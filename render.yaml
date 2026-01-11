@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: upapply-api
+    runtime: docker
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: ./api
+    region: oregon
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: upapply-db
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: '["chrome-extension://*", "https://www.upwork.com"]'
+      - key: EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: DEFAULT_MODEL
+        value: gpt-4o
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "10080"
+
+databases:
+  - name: upapply-db
+    plan: starter
+    databaseName: upapply
+    postgresMajorVersion: 16
+    region: oregon
+    ipAllowList: []

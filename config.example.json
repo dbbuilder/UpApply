@@ -1,0 +1,36 @@
+# Copy this file to config.json and customize as needed
+{
+  "openai": {
+    "model": "gpt-3.5-turbo",
+    "max_tokens": 1000,
+    "temperature": 0.7
+  },
+  "browser": {
+    "headless": false,
+    "timeout": 30000,
+    "browser_type": "chromium",
+    "delay_between_actions": 2000,
+    "screenshot_on_error": true
+  },
+  "upwork": {
+    "base_url": "https://www.upwork.com",
+    "saved_jobs_url": "/nx/search/jobs/saved",
+    "login_url": "/ab/account-security/login"
+  },
+  "storage": {
+    "jobs_file": "data/jobs.json",
+    "applications_file": "data/applications.json",
+    "cover_letters_dir": "data/cover_letters"
+  },
+  "cover_letter": {
+    "template": "Write a professional cover letter for this Upwork job posting. Be specific about relevant experience and skills. Keep it concise and professional:\n\n{job_description}",
+    "include_skills": true,
+    "max_length": 500
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "logs/upwork_automation.log",
+    "max_size_mb": 10,
+    "backup_count": 5
+  }
+}
