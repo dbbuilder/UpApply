@@ -6,20 +6,36 @@
 
 // Selector groups - we try multiple selectors in order
 export const SELECTORS = {
-  // Job details page
+  // Job details page & proposal page
   jobTitle: [
+    // Proposal page selectors
+    '[data-test="job-title-link"]',
+    '.job-details-header h1',
+    '.fe-proposal-job-title',
+    'h2[data-test="JobTitle"]',
+    // Job details page selectors
     'h4 a[href*="/jobs/"]',
     '[data-test="job-title"]',
     '.job-title-link',
     'header h1',
+    'h1',
+    'h2',
   ],
 
   jobDescription: [
+    // Proposal page selectors
+    '[data-test="job-description"]',
+    '.job-details-description',
+    '.fe-proposal-job-description',
+    // Job details page selectors
     '[data-test="Description"]',
     '.break.mt-2',
     '[data-test="job-description-text"]',
     '.job-description',
     '.cfe-ui-job-description',
+    // Generic fallback - look for large text blocks
+    'section p',
+    '.description',
   ],
 
   // Budget information
