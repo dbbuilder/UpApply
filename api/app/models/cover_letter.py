@@ -4,7 +4,7 @@ from typing import Optional, List, TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import DateTime, String, Text, Integer, Boolean, Numeric, func, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, ARRAY
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -21,16 +21,16 @@ class CoverLetter(Base):
     __tablename__ = "cover_letters"
 
     id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+        String(36), primary_key=True, default=lambda: str(uuid4())
     )
     user_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
+        String(36),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     job_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
+        String(36),
         ForeignKey("jobs.id", ondelete="CASCADE"),
         nullable=False,
     )
@@ -43,7 +43,7 @@ class CoverLetter(Base):
     prompt_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Memories used for generation (for transparency and learning)
-    memories_used: Mapped[Optional[List[str]]] = mapped_column(ARRAY(UUID(as_uuid=False)), nullable=True)
+    memories_used: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
 
     # Quality metrics
     ai_confidence: Mapped[Optional[float]] = mapped_column(Numeric(3, 2), nullable=True)

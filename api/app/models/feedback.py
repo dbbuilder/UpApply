@@ -4,7 +4,6 @@ from typing import Optional, TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import DateTime, String, Text, Integer, Boolean, func, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -21,21 +20,21 @@ class Feedback(Base):
     __tablename__ = "feedback"
 
     id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+        String(36), primary_key=True, default=lambda: str(uuid4())
     )
     user_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
+        String(36),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     application_id: Mapped[Optional[str]] = mapped_column(
-        UUID(as_uuid=False),
+        String(36),
         ForeignKey("applications.id", ondelete="CASCADE"),
         nullable=True,
     )
     cover_letter_id: Mapped[Optional[str]] = mapped_column(
-        UUID(as_uuid=False),
+        String(36),
         ForeignKey("cover_letters.id", ondelete="CASCADE"),
         nullable=True,
     )

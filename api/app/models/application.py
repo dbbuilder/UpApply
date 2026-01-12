@@ -5,7 +5,6 @@ from uuid import uuid4
 from enum import Enum as PyEnum
 
 from sqlalchemy import DateTime, String, Text, Numeric, Enum, func, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -37,21 +36,21 @@ class Application(Base):
     __tablename__ = "applications"
 
     id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+        String(36), primary_key=True, default=lambda: str(uuid4())
     )
     user_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
+        String(36),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     job_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
+        String(36),
         ForeignKey("jobs.id", ondelete="CASCADE"),
         nullable=False,
     )
     cover_letter_id: Mapped[Optional[str]] = mapped_column(
-        UUID(as_uuid=False),
+        String(36),
         ForeignKey("cover_letters.id", ondelete="SET NULL"),
         nullable=True,
     )

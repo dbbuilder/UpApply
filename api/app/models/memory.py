@@ -4,7 +4,7 @@ from typing import Optional, List, TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import DateTime, String, Text, Numeric, func, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
@@ -21,10 +21,10 @@ class Memory(Base):
     __tablename__ = "memories"
 
     id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+        String(36), primary_key=True, default=lambda: str(uuid4())
     )
     user_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
+        String(36),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -38,7 +38,7 @@ class Memory(Base):
     )  # project, achievement, feedback, lesson, skill_demo
 
     # Context
-    skills_demonstrated: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
+    skills_demonstrated: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
     industry: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     project_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     client_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

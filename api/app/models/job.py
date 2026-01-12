@@ -4,7 +4,7 @@ from typing import Optional, List, TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import DateTime, String, Text, Numeric, func, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
@@ -23,10 +23,10 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+        String(36), primary_key=True, default=lambda: str(uuid4())
     )
     user_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
+        String(36),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -47,7 +47,7 @@ class Job(Base):
     budget_max: Mapped[Optional[float]] = mapped_column(Numeric(10, 2), nullable=True)
 
     # Skills
-    skills_required: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
+    skills_required: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
     experience_level: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     project_length: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
