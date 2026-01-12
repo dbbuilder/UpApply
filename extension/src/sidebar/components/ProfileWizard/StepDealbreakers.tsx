@@ -98,7 +98,7 @@ export default function StepDealbreakers() {
         </div>
         <div className="flex flex-wrap gap-2">
           {avoidKeywords.map((keyword) => (
-            <span key={keyword} className="badge badge-red flex items-center gap-1">
+            <span key={keyword} className="badge badge-red flex items-center gap-1 pr-1">
               {keyword}
               <button
                 type="button"
@@ -106,7 +106,7 @@ export default function StepDealbreakers() {
                   setAvoidKeywords(avoidKeywords.filter((k) => k !== keyword));
                   setTimeout(handleSave, 100);
                 }}
-                className="ml-1 hover:text-red-900"
+                className="ml-1 w-4 h-4 flex items-center justify-center rounded-full hover:bg-red-200 text-red-700 hover:text-red-900 font-bold"
               >
                 ×
               </button>
@@ -132,7 +132,7 @@ export default function StepDealbreakers() {
         </div>
         <div className="flex flex-wrap gap-2">
           {avoidIndustries.map((industry) => (
-            <span key={industry} className="badge badge-red flex items-center gap-1">
+            <span key={industry} className="badge badge-red flex items-center gap-1 pr-1">
               {industry}
               <button
                 type="button"
@@ -140,7 +140,7 @@ export default function StepDealbreakers() {
                   setAvoidIndustries(avoidIndustries.filter((i) => i !== industry));
                   setTimeout(handleSave, 100);
                 }}
-                className="ml-1 hover:text-red-900"
+                className="ml-1 w-4 h-4 flex items-center justify-center rounded-full hover:bg-red-200 text-red-700 hover:text-red-900 font-bold"
               >
                 ×
               </button>
@@ -208,7 +208,7 @@ export default function StepDealbreakers() {
         </div>
         <div className="flex flex-wrap gap-2">
           {redFlags.map((flag) => (
-            <span key={flag} className="badge badge-yellow flex items-center gap-1">
+            <span key={flag} className="badge badge-yellow flex items-center gap-1 pr-1">
               {flag}
               <button
                 type="button"
@@ -216,7 +216,7 @@ export default function StepDealbreakers() {
                   setRedFlags(redFlags.filter((f) => f !== flag));
                   setTimeout(handleSave, 100);
                 }}
-                className="ml-1 hover:text-yellow-900"
+                className="ml-1 w-4 h-4 flex items-center justify-center rounded-full hover:bg-yellow-200 text-yellow-700 hover:text-yellow-900 font-bold"
               >
                 ×
               </button>

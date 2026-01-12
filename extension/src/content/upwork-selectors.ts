@@ -8,33 +8,32 @@
 export const SELECTORS = {
   // Job details page & proposal page
   jobTitle: [
-    // Proposal page selectors
-    '[data-test="job-title-link"]',
-    '.job-details-header h1',
-    '.fe-proposal-job-title',
-    'h2[data-test="JobTitle"]',
+    // Proposal/apply page - job title is h3 inside fe-job-details section
+    '.fe-job-details h3.h5',
+    '.fe-job-details h3',
+    '.fe-job-details .h5',
     // Job details page selectors
+    '[data-test="job-title-link"]',
     'h4 a[href*="/jobs/"]',
     '[data-test="job-title"]',
     '.job-title-link',
-    'header h1',
-    'h1',
-    'h2',
+    // Generic fallbacks (excluding "Submit a Proposal" h1)
+    '.fe-job-details h2',
+    'h2.h4',
   ],
 
   jobDescription: [
-    // Proposal page selectors
-    '[data-test="job-description"]',
-    '.job-details-description',
-    '.fe-proposal-job-description',
+    // Proposal/apply page - description is in .description.text-body-sm
+    '.fe-job-details .description.text-body-sm',
+    '.fe-job-details .description span',
+    '.fe-job-details .description',
     // Job details page selectors
     '[data-test="Description"]',
-    '.break.mt-2',
+    '[data-test="job-description"]',
     '[data-test="job-description-text"]',
     '.job-description',
     '.cfe-ui-job-description',
-    // Generic fallback - look for large text blocks
-    'section p',
+    // Generic fallback
     '.description',
   ],
 
@@ -53,6 +52,10 @@ export const SELECTORS = {
 
   // Skills
   skills: [
+    // Proposal page skills
+    '.fe-job-details .air3-token',
+    '.fe-job-details [data-qa-skill-key] .air3-token',
+    // Job details page skills
     '[data-test="Skills"] .air3-token',
     '.skill-badge',
     '[data-test="attrs-skills"] .air3-token',
@@ -62,14 +65,37 @@ export const SELECTORS = {
 
   // Experience level
   experienceLevel: [
+    // Proposal page - inside fe-ui-job-features
+    '.fe-ui-job-features [data-cy="expertise"] + strong',
+    '.fe-ui-job-features li:first-child strong',
     '[data-test="experience-level"]',
     '[data-cy="experience-level"]',
   ],
 
   // Project length
   projectLength: [
+    // Proposal page
+    '.fe-ui-job-features [data-test="hourly-duration"] strong',
     '[data-test="duration"]',
     '[data-cy="duration"]',
+  ],
+
+  // Screening questions (0 to several per job)
+  screeningQuestions: [
+    '.fe-proposal-job-questions .form-group',
+    '.questions-area .form-group',
+    '[data-test="screening-question"]',
+  ],
+
+  screeningQuestionLabel: [
+    'label',
+    '.label',
+  ],
+
+  screeningQuestionInput: [
+    'textarea',
+    'input[type="text"]',
+    '.air3-textarea',
   ],
 
   // Client information

@@ -122,13 +122,13 @@ export default function StepGoals() {
           {skillsToHighlight.map((skill) => (
             <span
               key={skill}
-              className="badge badge-green flex items-center gap-1"
+              className="badge badge-green flex items-center gap-1 pr-1"
             >
               {skill}
               <button
                 type="button"
                 onClick={() => removeHighlightSkill(skill)}
-                className="ml-1 hover:text-green-900"
+                className="ml-1 w-4 h-4 flex items-center justify-center rounded-full hover:bg-green-200 text-green-700 hover:text-green-900 font-bold"
               >
                 ×
               </button>
@@ -160,13 +160,13 @@ export default function StepGoals() {
           {skillsToDevelop.map((skill) => (
             <span
               key={skill}
-              className="badge badge-yellow flex items-center gap-1"
+              className="badge badge-yellow flex items-center gap-1 pr-1"
             >
               {skill}
               <button
                 type="button"
                 onClick={() => removeDevelopSkill(skill)}
-                className="ml-1 hover:text-yellow-900"
+                className="ml-1 w-4 h-4 flex items-center justify-center rounded-full hover:bg-yellow-200 text-yellow-700 hover:text-yellow-900 font-bold"
               >
                 ×
               </button>

@@ -9,6 +9,11 @@ import {
   querySelector,
 } from './upwork-selectors';
 
+interface ScreeningQuestion {
+  question: string;
+  inputSelector: string;  // CSS selector to find/fill the input
+}
+
 interface JobData {
   url: string;
   title: string | null;
@@ -18,12 +23,43 @@ interface JobData {
   skills: string[];
   experienceLevel: string | null;
   projectLength: string | null;
+  screeningQuestions: ScreeningQuestion[];
   clientInfo: {
     rating: string | null;
     location: string | null;
     totalSpent: string | null;
     hireRate: string | null;
   };
+}
+
+/**
+ * Extract screening questions from the page.
+ */
+function extractScreeningQuestions(): ScreeningQuestion[] {
+  const questions: ScreeningQuestion[] = [];
+
+  // Find all question containers
+  const questionContainers = document.querySelectorAll(
+    '.fe-proposal-job-questions .form-group, .questions-area .form-group'
+  );
+
+  questionContainers.forEach((container, index) => {
+    const label = container.querySelector('label, .label');
+    const input = container.querySelector('textarea, input[type="text"]');
+
+    if (label && input) {
+      const questionText = label.textContent?.trim() || '';
+      if (questionText) {
+        // Create a unique selector for this input
+        questions.push({
+          question: questionText,
+          inputSelector: input.id ? `#${input.id}` : `.fe-proposal-job-questions .form-group:nth-child(${index + 1}) textarea, .fe-proposal-job-questions .form-group:nth-child(${index + 1}) input`,
+        });
+      }
+    }
+  });
+
+  return questions;
 }
 
 /**
@@ -59,6 +95,11 @@ function extractJobData(): JobData {
   const clientSpent = extractText(SELECTORS.clientSpent);
   const clientHireRate = extractText(SELECTORS.clientHireRate);
 
+  // Extract screening questions
+  const screeningQuestions = extractScreeningQuestions();
+
+  console.log('UpApply: Extracted data:', { title, description: description?.substring(0, 100), skills, screeningQuestions });
+
   return {
     url,
     title,
@@ -68,6 +109,7 @@ function extractJobData(): JobData {
     skills,
     experienceLevel,
     projectLength,
+    screeningQuestions,
     clientInfo: {
       rating: clientRating,
       location: clientLocation,
@@ -126,6 +168,27 @@ function setBidAmount(amount: number): boolean {
 }
 
 /**
+ * Fill a screening question answer.
+ */
+function fillScreeningQuestion(selector: string, answer: string): boolean {
+  try {
+    const input = document.querySelector(selector) as HTMLTextAreaElement | HTMLInputElement | null;
+    if (!input) {
+      console.warn('UpApply: Screening question input not found:', selector);
+      return false;
+    }
+
+    input.value = answer;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  } catch (error) {
+    console.error('UpApply: Error filling screening question:', error);
+    return false;
+  }
+}
+
+/**
  * Handle messages from background script or sidebar.
  */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -156,6 +219,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         isJobPage: isJobPage(),
         url: window.location.href,
       });
+      break;
+
+    case 'FILL_SCREENING_QUESTION':
+      const questionFilled = fillScreeningQuestion(message.selector, message.answer);
+      sendResponse({ success: questionFilled });
       break;
 
     default:
