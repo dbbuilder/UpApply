@@ -52,6 +52,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ data: currentJobData });
       break;
 
+    case 'REQUEST_JOB_EXTRACTION':
+      // Forward extraction request to content script in active tab
+      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+        const tab = tabs[0];
+        console.log('UpApply Background: Requesting extraction from tab', tab?.id, tab?.url);
+
+        if (!tab?.id || !tab?.url?.includes('upwork.com')) {
+          sendResponse({ success: false, error: 'Not on an Upwork page' });
+          return;
+        }
+
+        // Try to inject content script if not already loaded
+        try {
+          // Get content script path from manifest
+          const manifest = chrome.runtime.getManifest();
+          const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+          if (contentScriptPath) {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              files: [contentScriptPath]
+            });
+            console.log('UpApply Background: Content script injected:', contentScriptPath);
+          }
+        } catch (e) {
+          console.log('UpApply Background: Script injection note:', e);
+        }
+
+        // Small delay to let script initialize
+        setTimeout(() => {
+          chrome.tabs.sendMessage(tab.id!, { type: 'EXTRACT_JOB_DATA' }, (response) => {
+            console.log('UpApply Background: Extraction response:', response);
+            if (chrome.runtime.lastError) {
+              console.error('UpApply Background: Error:', chrome.runtime.lastError);
+              sendResponse({ success: false, error: 'Content script not loaded. Please refresh the Upwork page and try again.' });
+            } else if (response?.success) {
+              currentJobData = response.data;
+              chrome.storage.local.set({ currentJob: currentJobData });
+              sendResponse(response);
+            } else {
+              sendResponse(response || { success: false, error: 'No response from content script' });
+            }
+          });
+        }, 200);
+      });
+      return true; // Keep channel open for async response
+
     case 'FILL_COVER_LETTER':
       // Forward to content script in active tab
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {

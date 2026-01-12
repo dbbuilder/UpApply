@@ -205,17 +205,25 @@ function fillScreeningQuestion(selector: string, answer: string): boolean {
  * Handle messages from background script or sidebar.
  */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  console.log('UpApply: Received message', message);
+  console.log('UpApply: Received message', message.type, message);
 
   switch (message.type) {
     case 'EXTRACT_JOB_DATA':
+      console.log('UpApply: EXTRACT_JOB_DATA received, isJobPage:', isJobPage(), 'URL:', window.location.href);
       if (!isJobPage()) {
+        console.log('UpApply: Not a job page, returning error');
         sendResponse({ success: false, error: 'Not on a job page' });
-        return;
+        return true;
       }
-      const jobData = extractJobData();
-      sendResponse({ success: true, data: jobData });
-      break;
+      try {
+        const jobData = extractJobData();
+        console.log('UpApply: Extraction complete, title:', jobData.title);
+        sendResponse({ success: true, data: jobData });
+      } catch (err) {
+        console.error('UpApply: Extraction error:', err);
+        sendResponse({ success: false, error: String(err) });
+      }
+      return true;
 
     case 'FILL_COVER_LETTER':
       const filled = fillCoverLetter(message.content);

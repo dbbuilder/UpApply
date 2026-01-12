@@ -61,16 +61,13 @@ export default function GeneratorPage() {
   }, []);
 
   const handleRefreshJob = () => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'EXTRACT_JOB_DATA' }, (response) => {
-          console.log('UpApply Sidebar: Manual extract response:', response);
-          if (response?.success && response.data) {
-            useAppStore.getState().setCurrentJob(response.data);
-          } else {
-            alert('Could not extract job data. Make sure you are on an Upwork job/proposal page.');
-          }
-        });
+    // Route through background script which has tabs permission
+    chrome.runtime.sendMessage({ type: 'REQUEST_JOB_EXTRACTION' }, (response) => {
+      console.log('UpApply Sidebar: Manual extract response:', response);
+      if (response?.success && response.data) {
+        useAppStore.getState().setCurrentJob(response.data);
+      } else {
+        alert('Could not extract job data. Make sure you are on an Upwork job/proposal page. Error: ' + (response?.error || 'No response'));
       }
     });
   };
