@@ -4,6 +4,11 @@
 import { create } from 'zustand';
 import { apiClient, Profile, JobAnalysisResponse } from '../lib/api-client';
 
+interface ScreeningQuestion {
+  question: string;
+  inputSelector: string;
+}
+
 interface JobData {
   url: string;
   title: string | null;
@@ -13,6 +18,7 @@ interface JobData {
   skills: string[];
   experienceLevel: string | null;
   projectLength: string | null;
+  screeningQuestions?: ScreeningQuestion[];
   clientInfo: {
     rating: string | null;
     location: string | null;
@@ -69,6 +75,7 @@ interface AppState {
   analyzeCurrentJob: () => Promise<void>;
   generateCoverLetter: () => Promise<void>;
   fillCoverLetter: () => Promise<boolean>;
+  fillScreeningQuestion: (selector: string, answer: string) => Promise<boolean>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -248,6 +255,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     return new Promise((resolve) => {
       chrome.runtime.sendMessage(
         { type: 'FILL_COVER_LETTER', content: coverLetter },
+        (response) => {
+          resolve(response?.success || false);
+        }
+      );
+    });
+  },
+
+  // Fill screening question in page
+  fillScreeningQuestion: async (selector: string, answer: string) => {
+    return new Promise<boolean>((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: 'FILL_SCREENING_QUESTION', selector, answer },
         (response) => {
           resolve(response?.success || false);
         }

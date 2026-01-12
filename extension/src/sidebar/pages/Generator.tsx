@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
 
 function MatchScoreBadge({ score }: { score: number }) {
@@ -35,8 +35,12 @@ export default function GeneratorPage() {
     analyzeCurrentJob,
     generateCoverLetter,
     fillCoverLetter,
+    fillScreeningQuestion,
     logout,
   } = useAppStore();
+
+  // State for screening question answers
+  const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
 
   useEffect(() => {
     // Request current job data from stored cache first
@@ -91,6 +95,22 @@ export default function GeneratorPage() {
     if (coverLetter) {
       navigator.clipboard.writeText(coverLetter);
     }
+  };
+
+  const handleFillQuestion = async (selector: string, index: number) => {
+    const answer = questionAnswers[`q${index}`];
+    if (!answer) {
+      alert('Please enter an answer first');
+      return;
+    }
+    const success = await fillScreeningQuestion(selector, answer);
+    if (!success) {
+      alert('Failed to fill answer. Make sure you are on the Upwork proposal page.');
+    }
+  };
+
+  const handleAnswerChange = (index: number, value: string) => {
+    setQuestionAnswers(prev => ({ ...prev, [`q${index}`]: value }));
   };
 
   return (
@@ -314,6 +334,37 @@ export default function GeneratorPage() {
                 >
                   Fill in Upwork Form
                 </button>
+              </div>
+            )}
+
+            {/* Screening Questions */}
+            {currentJob?.screeningQuestions && currentJob.screeningQuestions.length > 0 && coverLetter && (
+              <div className="card animate-slide-up">
+                <h4 className="font-medium text-gray-900 mb-3">
+                  Screening Questions ({currentJob.screeningQuestions.length})
+                </h4>
+                <div className="space-y-4">
+                  {currentJob.screeningQuestions.map((q, index) => (
+                    <div key={index} className="border-b border-gray-100 pb-3 last:border-0">
+                      <p className="text-sm text-gray-700 mb-2">{q.question}</p>
+                      <textarea
+                        className="w-full border border-gray-200 rounded-lg p-2 text-sm resize-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                        rows={3}
+                        placeholder="Enter your answer..."
+                        value={questionAnswers[`q${index}`] || ''}
+                        onChange={(e) => handleAnswerChange(index, e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleFillQuestion(q.inputSelector, index)}
+                        className="btn-outline text-sm mt-2"
+                        disabled={!questionAnswers[`q${index}`]}
+                      >
+                        Fill Answer
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </>

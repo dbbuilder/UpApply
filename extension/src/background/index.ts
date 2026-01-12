@@ -125,6 +125,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       return true;
 
+    case 'FILL_SCREENING_QUESTION':
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0]?.id) {
+          chrome.tabs.sendMessage(tabs[0].id, {
+            type: 'FILL_SCREENING_QUESTION',
+            selector: message.selector,
+            answer: message.answer,
+          }, sendResponse);
+        } else {
+          sendResponse({ success: false, error: 'No active tab' });
+        }
+      });
+      return true;
+
     case 'OPEN_SIDEBAR':
       if (sender.tab?.windowId) {
         chrome.sidePanel.open({ windowId: sender.tab.windowId });
