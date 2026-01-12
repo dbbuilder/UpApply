@@ -1,4 +1,5 @@
 """Authentication endpoints."""
+import logging
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,42 +17,55 @@ from app.core.config import settings
 from app.models.user import User, UserProfile
 from app.schemas.auth import UserRegister, UserLogin, Token, UserResponse
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
     """Register a new user."""
-    # Check if email already exists
-    result = await db.execute(select(User).where(User.email == user_data.email))
-    existing_user = result.scalar_one_or_none()
+    try:
+        # Check if email already exists
+        result = await db.execute(select(User).where(User.email == user_data.email))
+        existing_user = result.scalar_one_or_none()
 
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered",
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered",
+            )
+
+        # Create user
+        logger.info(f"Creating user with email: {user_data.email}")
+        user = User(
+            email=user_data.email,
+            hashed_password=hash_password(user_data.password),
+        )
+        db.add(user)
+        await db.flush()
+        logger.info(f"User created with id: {user.id}")
+
+        # Create empty profile
+        profile = UserProfile(user_id=user.id)
+        db.add(profile)
+        await db.commit()
+        logger.info("Profile created and committed")
+
+        # Generate token
+        access_token = create_access_token(
+            data={"sub": str(user.id)},
+            expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
         )
 
-    # Create user
-    user = User(
-        email=user_data.email,
-        hashed_password=hash_password(user_data.password),
-    )
-    db.add(user)
-    await db.flush()
-
-    # Create empty profile
-    profile = UserProfile(user_id=user.id)
-    db.add(profile)
-    await db.commit()
-
-    # Generate token
-    access_token = create_access_token(
-        data={"sub": user.id},
-        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
-    )
-
-    return Token(access_token=access_token)
+        return Token(access_token=access_token)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Registration error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Registration failed: {str(e)}",
+        )
 
 
 @router.post("/login", response_model=Token)
@@ -76,7 +90,7 @@ async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
 
     # Generate token
     access_token = create_access_token(
-        data={"sub": user.id},
+        data={"sub": str(user.id)},
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
 
@@ -87,7 +101,7 @@ async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
 async def refresh_token(current_user: User = Depends(get_current_user)):
     """Refresh access token."""
     access_token = create_access_token(
-        data={"sub": current_user.id},
+        data={"sub": str(current_user.id)},
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
     return Token(access_token=access_token)
