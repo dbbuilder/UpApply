@@ -173,3 +173,6 @@ extension/node_modules/
 
 # API virtual environment
 api/venv/
+
+# Unignore extension lib folder (blocked by lib/ rule above)
+!extension/src/lib/

@@ -7,6 +7,7 @@ export default function StepIdentity() {
   const [fullName, setFullName] = useState(profile?.full_name || '');
   const [professionalTitle, setProfessionalTitle] = useState(profile?.professional_title || '');
   const [bio, setBio] = useState(profile?.bio || '');
+  const [preferredClosing, setPreferredClosing] = useState(profile?.preferred_closing || '');
   const [resumeText, setResumeText] = useState('');
   const [importing, setImporting] = useState(false);
   const [importSuccess, setImportSuccess] = useState(false);
@@ -16,6 +17,7 @@ export default function StepIdentity() {
       setFullName(profile.full_name || '');
       setProfessionalTitle(profile.professional_title || '');
       setBio(profile.bio || '');
+      setPreferredClosing(profile.preferred_closing || '');
     }
   }, [profile]);
 
@@ -57,6 +59,7 @@ export default function StepIdentity() {
         full_name: fullName,
         professional_title: professionalTitle,
         bio: bio,
+        preferred_closing: preferredClosing,
       });
       setProfile(updated);
     } catch (error) {
@@ -143,6 +146,23 @@ export default function StepIdentity() {
             className="input min-h-[100px]"
             placeholder="A brief overview of your experience and expertise..."
           />
+        </div>
+
+        <div>
+          <label htmlFor="closing" className="label">
+            Cover Letter Closing
+          </label>
+          <textarea
+            id="closing"
+            value={preferredClosing}
+            onChange={(e) => setPreferredClosing(e.target.value)}
+            onBlur={handleSave}
+            className="input min-h-[60px]"
+            placeholder="Best regards,&#10;John Doe"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            This will be added to the end of every cover letter
+          </p>
         </div>
       </div>
     </div>

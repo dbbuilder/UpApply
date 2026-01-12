@@ -102,6 +102,7 @@ class UserProfile(Base):
     response_time_expectation: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     timezone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     working_hours_preference: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    preferred_closing: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # e.g. "Best regards,\nChris"
 
     # Unique Value Propositions
     unique_strengths: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)

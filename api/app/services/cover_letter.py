@@ -185,6 +185,13 @@ def build_user_prompt(
     return "".join(parts)
 
 
+def append_closing(content: str, closing: Optional[str]) -> str:
+    """Append user's preferred closing to cover letter if provided."""
+    if not closing:
+        return content
+    return f"{content}\n\n{closing}"
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=10),
@@ -226,7 +233,8 @@ async def generate_cover_letter(
     )
 
     raw_content = response.choices[0].message.content.strip()
-    return clean_cover_letter(raw_content)
+    cleaned = clean_cover_letter(raw_content)
+    return append_closing(cleaned, profile.preferred_closing)
 
 
 @retry(
@@ -266,4 +274,5 @@ Please revise the cover letter based on this feedback while maintaining personal
     )
 
     raw_content = response.choices[0].message.content.strip()
-    return clean_cover_letter(raw_content)
+    cleaned = clean_cover_letter(raw_content)
+    return append_closing(cleaned, profile.preferred_closing)

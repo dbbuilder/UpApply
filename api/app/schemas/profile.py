@@ -82,6 +82,7 @@ class ProfileCommunication(BaseModel):
     response_time_expectation: Optional[str] = None
     timezone: Optional[str] = None
     working_hours_preference: Optional[str] = None
+    preferred_closing: Optional[str] = None  # e.g. "Best regards,\nChris"
 
 
 # Unique strengths section
@@ -157,6 +158,7 @@ class ProfileCreate(BaseModel):
     response_time_expectation: Optional[str] = None
     timezone: Optional[str] = None
     working_hours_preference: Optional[str] = None
+    preferred_closing: Optional[str] = None
 
     # Strengths
     unique_strengths: Optional[List[str]] = None
@@ -226,6 +228,7 @@ class ProfileResponse(BaseModel):
     tone_preference: Optional[str] = None
     communication_style: Optional[str] = None
     timezone: Optional[str] = None
+    preferred_closing: Optional[str] = None
 
     # Strengths
     unique_strengths: Optional[List[str]] = None
