@@ -4,7 +4,7 @@ from typing import Optional, List
 from uuid import uuid4
 
 from sqlalchemy import Boolean, DateTime, String, Text, Integer, Numeric, Date, func, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -73,28 +73,28 @@ class UserProfile(Base):
     skills: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)  # [{name, level, years}]
     work_history: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     education: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
-    certifications: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
-    portfolio_links: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
+    certifications: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
+    portfolio_links: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
 
     # Goals & Aspirations
     career_goals: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     ideal_project_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    skills_to_highlight: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
-    skills_to_develop: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
+    skills_to_highlight: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
+    skills_to_develop: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
 
     # Project Preferences
-    preferred_project_types: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
-    preferred_industries: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
+    preferred_project_types: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
+    preferred_industries: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
     preferred_team_size: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    preferred_client_types: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
+    preferred_client_types: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
     project_duration_preference: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Deal Breakers & Avoidances
-    avoid_keywords: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
-    avoid_industries: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
+    avoid_keywords: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
+    avoid_industries: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
     minimum_budget: Mapped[Optional[float]] = mapped_column(Numeric(10, 2), nullable=True)
     minimum_hourly_rate: Mapped[Optional[float]] = mapped_column(Numeric(10, 2), nullable=True)
-    red_flag_patterns: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
+    red_flag_patterns: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
 
     # Communication & Style
     tone_preference: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -104,9 +104,9 @@ class UserProfile(Base):
     working_hours_preference: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Unique Value Propositions
-    unique_strengths: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
-    success_stories: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
-    client_testimonial_themes: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
+    unique_strengths: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
+    success_stories: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
+    client_testimonial_themes: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
 
     # Pricing Strategy
     hourly_rate_min: Mapped[Optional[float]] = mapped_column(Numeric(10, 2), nullable=True)
