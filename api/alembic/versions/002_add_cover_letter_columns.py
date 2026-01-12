@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 # revision identifiers
 revision = '002_add_cover_letter_columns'
-down_revision = '001_initial_schema'
+down_revision = '001_initial'
 branch_labels = None
 depends_on = None
 
