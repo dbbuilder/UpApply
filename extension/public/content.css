@@ -1,0 +1,24 @@
+/* UpApply content script styles */
+
+/* Highlight the cover letter textarea when we're ready to fill it */
+.upapply-ready textarea[aria-labelledby="cover_letter_label"],
+.upapply-ready #cover_letter {
+  border-color: #14a800 !important;
+  box-shadow: 0 0 0 2px rgba(20, 168, 0, 0.2) !important;
+}
+
+/* Indicator that UpApply is active */
+.upapply-active::after {
+  content: '✓ UpApply';
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #14a800;
+  color: white;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 99999;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}

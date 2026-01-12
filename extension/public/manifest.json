@@ -6,7 +6,8 @@
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://www.upwork.com/*"
@@ -19,7 +20,7 @@
     {
       "matches": ["https://www.upwork.com/jobs/*", "https://www.upwork.com/nx/proposals/*"],
       "js": ["src/content/index.ts"],
-      "css": ["src/content/content.css"]
+      "css": ["content.css"]
     }
   ],
   "action": {

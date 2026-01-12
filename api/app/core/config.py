@@ -38,13 +38,8 @@ class Settings(BaseSettings):
             return v.replace("postgresql://", "postgresql+asyncpg://", 1)
         return v
 
-    # CORS
-    cors_origins: List[str] = [
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "chrome-extension://*",
-        "https://www.upwork.com",
-    ]
+    # CORS - use ["*"] to allow chrome extensions with dynamic IDs
+    cors_origins: List[str] = ["*"]
 
     @field_validator("cors_origins", mode="before")
     @classmethod

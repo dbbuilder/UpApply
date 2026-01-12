@@ -18,7 +18,7 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: CORS_ORIGINS
-        value: '["chrome-extension://*", "https://www.upwork.com"]'
+        value: '["*"]'
       - key: EMBEDDING_MODEL
         value: text-embedding-3-small
       - key: DEFAULT_MODEL
