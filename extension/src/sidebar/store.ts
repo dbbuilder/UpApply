@@ -97,7 +97,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   setIsLoading: (loading) => set({ isLoading: loading }),
   setUser: (user) => set({ user, isAuthenticated: !!user }),
   setProfile: (profile) => set({ profile }),
-  setCurrentJob: (job) => set({ currentJob: job, jobAnalysis: null, coverLetter: null }),
+  setCurrentJob: (job) => {
+    const { currentJob } = get();
+    // Only reset analysis/letter if it's a different job (different URL)
+    if (currentJob?.url !== job?.url) {
+      set({ currentJob: job, jobAnalysis: null, coverLetter: null });
+    } else {
+      // Same job, just update the data without resetting generated content
+      set({ currentJob: job });
+    }
+  },
   setJobAnalysis: (analysis) => set({ jobAnalysis: analysis }),
   setCoverLetter: (letter) => set({ coverLetter: letter }),
   setCurrentView: (view) => set({ currentView: view }),

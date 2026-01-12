@@ -97,6 +97,78 @@ export default function GeneratorPage() {
     }
   };
 
+  const handleOpenEditor = () => {
+    if (!coverLetter) return;
+
+    // Create a popup window with the cover letter for editing
+    const width = 600;
+    const height = 500;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+
+    const popup = window.open('', 'CoverLetterEditor',
+      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`);
+
+    if (popup) {
+      popup.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Edit Cover Letter - UpApply</title>
+          <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 16px; background: #f9fafb; }
+            h2 { margin-bottom: 12px; color: #111827; font-size: 18px; }
+            textarea { width: 100%; height: calc(100vh - 120px); padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; line-height: 1.6; resize: none; }
+            textarea:focus { outline: none; border-color: #10b981; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1); }
+            .buttons { margin-top: 12px; display: flex; gap: 8px; }
+            button { padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; border: none; }
+            .primary { background: #10b981; color: white; }
+            .primary:hover { background: #059669; }
+            .secondary { background: #e5e7eb; color: #374151; }
+            .secondary:hover { background: #d1d5db; }
+            .word-count { font-size: 12px; color: #6b7280; margin-top: 8px; }
+          </style>
+        </head>
+        <body>
+          <h2>Edit Cover Letter</h2>
+          <textarea id="editor">${coverLetter.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+          <div class="word-count" id="wordCount">Words: ${coverLetter.split(/\s+/).filter(w => w).length}</div>
+          <div class="buttons">
+            <button class="primary" onclick="copyAndClose()">Copy & Close</button>
+            <button class="secondary" onclick="window.close()">Cancel</button>
+          </div>
+          <script>
+            const editor = document.getElementById('editor');
+            const wordCount = document.getElementById('wordCount');
+            editor.addEventListener('input', () => {
+              const words = editor.value.split(/\\s+/).filter(w => w).length;
+              wordCount.textContent = 'Words: ' + words;
+            });
+            function copyAndClose() {
+              navigator.clipboard.writeText(editor.value);
+              window.opener.postMessage({ type: 'COVER_LETTER_UPDATED', content: editor.value }, '*');
+              window.close();
+            }
+          </script>
+        </body>
+        </html>
+      `);
+      popup.document.close();
+    }
+  };
+
+  // Listen for updates from the popup editor
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'COVER_LETTER_UPDATED') {
+        useAppStore.getState().setCoverLetter(event.data.content);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
   const handleFillQuestion = async (selector: string, index: number) => {
     const answer = questionAnswers[`q${index}`];
     if (!answer) {
@@ -306,6 +378,14 @@ export default function GeneratorPage() {
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="font-medium text-gray-900">Cover Letter</h4>
                   <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleOpenEditor}
+                      className="text-gray-500 hover:text-gray-700 text-sm"
+                      title="Open in larger editor"
+                    >
+                      Edit
+                    </button>
                     <button
                       type="button"
                       onClick={handleCopy}
