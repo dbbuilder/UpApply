@@ -99,43 +99,118 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true; // Keep channel open for async response
 
     case 'FILL_COVER_LETTER':
-      // Forward to content script in active tab
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]?.id) {
-          chrome.tabs.sendMessage(tabs[0].id, {
+      // Forward to content script in active tab (with injection if needed)
+      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+        const tab = tabs[0];
+        if (!tab?.id || !tab?.url?.includes('upwork.com')) {
+          sendResponse({ success: false, error: 'Not on an Upwork page' });
+          return;
+        }
+
+        // Try to inject content script if not already loaded
+        try {
+          const manifest = chrome.runtime.getManifest();
+          const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+          if (contentScriptPath) {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              files: [contentScriptPath]
+            });
+            console.log('UpApply Background: Content script injected for fill');
+          }
+        } catch (e) {
+          console.log('UpApply Background: Script injection note:', e);
+        }
+
+        // Small delay to let script initialize
+        setTimeout(() => {
+          chrome.tabs.sendMessage(tab.id!, {
             type: 'FILL_COVER_LETTER',
             content: message.content,
-          }, sendResponse);
-        } else {
-          sendResponse({ success: false, error: 'No active tab' });
-        }
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              console.error('UpApply Background: Fill error:', chrome.runtime.lastError);
+              sendResponse({ success: false, error: 'Content script not loaded. Please refresh the page.' });
+            } else {
+              sendResponse(response || { success: false, error: 'No response' });
+            }
+          });
+        }, 200);
       });
       return true; // Keep channel open for async response
 
     case 'SET_BID_AMOUNT':
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]?.id) {
-          chrome.tabs.sendMessage(tabs[0].id, {
+      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+        const tab = tabs[0];
+        if (!tab?.id || !tab?.url?.includes('upwork.com')) {
+          sendResponse({ success: false, error: 'Not on an Upwork page' });
+          return;
+        }
+
+        // Try to inject content script if needed
+        try {
+          const manifest = chrome.runtime.getManifest();
+          const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+          if (contentScriptPath) {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              files: [contentScriptPath]
+            });
+          }
+        } catch (e) {
+          // Script may already be loaded
+        }
+
+        setTimeout(() => {
+          chrome.tabs.sendMessage(tab.id!, {
             type: 'SET_BID_AMOUNT',
             amount: message.amount,
-          }, sendResponse);
-        } else {
-          sendResponse({ success: false, error: 'No active tab' });
-        }
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              sendResponse({ success: false, error: 'Content script not loaded. Please refresh the page.' });
+            } else {
+              sendResponse(response || { success: false });
+            }
+          });
+        }, 200);
       });
       return true;
 
     case 'FILL_SCREENING_QUESTION':
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]?.id) {
-          chrome.tabs.sendMessage(tabs[0].id, {
+      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+        const tab = tabs[0];
+        if (!tab?.id || !tab?.url?.includes('upwork.com')) {
+          sendResponse({ success: false, error: 'Not on an Upwork page' });
+          return;
+        }
+
+        // Try to inject content script if needed
+        try {
+          const manifest = chrome.runtime.getManifest();
+          const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+          if (contentScriptPath) {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              files: [contentScriptPath]
+            });
+          }
+        } catch (e) {
+          // Script may already be loaded
+        }
+
+        setTimeout(() => {
+          chrome.tabs.sendMessage(tab.id!, {
             type: 'FILL_SCREENING_QUESTION',
             selector: message.selector,
             answer: message.answer,
-          }, sendResponse);
-        } else {
-          sendResponse({ success: false, error: 'No active tab' });
-        }
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              sendResponse({ success: false, error: 'Content script not loaded. Please refresh the page.' });
+            } else {
+              sendResponse(response || { success: false });
+            }
+          });
+        }, 200);
       });
       return true;
 
