@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
+import { apiClient, ScreeningAnswerSearchResult } from '../../lib/api-client';
 
 function MatchScoreBadge({ score }: { score: number }) {
   let colorClass = 'score-low';
@@ -41,6 +42,8 @@ export default function GeneratorPage() {
 
   // State for screening question answers
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
+  const [suggestedAnswers, setSuggestedAnswers] = useState<Record<string, ScreeningAnswerSearchResult[]>>({});
+  const [loadingSuggestions, setLoadingSuggestions] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     // Request current job data from stored cache first
@@ -169,7 +172,7 @@ export default function GeneratorPage() {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
-  const handleFillQuestion = async (selector: string, index: number) => {
+  const handleFillQuestion = async (selector: string, index: number, question: string) => {
     const answer = questionAnswers[`q${index}`];
     if (!answer) {
       alert('Please enter an answer first');
@@ -178,7 +181,41 @@ export default function GeneratorPage() {
     const success = await fillScreeningQuestion(selector, answer);
     if (!success) {
       alert('Failed to fill answer. Make sure you are on the Upwork proposal page.');
+      return;
     }
+
+    // Save the Q&A for future reference
+    try {
+      await apiClient.createScreeningAnswer({
+        question,
+        answer,
+        job_title: currentJob?.title || undefined,
+        job_skills: currentJob?.skills,
+      });
+      console.log('Screening answer saved for future use');
+    } catch (err) {
+      console.error('Failed to save screening answer:', err);
+    }
+  };
+
+  // Search for similar past answers when a question is focused
+  const handleQuestionFocus = async (question: string, index: number) => {
+    const key = `q${index}`;
+    if (suggestedAnswers[key] || loadingSuggestions[key]) return;
+
+    setLoadingSuggestions(prev => ({ ...prev, [key]: true }));
+    try {
+      const results = await apiClient.searchScreeningAnswers(question, 3);
+      setSuggestedAnswers(prev => ({ ...prev, [key]: results }));
+    } catch (err) {
+      console.error('Failed to search past answers:', err);
+    } finally {
+      setLoadingSuggestions(prev => ({ ...prev, [key]: false }));
+    }
+  };
+
+  const handleUseSuggestedAnswer = (index: number, answer: string) => {
+    setQuestionAnswers(prev => ({ ...prev, [`q${index}`]: answer }));
   };
 
   const handleAnswerChange = (index: number, value: string) => {
@@ -433,14 +470,38 @@ export default function GeneratorPage() {
                         placeholder="Enter your answer..."
                         value={questionAnswers[`q${index}`] || ''}
                         onChange={(e) => handleAnswerChange(index, e.target.value)}
+                        onFocus={() => handleQuestionFocus(q.question, index)}
                       />
+
+                      {/* Past Answer Suggestions */}
+                      {loadingSuggestions[`q${index}`] && (
+                        <p className="text-xs text-gray-400 mt-1">Searching past answers...</p>
+                      )}
+                      {suggestedAnswers[`q${index}`]?.length > 0 && (
+                        <div className="mt-2 bg-blue-50 rounded p-2">
+                          <p className="text-xs font-medium text-blue-700 mb-1">Past answers for similar questions:</p>
+                          {suggestedAnswers[`q${index}`].map((suggestion, sIdx) => (
+                            <div key={sIdx} className="text-xs text-gray-600 mb-1 flex justify-between items-start gap-2">
+                              <span className="flex-1 line-clamp-2">{suggestion.answer.answer}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleUseSuggestedAnswer(index, suggestion.answer.answer)}
+                                className="text-blue-600 hover:text-blue-800 whitespace-nowrap"
+                              >
+                                Use
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                       <button
                         type="button"
-                        onClick={() => handleFillQuestion(q.inputSelector, index)}
+                        onClick={() => handleFillQuestion(q.inputSelector, index, q.question)}
                         className="btn-outline text-sm mt-2"
                         disabled={!questionAnswers[`q${index}`]}
                       >
-                        Fill Answer
+                        Fill & Save Answer
                       </button>
                     </div>
                   ))}

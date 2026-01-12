@@ -141,6 +141,49 @@ export const SELECTORS = {
     '[data-test="submit-proposal"]',
     'button[type="submit"]',
   ],
+
+  // My Proposals page selectors (for scraping proposal history)
+  proposalListItem: [
+    '[data-test="proposal-list-item"]',
+    '.proposals-list-item',
+    '.my-proposals-list article',
+    '.up-card-section.up-card-list-section',
+  ],
+
+  proposalJobTitle: [
+    '[data-test="proposal-job-title"]',
+    '.proposal-job-title',
+    'h4 a',
+    '.job-title-link',
+  ],
+
+  proposalCoverLetter: [
+    '[data-test="proposal-cover-letter"]',
+    '.proposal-cover-letter',
+    '.cover-letter-text',
+  ],
+
+  proposalStatus: [
+    '[data-test="proposal-status"]',
+    '.proposal-status',
+    '.status-badge',
+  ],
+
+  proposalBidAmount: [
+    '[data-test="proposal-bid"]',
+    '.proposal-bid-amount',
+  ],
+
+  proposalSubmittedDate: [
+    '[data-test="proposal-date"]',
+    '.proposal-submitted-date',
+    'time',
+  ],
+
+  proposalJobUrl: [
+    'a[href*="/jobs/"]',
+    '[data-test="job-link"]',
+  ],
 } as const;
 
 /**

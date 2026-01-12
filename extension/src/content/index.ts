@@ -7,6 +7,7 @@ import {
   extractText,
   extractTexts,
   querySelector,
+  querySelectorAll,
 } from './upwork-selectors';
 
 interface ScreeningQuestion {
@@ -30,6 +31,17 @@ interface JobData {
     totalSpent: string | null;
     hireRate: string | null;
   };
+}
+
+interface ScrapedProposal {
+  proposalId: string | null;
+  jobTitle: string | null;
+  jobUrl: string | null;
+  coverLetter: string | null;
+  bidAmount: number | null;
+  bidType: string | null;
+  status: string | null;
+  submittedAt: string | null;
 }
 
 /**
@@ -141,6 +153,84 @@ function isJobPage(): boolean {
 }
 
 /**
+ * Check if we're on the My Proposals page.
+ */
+function isMyProposalsPage(): boolean {
+  return window.location.href.includes('/freelancers/proposals') ||
+         window.location.href.includes('/nx/find-work/proposals') ||
+         window.location.href.includes('/ab/proposals');
+}
+
+/**
+ * Extract proposals from the My Proposals page.
+ */
+function extractProposals(): ScrapedProposal[] {
+  const proposals: ScrapedProposal[] = [];
+
+  // Find all proposal items
+  const proposalItems = querySelectorAll(SELECTORS.proposalListItem);
+  console.log('UpApply: Found', proposalItems.length, 'proposal items');
+
+  for (const item of proposalItems) {
+    try {
+      // Extract job title and URL
+      const titleElement = item.querySelector('h4 a, .job-title-link, [data-test="proposal-job-title"]');
+      const jobTitle = titleElement?.textContent?.trim() || null;
+      const jobUrl = titleElement?.getAttribute('href') || null;
+
+      // Try to get proposal ID from data attributes or URL
+      const proposalId = item.getAttribute('data-proposal-id') ||
+                         jobUrl?.match(/~([a-zA-Z0-9]+)/)?.[1] ||
+                         null;
+
+      // Extract cover letter - this might require expanding the proposal
+      const coverLetterElement = item.querySelector('.cover-letter-text, [data-test="proposal-cover-letter"], .proposal-description');
+      const coverLetter = coverLetterElement?.textContent?.trim() || null;
+
+      // Extract bid amount
+      const bidText = item.querySelector('.proposal-bid-amount, [data-test="proposal-bid"]')?.textContent?.trim();
+      let bidAmount: number | null = null;
+      let bidType: string | null = null;
+      if (bidText) {
+        const match = bidText.match(/\$?([\d,]+\.?\d*)/);
+        if (match) {
+          bidAmount = parseFloat(match[1].replace(',', ''));
+        }
+        bidType = bidText.toLowerCase().includes('/hr') || bidText.toLowerCase().includes('hourly')
+          ? 'hourly' : 'fixed';
+      }
+
+      // Extract status
+      const statusElement = item.querySelector('.status-badge, [data-test="proposal-status"], .proposal-status');
+      const status = statusElement?.textContent?.trim()?.toLowerCase() || 'submitted';
+
+      // Extract submitted date
+      const dateElement = item.querySelector('time, [data-test="proposal-date"], .proposal-submitted-date');
+      const submittedAt = dateElement?.getAttribute('datetime') ||
+                          dateElement?.textContent?.trim() ||
+                          null;
+
+      if (jobTitle || coverLetter) {
+        proposals.push({
+          proposalId,
+          jobTitle,
+          jobUrl: jobUrl ? new URL(jobUrl, window.location.origin).href : null,
+          coverLetter,
+          bidAmount,
+          bidType,
+          status,
+          submittedAt,
+        });
+      }
+    } catch (err) {
+      console.error('UpApply: Error extracting proposal:', err);
+    }
+  }
+
+  return proposals;
+}
+
+/**
  * Fill the cover letter textarea with generated content.
  */
 function fillCoverLetter(content: string): boolean {
@@ -245,6 +335,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'FILL_SCREENING_QUESTION':
       const questionFilled = fillScreeningQuestion(message.selector, message.answer);
       sendResponse({ success: questionFilled });
+      break;
+
+    case 'SCRAPE_PROPOSALS':
+      if (!isMyProposalsPage()) {
+        sendResponse({ success: false, error: 'Not on My Proposals page' });
+      } else {
+        try {
+          const proposals = extractProposals();
+          sendResponse({ success: true, data: proposals });
+        } catch (err) {
+          sendResponse({ success: false, error: String(err) });
+        }
+      }
+      break;
+
+    case 'GET_PAGE_TYPE':
+      sendResponse({
+        isJobPage: isJobPage(),
+        isMyProposalsPage: isMyProposalsPage(),
+        url: window.location.href,
+      });
       break;
 
     default:

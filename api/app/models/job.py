@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from app.models.user import User
     from app.models.application import Application
     from app.models.cover_letter import CoverLetter
+    from app.models.screening_answer import ScreeningAnswer
+    from app.models.proposal import Proposal
 
 
 class Job(Base):
@@ -81,6 +83,12 @@ class Job(Base):
     )
     cover_letters: Mapped[List["CoverLetter"]] = relationship(
         "CoverLetter", back_populates="job", cascade="all, delete-orphan"
+    )
+    screening_answers: Mapped[List["ScreeningAnswer"]] = relationship(
+        "ScreeningAnswer", back_populates="job"
+    )
+    proposals: Mapped[List["Proposal"]] = relationship(
+        "Proposal", back_populates="job"
     )
 
     __table_args__ = (

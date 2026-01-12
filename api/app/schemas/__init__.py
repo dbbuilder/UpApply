@@ -55,6 +55,23 @@ from app.schemas.feedback import (
     FeedbackResponse,
     AnalyticsDashboard,
 )
+from app.schemas.screening_answer import (
+    ScreeningAnswerCreate,
+    ScreeningAnswerUpdate,
+    ScreeningAnswerResponse,
+    ScreeningAnswerSearchRequest,
+    ScreeningAnswerSearchResult,
+    ScreeningAnswerBulkCreate,
+)
+from app.schemas.proposal import (
+    ProposalCreate,
+    ProposalUpdate,
+    ProposalResponse,
+    ProposalSearchRequest,
+    ProposalSearchResult,
+    ProposalBulkCreate,
+    ProposalImportFromUpwork,
+)
 
 __all__ = [
     # Auth
@@ -107,4 +124,19 @@ __all__ = [
     "FeedbackCreate",
     "FeedbackResponse",
     "AnalyticsDashboard",
+    # Screening Answers
+    "ScreeningAnswerCreate",
+    "ScreeningAnswerUpdate",
+    "ScreeningAnswerResponse",
+    "ScreeningAnswerSearchRequest",
+    "ScreeningAnswerSearchResult",
+    "ScreeningAnswerBulkCreate",
+    # Proposals
+    "ProposalCreate",
+    "ProposalUpdate",
+    "ProposalResponse",
+    "ProposalSearchRequest",
+    "ProposalSearchResult",
+    "ProposalBulkCreate",
+    "ProposalImportFromUpwork",
 ]

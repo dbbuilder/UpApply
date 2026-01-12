@@ -279,6 +279,70 @@ class ApiClient {
   async getAnalyticsDashboard() {
     return this.request<AnalyticsDashboard>('/api/v1/feedback/analytics/dashboard');
   }
+
+  // Screening Answers
+  async createScreeningAnswer(data: ScreeningAnswerCreate) {
+    return this.request<ScreeningAnswer>('/api/v1/screening-answers', {
+      method: 'POST',
+      body: data,
+    });
+  }
+
+  async searchScreeningAnswers(question: string, limit = 5) {
+    return this.request<ScreeningAnswerSearchResult[]>('/api/v1/screening-answers/search', {
+      method: 'POST',
+      body: { question, limit },
+    });
+  }
+
+  async bulkCreateScreeningAnswers(answers: ScreeningAnswerCreate[]) {
+    return this.request<ScreeningAnswer[]>('/api/v1/screening-answers/bulk', {
+      method: 'POST',
+      body: { answers },
+    });
+  }
+
+  // Proposals
+  async createProposal(data: ProposalCreate) {
+    return this.request<Proposal>('/api/v1/proposals', {
+      method: 'POST',
+      body: data,
+    });
+  }
+
+  async getProposals(params?: { status?: string; was_hired?: boolean; limit?: number }) {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.append('status', params.status);
+    if (params?.was_hired !== undefined) searchParams.append('was_hired', String(params.was_hired));
+    if (params?.limit) searchParams.append('limit', String(params.limit));
+    const query = searchParams.toString() ? `?${searchParams}` : '';
+    return this.request<Proposal[]>(`/api/v1/proposals${query}`);
+  }
+
+  async searchProposals(query: string, limit = 5, includeSuccessfulOnly = false) {
+    return this.request<ProposalSearchResult[]>('/api/v1/proposals/search', {
+      method: 'POST',
+      body: { query, limit, include_successful_only: includeSuccessfulOnly },
+    });
+  }
+
+  async bulkCreateProposals(proposals: ProposalCreate[]) {
+    return this.request<Proposal[]>('/api/v1/proposals/bulk', {
+      method: 'POST',
+      body: { proposals },
+    });
+  }
+
+  async importProposalsFromUpwork(proposals: Record<string, unknown>[]) {
+    return this.request<Proposal[]>('/api/v1/proposals/import-from-upwork', {
+      method: 'POST',
+      body: { proposals },
+    });
+  }
+
+  async getProposalStats() {
+    return this.request<ProposalStats>('/api/v1/proposals/stats');
+  }
 }
 
 export class ApiError extends Error {
@@ -548,6 +612,93 @@ export interface AnalyticsDashboard {
   top_skills: { skill: string; success_rate: number; applications: number }[];
   weekly_applications: { week: string; applications: number; responses: number }[];
   insights: { type: string; message: string; confidence: number }[];
+}
+
+// Screening Answer Types
+export interface ScreeningAnswerCreate {
+  question: string;
+  answer: string;
+  question_type?: string;
+  job_id?: string;
+  application_id?: string;
+  job_title?: string;
+  job_skills?: string[];
+}
+
+export interface ScreeningAnswer {
+  id: string;
+  user_id: string;
+  job_id?: string;
+  application_id?: string;
+  question: string;
+  answer: string;
+  question_type?: string;
+  job_title?: string;
+  was_successful?: boolean;
+  created_at: string;
+}
+
+export interface ScreeningAnswerSearchResult {
+  answer: ScreeningAnswer;
+  similarity: number;
+}
+
+// Proposal Types
+export interface ProposalCreate {
+  cover_letter_text: string;
+  job_id?: string;
+  upwork_proposal_id?: string;
+  upwork_job_url?: string;
+  job_title?: string;
+  job_description_snippet?: string;
+  job_skills?: string[];
+  job_budget?: string;
+  job_category?: string;
+  bid_amount?: number;
+  bid_type?: string;
+  status?: string;
+  submitted_at?: string;
+  source?: string;
+}
+
+export interface Proposal {
+  id: string;
+  user_id: string;
+  job_id?: string;
+  upwork_proposal_id?: string;
+  upwork_job_url?: string;
+  cover_letter_text: string;
+  job_title?: string;
+  job_description_snippet?: string;
+  job_skills?: string[];
+  job_budget?: string;
+  job_category?: string;
+  bid_amount?: number;
+  bid_type?: string;
+  status?: string;
+  was_hired?: boolean;
+  client_responded?: boolean;
+  earnings?: number;
+  source: string;
+  submitted_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProposalSearchResult {
+  proposal: Proposal;
+  similarity: number;
+}
+
+export interface ProposalStats {
+  total_proposals: number;
+  hired: number;
+  responded: number;
+  total_earnings: number;
+  submitted: number;
+  viewed: number;
+  hire_rate: number;
+  response_rate: number;
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

@@ -219,6 +219,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         chrome.sidePanel.open({ windowId: sender.tab.windowId });
       }
       break;
+
+    case 'SCRAPE_PROPOSALS':
+      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+        const tab = tabs[0];
+        if (!tab?.id || !tab?.url?.includes('upwork.com')) {
+          sendResponse({ success: false, error: 'Not on an Upwork page' });
+          return;
+        }
+
+        // Try to inject content script if needed
+        try {
+          const manifest = chrome.runtime.getManifest();
+          const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+          if (contentScriptPath) {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              files: [contentScriptPath]
+            });
+          }
+        } catch (e) {
+          // Script may already be loaded
+        }
+
+        setTimeout(() => {
+          chrome.tabs.sendMessage(tab.id!, { type: 'SCRAPE_PROPOSALS' }, (response) => {
+            if (chrome.runtime.lastError) {
+              sendResponse({ success: false, error: 'Content script not loaded. Please refresh the page.' });
+            } else {
+              sendResponse(response || { success: false, error: 'No response' });
+            }
+          });
+        }, 200);
+      });
+      return true;
   }
 
   return false;
