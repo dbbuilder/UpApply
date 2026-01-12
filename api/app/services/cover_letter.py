@@ -142,6 +142,36 @@ def format_skill_matches(
     return "\n".join(parts) if parts else "No specific skill requirements identified."
 
 
+def format_past_proposals(proposals: List[Dict]) -> str:
+    """Format past proposals for inclusion in prompt as writing examples."""
+    if not proposals:
+        return ""
+
+    formatted = []
+    for i, prop in enumerate(proposals, 1):
+        entry = f"Example {i}"
+        if prop.get("job_title"):
+            entry += f" - For: {prop['job_title']}"
+        if prop.get("was_hired"):
+            entry += " [SUCCESSFUL - Got Hired]"
+
+        cover_letter = prop.get("cover_letter_text", "")
+        # Truncate long cover letters but keep enough for style reference
+        if len(cover_letter) > 600:
+            cover_letter = cover_letter[:600] + "..."
+
+        entry += f"\n{cover_letter}"
+
+        if prop.get("job_skills"):
+            skills = prop["job_skills"]
+            if isinstance(skills, list):
+                entry += f"\n(Skills: {', '.join(skills[:5])})"
+
+        formatted.append(entry)
+
+    return "\n\n".join(formatted)
+
+
 def build_user_prompt(
     job_title: str,
     job_description: str,
@@ -151,6 +181,7 @@ def build_user_prompt(
     missing_skills: List[str],
     relevant_memories: List[Dict],
     profile: UserProfile,
+    past_proposals: Optional[List[Dict]] = None,
 ) -> str:
     """Build user prompt with job and match details."""
     parts = [
@@ -168,6 +199,12 @@ def build_user_prompt(
 
     parts.append(f"\n\nSKILL ALIGNMENT:\n{format_skill_matches(skill_matches, missing_skills)}")
 
+    # Add past successful proposals as writing style examples
+    if past_proposals:
+        past_proposals_text = format_past_proposals(past_proposals)
+        if past_proposals_text:
+            parts.append(f"\n\nPAST COVER LETTERS FOR SIMILAR JOBS (use as style reference, especially successful ones):\n{past_proposals_text}")
+
     # Add skills to highlight if they match job requirements
     if profile.skills_to_highlight:
         matching_highlights = []
@@ -180,7 +217,7 @@ def build_user_prompt(
         if matching_highlights:
             parts.append(f"\n\nUSER'S PREFERRED FOCUS (emphasize these if relevant):\n{', '.join(matching_highlights)}")
 
-    parts.append("\n\nGenerate a personalized, compelling cover letter for this job.")
+    parts.append("\n\nGenerate a personalized, compelling cover letter for this job. Learn from the past cover letter examples if provided, especially the successful ones.")
 
     return "".join(parts)
 
@@ -206,8 +243,14 @@ async def generate_cover_letter(
     relevant_memories: List[Dict],
     profile: UserProfile,
     model: Optional[str] = None,
+    past_proposals: Optional[List[Dict]] = None,
 ) -> str:
-    """Generate a personalized cover letter using OpenAI."""
+    """Generate a personalized cover letter using OpenAI.
+
+    Args:
+        past_proposals: List of past proposals for similar jobs to use as style examples.
+            Successful proposals (was_hired=True) are weighted more heavily.
+    """
     client = get_openai_client()
 
     system_prompt = build_system_prompt(profile)
@@ -220,6 +263,7 @@ async def generate_cover_letter(
         missing_skills=missing_skills,
         relevant_memories=relevant_memories,
         profile=profile,
+        past_proposals=past_proposals,
     )
 
     response = await client.chat.completions.create(

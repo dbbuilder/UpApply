@@ -25,6 +25,7 @@ from app.schemas.job import (
 from app.services.job_analysis import (
     analyze_skill_match,
     find_relevant_memories,
+    find_relevant_proposals,
     check_deal_breakers,
     generate_strengths_and_concerns,
     calculate_match_score,
@@ -484,7 +485,7 @@ async def generate_cover_letter_endpoint(
             detail="Either job_id or job_data must be provided",
         )
 
-    # Get skill matches and memories
+    # Get skill matches, memories, and past proposals
     skill_matches, missing_skills = await analyze_skill_match(job_skills, profile)
     relevant_memories = await find_relevant_memories(
         db=db,
@@ -492,6 +493,16 @@ async def generate_cover_letter_endpoint(
         job_description=job_description,
         job_skills=job_skills,
         limit=5,
+    )
+
+    # Find relevant past proposals to use as writing examples
+    past_proposals = await find_relevant_proposals(
+        db=db,
+        user_id=current_user.id,
+        job_description=job_description,
+        job_skills=job_skills,
+        limit=3,  # Top 3 most similar past proposals
+        successful_only=False,  # Include all, but successful ones are prioritized
     )
 
     # Generate cover letter
@@ -504,6 +515,7 @@ async def generate_cover_letter_endpoint(
         missing_skills=missing_skills,
         relevant_memories=relevant_memories,
         profile=profile,
+        past_proposals=past_proposals,
     )
 
     # Save cover letter
@@ -638,6 +650,15 @@ async def regenerate_cover_letter_endpoint(
             limit=5,
         )
 
+        # Find relevant past proposals
+        past_proposals = await find_relevant_proposals(
+            db=db,
+            user_id=current_user.id,
+            job_description=job.description,
+            job_skills=job_skills,
+            limit=3,
+        )
+
         content = await generate_cover_letter(
             job_title=job.title,
             job_description=job.description,
@@ -647,6 +668,7 @@ async def regenerate_cover_letter_endpoint(
             missing_skills=missing_skills,
             relevant_memories=relevant_memories,
             profile=profile,
+            past_proposals=past_proposals,
         )
 
     # Create new version

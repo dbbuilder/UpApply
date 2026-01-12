@@ -332,3 +332,64 @@ def generate_recommendation(
         return "Moderate match - apply if interested in the project"
     else:
         return "Lower match - may require additional skills demonstration"
+
+
+async def find_relevant_proposals(
+    db: AsyncSession,
+    user_id: str,
+    job_description: str,
+    job_skills: List[str],
+    limit: int = 3,
+    successful_only: bool = False,
+) -> List[Dict]:
+    """Find past proposals relevant to the job using semantic search.
+
+    Returns proposals that were written for similar jobs, prioritizing
+    successful proposals (those that led to being hired).
+    """
+    # Create search text combining description and skills
+    search_text = f"{job_description}\nRequired skills: {', '.join(job_skills)}"
+    query_embedding = await generate_embedding(search_text)
+
+    # Vector similarity search on past proposals
+    # Optionally filter to only successful proposals
+    sql = text("""
+        SELECT
+            id, job_title, cover_letter_text, job_skills,
+            bid_amount, bid_type, was_hired, outcome,
+            1 - (embedding <=> CAST(:embedding AS vector)) as similarity
+        FROM proposals
+        WHERE user_id = :user_id
+        AND embedding IS NOT NULL
+        """ + ("AND was_hired = true" if successful_only else "") + """
+        ORDER BY
+            CASE WHEN was_hired = true THEN 0 ELSE 1 END,
+            embedding <=> CAST(:embedding AS vector)
+        LIMIT :limit
+    """)
+
+    result = await db.execute(
+        sql,
+        {
+            "embedding": str(query_embedding),
+            "user_id": user_id,
+            "limit": limit,
+        },
+    )
+
+    proposals = []
+    for row in result.fetchall():
+        if row.similarity > 0.25:  # Lower threshold than memories since proposals are rarer
+            proposals.append({
+                "id": row.id,
+                "job_title": row.job_title,
+                "cover_letter_text": row.cover_letter_text,
+                "job_skills": row.job_skills,
+                "bid_amount": float(row.bid_amount) if row.bid_amount else None,
+                "bid_type": row.bid_type,
+                "was_hired": row.was_hired,
+                "outcome": row.outcome,
+                "similarity": row.similarity,
+            })
+
+    return proposals
