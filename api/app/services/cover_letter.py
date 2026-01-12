@@ -1,5 +1,5 @@
 """Cover letter generation service using OpenAI."""
-import json
+import re
 from typing import Dict, Any, List, Optional
 
 from openai import AsyncOpenAI
@@ -9,6 +9,50 @@ from app.core.config import settings
 from app.core.embeddings import get_openai_client
 from app.models.user import UserProfile
 from app.schemas.job import SkillMatch
+
+
+def clean_cover_letter(content: str) -> str:
+    """Remove unwanted elements from generated cover letter."""
+    lines = content.strip().split('\n')
+    cleaned_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Skip Subject: lines
+        if stripped.lower().startswith('subject:'):
+            continue
+
+        # Skip Dear... lines
+        if stripped.lower().startswith('dear '):
+            continue
+
+        # Skip common signature lines
+        if stripped.lower() in ['sincerely,', 'best regards,', 'regards,', 'best,', 'thank you,', 'thanks,', 'warm regards,']:
+            continue
+
+        # Skip lines that are just a name (likely signature)
+        if len(stripped.split()) <= 3 and stripped and not any(c in stripped for c in '.!?:,'):
+            # Check if it looks like a name at the end
+            if cleaned_lines and cleaned_lines[-1].strip().lower() in ['sincerely,', 'best regards,', 'regards,', 'best,']:
+                continue
+
+        cleaned_lines.append(line)
+
+    result = '\n'.join(cleaned_lines).strip()
+
+    # Remove any bracketed placeholders like [Your Name], [Company], etc.
+    result = re.sub(r'\[[\w\s\']+\]', '', result)
+
+    # Clean up any double spaces or extra newlines created
+    result = re.sub(r'  +', ' ', result)
+    result = re.sub(r'\n{3,}', '\n\n', result)
+
+    # Remove trailing signature-like content
+    # Pattern: ends with "Sincerely," or similar followed by optional name
+    result = re.sub(r'\n+(Sincerely|Best regards|Regards|Best|Thank you|Thanks|Warm regards),?\s*\n*[\w\s]*$', '', result, flags=re.IGNORECASE)
+
+    return result.strip()
 
 
 def build_system_prompt(profile: UserProfile) -> str:
@@ -43,9 +87,13 @@ GUIDELINES:
 - Keep under 300 words
 - End with clear call to action
 - NO generic phrases like "I am excited to apply" or "I look forward to hearing from you"
-- NO placeholders like [Your Name] or [Company]
+- NO placeholders like [Your Name], [Company], [Hiring Manager], etc.
+- NO "Dear..." salutation line - start directly with the content
+- NO "Subject:" line
+- NO signature block at the end (no "Sincerely," or name)
 - Be specific about how past experience applies to THIS job
-- Focus on value you can provide, not just qualifications""")
+- Focus on value you can provide, not just qualifications
+- Start the letter immediately with a compelling opening sentence""")
 
     return "".join(prompt_parts)
 
@@ -177,7 +225,8 @@ async def generate_cover_letter(
         temperature=0.7,
     )
 
-    return response.choices[0].message.content.strip()
+    raw_content = response.choices[0].message.content.strip()
+    return clean_cover_letter(raw_content)
 
 
 @retry(
@@ -204,7 +253,7 @@ User feedback for improvement:
 
 Job: {job_title}
 
-Please revise the cover letter based on this feedback while maintaining personalization for the job."""
+Please revise the cover letter based on this feedback while maintaining personalization for the job. Remember: NO salutation line, NO signature, NO placeholders."""
 
     response = await client.chat.completions.create(
         model=model or settings.default_model,
@@ -216,4 +265,5 @@ Please revise the cover letter based on this feedback while maintaining personal
         temperature=0.7,
     )
 
-    return response.choices[0].message.content.strip()
+    raw_content = response.choices[0].message.content.strip()
+    return clean_cover_letter(raw_content)
