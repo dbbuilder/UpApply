@@ -68,12 +68,27 @@ function extractScreeningQuestions(): ScreeningQuestion[] {
 function extractJobData(): JobData {
   const url = window.location.href;
 
+  // Debug: Check if key elements exist
+  const feJobDetails = document.querySelector('.fe-job-details');
+  const feUiApplication = document.querySelector('.fe-ui-application-vue');
+  console.log('UpApply: Page elements found:', {
+    '.fe-job-details': !!feJobDetails,
+    '.fe-ui-application-vue': !!feUiApplication,
+    'any h3 in .fe-job-details': feJobDetails?.querySelector('h3')?.textContent?.substring(0, 50),
+  });
+
   // Extract basic job info
   const title = extractText(SELECTORS.jobTitle);
   const description = extractText(SELECTORS.jobDescription);
   const skills = extractTexts(SELECTORS.skills);
   const experienceLevel = extractText(SELECTORS.experienceLevel);
   const projectLength = extractText(SELECTORS.projectLength);
+
+  console.log('UpApply: Extraction results:', {
+    title,
+    descriptionLength: description?.length,
+    skills,
+  });
 
   // Extract budget info
   const budgetAmount = extractText(SELECTORS.budgetAmount);
@@ -97,8 +112,6 @@ function extractJobData(): JobData {
 
   // Extract screening questions
   const screeningQuestions = extractScreeningQuestions();
-
-  console.log('UpApply: Extracted data:', { title, description: description?.substring(0, 100), skills, screeningQuestions });
 
   return {
     url,

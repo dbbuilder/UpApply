@@ -9,9 +9,10 @@ export const SELECTORS = {
   // Job details page & proposal page
   jobTitle: [
     // Proposal/apply page - job title is h3 inside fe-job-details section
-    '.fe-job-details h3.h5',
+    '.fe-job-details .air3-card-section h3',
+    '.fe-job-details section h3',
     '.fe-job-details h3',
-    '.fe-job-details .h5',
+    '.fe-job-details .content h3',
     // Job details page selectors
     '[data-test="job-title-link"]',
     'h4 a[href*="/jobs/"]',

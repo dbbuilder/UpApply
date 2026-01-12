@@ -39,13 +39,41 @@ export default function GeneratorPage() {
   } = useAppStore();
 
   useEffect(() => {
-    // Request current job data from content script
+    // Request current job data from stored cache first
     chrome.runtime.sendMessage({ type: 'GET_CURRENT_JOB' }, (response) => {
+      console.log('UpApply Sidebar: GET_CURRENT_JOB response:', response);
       if (response?.data) {
         useAppStore.getState().setCurrentJob(response.data);
       }
     });
+
+    // Also actively request extraction from content script
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.id) {
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'EXTRACT_JOB_DATA' }, (response) => {
+          console.log('UpApply Sidebar: EXTRACT_JOB_DATA response:', response);
+          if (response?.success && response.data) {
+            useAppStore.getState().setCurrentJob(response.data);
+          }
+        });
+      }
+    });
   }, []);
+
+  const handleRefreshJob = () => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.id) {
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'EXTRACT_JOB_DATA' }, (response) => {
+          console.log('UpApply Sidebar: Manual extract response:', response);
+          if (response?.success && response.data) {
+            useAppStore.getState().setCurrentJob(response.data);
+          } else {
+            alert('Could not extract job data. Make sure you are on an Upwork job/proposal page.');
+          }
+        });
+      }
+    });
+  };
 
   const handleAnalyze = () => {
     analyzeCurrentJob();
@@ -107,6 +135,13 @@ export default function GeneratorPage() {
             <p className="text-sm text-gray-500 mt-1">
               Navigate to an Upwork job page to get started
             </p>
+            <button
+              type="button"
+              onClick={handleRefreshJob}
+              className="btn-outline mt-4"
+            >
+              Refresh Detection
+            </button>
           </div>
         ) : (
           <>
