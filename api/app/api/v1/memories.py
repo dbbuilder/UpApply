@@ -192,11 +192,11 @@ async def search_memories(
             skills_demonstrated, industry, project_type, client_type,
             outcome, metrics, client_feedback, source, importance_score,
             created_at, updated_at,
-            1 - (embedding <=> :embedding::vector) as similarity
+            1 - (embedding <=> CAST(:embedding AS vector)) as similarity
         FROM memories
         WHERE user_id = :user_id
         AND embedding IS NOT NULL
-        ORDER BY embedding <=> :embedding::vector
+        ORDER BY embedding <=> CAST(:embedding AS vector)
         LIMIT :limit
     """)
 

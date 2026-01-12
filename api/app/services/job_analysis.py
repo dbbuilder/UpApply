@@ -121,11 +121,11 @@ async def find_relevant_memories(
         SELECT
             id, title, content, category, skills_demonstrated,
             outcome, metrics, client_feedback,
-            1 - (embedding <=> :embedding::vector) as similarity
+            1 - (embedding <=> CAST(:embedding AS vector)) as similarity
         FROM memories
         WHERE user_id = :user_id
         AND embedding IS NOT NULL
-        ORDER BY embedding <=> :embedding::vector
+        ORDER BY embedding <=> CAST(:embedding AS vector)
         LIMIT :limit
     """)
 
