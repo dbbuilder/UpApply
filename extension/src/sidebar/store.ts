@@ -53,7 +53,7 @@ interface AppState {
   coverLetterLoading: boolean;
 
   // UI
-  currentView: 'auth' | 'setup' | 'generator' | 'memories' | 'history' | 'analytics';
+  currentView: 'auth' | 'setup' | 'generator' | 'memories' | 'history' | 'analytics' | 'feedback';
   setupStep: number;
 
   // Actions

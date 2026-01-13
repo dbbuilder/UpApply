@@ -9,6 +9,7 @@ from app.api.v1.applications import router as applications_router
 from app.api.v1.feedback import router as feedback_router
 from app.api.v1.screening_answers import router as screening_answers_router
 from app.api.v1.proposals import router as proposals_router
+from app.api.v1.beta_feedback import router as beta_feedback_router
 
 router = APIRouter()
 
@@ -20,3 +21,4 @@ router.include_router(applications_router, prefix="/applications", tags=["Applic
 router.include_router(feedback_router, prefix="/feedback", tags=["Feedback"])
 router.include_router(screening_answers_router, prefix="/screening-answers", tags=["Screening Answers"])
 router.include_router(proposals_router, prefix="/proposals", tags=["Proposals"])
+router.include_router(beta_feedback_router, prefix="/beta-feedback", tags=["Beta Feedback"])

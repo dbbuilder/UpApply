@@ -7,6 +7,7 @@ from app.models.cover_letter import CoverLetter
 from app.models.feedback import Feedback
 from app.models.screening_answer import ScreeningAnswer
 from app.models.proposal import Proposal
+from app.models.beta_feedback import BetaFeedback
 
 __all__ = [
     "User",
@@ -19,4 +20,5 @@ __all__ = [
     "Feedback",
     "ScreeningAnswer",
     "Proposal",
+    "BetaFeedback",
 ]

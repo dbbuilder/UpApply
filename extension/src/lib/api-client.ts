@@ -355,6 +355,14 @@ class ApiClient {
       body: { attachments, full_description: fullDescription },
     });
   }
+
+  // Beta Feedback (no auth required)
+  async submitBetaFeedback(data: BetaFeedbackCreate) {
+    return this.request<BetaFeedbackResponse>('/api/v1/beta-feedback', {
+      method: 'POST',
+      body: data,
+    });
+  }
 }
 
 export class ApiError extends Error {
@@ -735,6 +743,26 @@ export interface ExtractAttachmentsResponse {
   attachment_count: number;
   attachment_metadata: AttachmentMetadata[];
   extraction_errors: string[];
+}
+
+// Beta Feedback Types
+export interface BetaFeedbackCreate {
+  feedback_type: 'bug' | 'feature_request' | 'usability' | 'general';
+  description: string;
+  email?: string;
+  page_url?: string;
+  extension_version?: string;
+  browser_info?: string;
+}
+
+export interface BetaFeedbackResponse {
+  id: string;
+  feedback_type: string;
+  description: string;
+  email?: string;
+  page_url?: string;
+  extension_version?: string;
+  created_at: string;
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

@@ -171,6 +171,9 @@ node_modules/
 extension/dist/
 extension/node_modules/
 
+# Distribution artifacts
+*.zip
+
 # API virtual environment
 api/venv/
 

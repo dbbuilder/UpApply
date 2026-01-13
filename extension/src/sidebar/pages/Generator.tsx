@@ -341,6 +341,14 @@ export default function GeneratorPage() {
           </button>
           <button
             type="button"
+            onClick={() => setCurrentView('feedback')}
+            className="text-amber-600 hover:text-amber-700 text-sm"
+            title="Send feedback"
+          >
+            Feedback
+          </button>
+          <button
+            type="button"
             onClick={logout}
             className="text-gray-400 hover:text-gray-600 text-sm"
           >
