@@ -253,10 +253,186 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }, 200);
       });
       return true;
+
+    case 'GET_VIEW_POSTING_LINK':
+      // Forward to content script in active tab
+      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+        const tab = tabs[0];
+        if (!tab?.id) {
+          sendResponse({ success: false, error: 'No active tab' });
+          return;
+        }
+
+        chrome.tabs.sendMessage(tab.id, { type: 'GET_VIEW_POSTING_LINK' }, (response) => {
+          if (chrome.runtime.lastError) {
+            sendResponse({ success: false, error: 'Content script not loaded' });
+          } else {
+            sendResponse(response || { success: false });
+          }
+        });
+      });
+      return true;
+
+    case 'EXTRACT_FULL_JOB':
+      // Open the job posting in a background tab and extract data
+      (async () => {
+        try {
+          const data = await extractFullJobInBackground(message.jobPostingUrl);
+          sendResponse({ success: true, data });
+        } catch (err) {
+          console.error('UpApply Background: Full job extraction failed:', err);
+          sendResponse({ success: false, error: String(err) });
+        }
+      })();
+      return true;
+
+    case 'DOWNLOAD_ATTACHMENT':
+      // Download an attachment and return as base64
+      (async () => {
+        try {
+          const result = await downloadAttachment(message.url);
+          sendResponse({ success: true, ...result });
+        } catch (err) {
+          console.error('UpApply Background: Attachment download failed:', err);
+          sendResponse({ success: false, error: String(err) });
+        }
+      })();
+      return true;
   }
 
   return false;
 });
+
+/**
+ * Wait for a tab to complete loading.
+ */
+function waitForTabLoad(tabId: number, timeoutMs = 30000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      reject(new Error('Tab load timeout'));
+    }, timeoutMs);
+
+    const listener = (id: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+      if (id === tabId && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        clearTimeout(timeout);
+        resolve();
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+/**
+ * Extract full job data by opening the job posting in a background tab.
+ */
+async function extractFullJobInBackground(jobPostingUrl: string): Promise<{
+  fullDescription: string | null;
+  attachments: Array<{ url: string; filename: string; contentType: string }>;
+}> {
+  console.log('UpApply Background: Opening background tab for:', jobPostingUrl);
+
+  // Create background tab (not active)
+  const tab = await chrome.tabs.create({
+    url: jobPostingUrl,
+    active: false,
+  });
+
+  if (!tab.id) {
+    throw new Error('Failed to create tab');
+  }
+
+  try {
+    // Wait for tab to load
+    await waitForTabLoad(tab.id);
+
+    // Additional delay for dynamic content
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Inject content script if needed
+    const manifest = chrome.runtime.getManifest();
+    const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+    if (contentScriptPath) {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: [contentScriptPath],
+        });
+        console.log('UpApply Background: Content script injected into background tab');
+      } catch (e) {
+        console.log('UpApply Background: Script injection note:', e);
+      }
+    }
+
+    // Small delay after injection
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Extract data from the tab
+    const response = await new Promise<{ success: boolean; data?: unknown; error?: string }>((resolve) => {
+      chrome.tabs.sendMessage(tab.id!, { type: 'EXTRACT_JOB_POSTING_DATA' }, (resp) => {
+        if (chrome.runtime.lastError) {
+          resolve({ success: false, error: chrome.runtime.lastError.message });
+        } else {
+          resolve(resp || { success: false, error: 'No response' });
+        }
+      });
+    });
+
+    if (!response.success) {
+      throw new Error(response.error || 'Extraction failed');
+    }
+
+    console.log('UpApply Background: Full job extracted successfully');
+    return response.data as {
+      fullDescription: string | null;
+      attachments: Array<{ url: string; filename: string; contentType: string }>;
+    };
+  } finally {
+    // Always close the background tab
+    try {
+      await chrome.tabs.remove(tab.id);
+      console.log('UpApply Background: Background tab closed');
+    } catch (e) {
+      console.error('UpApply Background: Failed to close tab:', e);
+    }
+  }
+}
+
+/**
+ * Download an attachment and return as base64.
+ * This runs in the background context which may have different CORS restrictions.
+ */
+async function downloadAttachment(url: string): Promise<{ data: string; contentType: string; size: number }> {
+  console.log('UpApply Background: Downloading attachment:', url);
+
+  const response = await fetch(url, {
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+  }
+
+  const blob = await response.blob();
+  const contentType = response.headers.get('content-type') || 'application/octet-stream';
+
+  // Convert to base64
+  const arrayBuffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 = btoa(binary);
+
+  return {
+    data: base64,
+    contentType,
+    size: blob.size,
+  };
+}
 
 // Handle extension icon click - open sidebar
 chrome.action.onClicked.addListener((tab) => {

@@ -7,10 +7,12 @@
     "storage",
     "activeTab",
     "scripting",
-    "sidePanel"
+    "sidePanel",
+    "tabs"
   ],
   "host_permissions": [
-    "https://www.upwork.com/*"
+    "https://www.upwork.com/*",
+    "https://*.upwork.com/*"
   ],
   "background": {
     "service_worker": "src/background/index.ts",
@@ -18,7 +20,11 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.upwork.com/jobs/*", "https://www.upwork.com/nx/proposals/*"],
+      "matches": [
+        "https://www.upwork.com/jobs/*",
+        "https://www.upwork.com/nx/proposals/*",
+        "https://www.upwork.com/freelance-jobs/*"
+      ],
       "js": ["src/content/index.ts"],
       "css": ["content.css"]
     }

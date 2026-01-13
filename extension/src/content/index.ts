@@ -44,6 +44,17 @@ interface ScrapedProposal {
   submittedAt: string | null;
 }
 
+interface AttachmentInfo {
+  url: string;
+  filename: string;
+  contentType: string;
+}
+
+interface JobPostingData {
+  fullDescription: string | null;
+  attachments: AttachmentInfo[];
+}
+
 /**
  * Extract screening questions from the page.
  */
@@ -231,6 +242,84 @@ function extractProposals(): ScrapedProposal[] {
 }
 
 /**
+ * Infer content type from URL or filename.
+ */
+function inferContentType(url: string, filename: string): string {
+  const ext = (url.match(/\.(\w+)(?:\?|$)/) || filename.match(/\.(\w+)$/) || [])[1]?.toLowerCase();
+  const typeMap: Record<string, string> = {
+    pdf: 'application/pdf',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    doc: 'application/msword',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    txt: 'text/plain',
+  };
+  return typeMap[ext] || 'application/octet-stream';
+}
+
+/**
+ * Get the "View job posting" link URL from the current page.
+ */
+function getViewJobPostingLink(): string | null {
+  const linkElement = querySelector(SELECTORS.viewJobPostingLink) as HTMLAnchorElement | null;
+  if (linkElement?.href) {
+    return linkElement.href;
+  }
+  return null;
+}
+
+/**
+ * Extract job posting data from a job details page.
+ * This is used when viewing the full job posting (not the /apply page).
+ */
+function extractJobPostingData(): JobPostingData {
+  // Get full description
+  const fullDescription = extractText(SELECTORS.jobPostingFullDescription);
+
+  // Get attachments
+  const attachmentElements = querySelectorAll(SELECTORS.jobPostingAttachments);
+  const attachments: AttachmentInfo[] = [];
+  const seenUrls = new Set<string>();
+
+  for (const el of attachmentElements) {
+    const link = el as HTMLAnchorElement;
+    if (!link.href || seenUrls.has(link.href)) continue;
+
+    // Skip non-attachment links
+    if (!link.href.includes('attachment') &&
+        !link.href.includes('/ab/') &&
+        !link.href.match(/\.(pdf|docx?|png|jpe?g|gif|txt)(\?|$)/i)) {
+      continue;
+    }
+
+    seenUrls.add(link.href);
+    const filename = link.textContent?.trim() ||
+                     link.getAttribute('download') ||
+                     link.href.split('/').pop()?.split('?')[0] ||
+                     'attachment';
+
+    attachments.push({
+      url: link.href,
+      filename,
+      contentType: inferContentType(link.href, filename),
+    });
+  }
+
+  console.log('UpApply: Extracted job posting data:', {
+    descriptionLength: fullDescription?.length,
+    attachmentCount: attachments.length,
+  });
+
+  return {
+    fullDescription,
+    attachments,
+  };
+}
+
+/**
  * Fill the cover letter textarea with generated content.
  */
 function fillCoverLetter(content: string): boolean {
@@ -356,6 +445,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         isMyProposalsPage: isMyProposalsPage(),
         url: window.location.href,
       });
+      break;
+
+    case 'GET_VIEW_POSTING_LINK':
+      const viewLink = getViewJobPostingLink();
+      sendResponse({ success: !!viewLink, url: viewLink });
+      break;
+
+    case 'EXTRACT_JOB_POSTING_DATA':
+      try {
+        const postingData = extractJobPostingData();
+        sendResponse({ success: true, data: postingData });
+      } catch (err) {
+        console.error('UpApply: Job posting extraction error:', err);
+        sendResponse({ success: false, error: String(err) });
+      }
       break;
 
     default:

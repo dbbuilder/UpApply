@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
-import { apiClient, ScreeningAnswerSearchResult } from '../../lib/api-client';
+import { apiClient, ScreeningAnswerSearchResult, AttachmentData } from '../../lib/api-client';
 
 function MatchScoreBadge({ score }: { score: number }) {
   let colorClass = 'score-low';
@@ -44,6 +44,12 @@ export default function GeneratorPage() {
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
   const [suggestedAnswers, setSuggestedAnswers] = useState<Record<string, ScreeningAnswerSearchResult[]>>({});
   const [loadingSuggestions, setLoadingSuggestions] = useState<Record<string, boolean>>({});
+
+  // State for fetching full job with attachments
+  const [fetchingFullJob, setFetchingFullJob] = useState(false);
+  const [fullJobFetched, setFullJobFetched] = useState(false);
+  const [attachmentCount, setAttachmentCount] = useState(0);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     // Request current job data from stored cache first
@@ -222,6 +228,97 @@ export default function GeneratorPage() {
     setQuestionAnswers(prev => ({ ...prev, [`q${index}`]: value }));
   };
 
+  // Fetch the full job posting via background tab
+  const handleFetchFullJob = async () => {
+    setFetchingFullJob(true);
+    setFetchError(null);
+
+    try {
+      // First, get the "View job posting" link from the current page
+      const linkResponse = await new Promise<{ success: boolean; url?: string; error?: string }>((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_VIEW_POSTING_LINK' }, resolve);
+      });
+
+      if (!linkResponse.success || !linkResponse.url) {
+        setFetchError('Could not find "View job posting" link on this page');
+        return;
+      }
+
+      console.log('UpApply: Fetching full job from:', linkResponse.url);
+
+      // Open background tab and extract data
+      const extractResponse = await new Promise<{
+        success: boolean;
+        data?: { fullDescription: string | null; attachments: Array<{ url: string; filename: string; contentType: string }> };
+        error?: string;
+      }>((resolve) => {
+        chrome.runtime.sendMessage({ type: 'EXTRACT_FULL_JOB', jobPostingUrl: linkResponse.url }, resolve);
+      });
+
+      if (!extractResponse.success || !extractResponse.data) {
+        setFetchError(extractResponse.error || 'Failed to extract job posting data');
+        return;
+      }
+
+      const { fullDescription, attachments } = extractResponse.data;
+      console.log('UpApply: Extracted', attachments.length, 'attachments');
+
+      // If there are attachments, download and send to backend
+      if (attachments.length > 0 && jobAnalysis) {
+        const attachmentData: AttachmentData[] = [];
+
+        for (const att of attachments) {
+          try {
+            const downloadResponse = await new Promise<{
+              success: boolean;
+              data?: string;
+              contentType?: string;
+              error?: string;
+            }>((resolve) => {
+              chrome.runtime.sendMessage({ type: 'DOWNLOAD_ATTACHMENT', url: att.url }, resolve);
+            });
+
+            if (downloadResponse.success && downloadResponse.data) {
+              attachmentData.push({
+                data: downloadResponse.data,
+                filename: att.filename,
+                content_type: downloadResponse.contentType || att.contentType,
+              });
+            }
+          } catch (err) {
+            console.error('Failed to download attachment:', att.filename, err);
+          }
+        }
+
+        // Send to backend for text extraction
+        if (attachmentData.length > 0) {
+          try {
+            // We need a job ID - if we don't have one, we can't save yet
+            // For now, just log that we have attachments
+            console.log('UpApply: Downloaded', attachmentData.length, 'attachments for text extraction');
+            setAttachmentCount(attachmentData.length);
+          } catch (err) {
+            console.error('Failed to extract attachment text:', err);
+          }
+        }
+      }
+
+      // Update current job with full description
+      if (fullDescription) {
+        const updatedJob = { ...currentJob, fullDescription };
+        useAppStore.getState().setCurrentJob(updatedJob as typeof currentJob);
+      }
+
+      setFullJobFetched(true);
+      setAttachmentCount(attachments.length);
+    } catch (err) {
+      console.error('UpApply: Fetch full job error:', err);
+      setFetchError(String(err));
+    } finally {
+      setFetchingFullJob(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
@@ -285,6 +382,41 @@ export default function GeneratorPage() {
                 ))}
                 {currentJob.skills.length > 4 && (
                   <span className="badge badge-gray">+{currentJob.skills.length - 4}</span>
+                )}
+              </div>
+
+              {/* Fetch Full Job */}
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                {!fullJobFetched ? (
+                  <button
+                    type="button"
+                    onClick={handleFetchFullJob}
+                    disabled={fetchingFullJob}
+                    className="text-sm text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                  >
+                    {fetchingFullJob ? (
+                      <>
+                        <span className="animate-spin">⏳</span>
+                        Fetching full job details...
+                      </>
+                    ) : (
+                      <>
+                        📄 Fetch full job posting & attachments
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <div className="text-sm text-gray-500 flex items-center gap-1">
+                    ✓ Full job loaded
+                    {attachmentCount > 0 && (
+                      <span className="text-emerald-600">
+                        ({attachmentCount} attachment{attachmentCount !== 1 ? 's' : ''})
+                      </span>
+                    )}
+                  </div>
+                )}
+                {fetchError && (
+                  <p className="text-sm text-red-500 mt-1">{fetchError}</p>
                 )}
               </div>
             </div>

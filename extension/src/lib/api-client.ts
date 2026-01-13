@@ -343,6 +343,18 @@ class ApiClient {
   async getProposalStats() {
     return this.request<ProposalStats>('/api/v1/proposals/stats');
   }
+
+  // Attachment extraction
+  async extractJobAttachments(
+    jobId: string,
+    attachments: AttachmentData[],
+    fullDescription?: string
+  ) {
+    return this.request<ExtractAttachmentsResponse>(`/api/v1/jobs/${jobId}/extract-attachments`, {
+      method: 'POST',
+      body: { attachments, full_description: fullDescription },
+    });
+  }
 }
 
 export class ApiError extends Error {
@@ -699,6 +711,30 @@ export interface ProposalStats {
   viewed: number;
   hire_rate: number;
   response_rate: number;
+}
+
+// Attachment Extraction Types
+export interface AttachmentData {
+  data: string;  // Base64-encoded file content
+  filename: string;
+  content_type: string;
+}
+
+export interface AttachmentMetadata {
+  filename: string;
+  content_type: string;
+  size: number;
+  extraction_status: string;
+  error?: string;
+}
+
+export interface ExtractAttachmentsResponse {
+  job_id: string;
+  attachment_text: string;
+  full_description?: string;
+  attachment_count: number;
+  attachment_metadata: AttachmentMetadata[];
+  extraction_errors: string[];
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

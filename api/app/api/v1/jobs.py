@@ -21,6 +21,9 @@ from app.schemas.job import (
     CoverLetterGenerateRequest,
     CoverLetterResponse,
     CoverLetterRegenerateRequest,
+    ExtractAttachmentsRequest,
+    ExtractAttachmentsResponse,
+    AttachmentMetadata,
 )
 from app.services.job_analysis import (
     analyze_skill_match,
@@ -696,4 +699,86 @@ async def regenerate_cover_letter_endpoint(
         is_final=False,
         created_at=new_letter.created_at,
         match_score=job.match_score,
+    )
+
+
+# Attachment extraction endpoints
+
+@router.post("/{job_id}/extract-attachments", response_model=ExtractAttachmentsResponse)
+async def extract_job_attachments(
+    job_id: str,
+    request: ExtractAttachmentsRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Extract text from job attachments and update job record."""
+    from app.services.text_extraction import extract_all_attachments
+
+    # Get the job
+    result = await db.execute(
+        select(Job).where(Job.id == job_id, Job.user_id == current_user.id)
+    )
+    job = result.scalar_one_or_none()
+
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found",
+        )
+
+    # Extract text from all attachments
+    attachments_data = [
+        {
+            "data": att.data,
+            "filename": att.filename,
+            "content_type": att.content_type,
+        }
+        for att in request.attachments
+    ]
+
+    combined_text, metadata = await extract_all_attachments(attachments_data)
+
+    # Collect errors
+    extraction_errors = [
+        f"{m['filename']}: {m['error']}"
+        for m in metadata
+        if m.get("error")
+    ]
+
+    # Update job with extracted content
+    if request.full_description:
+        job.full_description = request.full_description
+    if combined_text:
+        job.attachment_text = combined_text
+    job.attachment_metadata = metadata
+
+    # Regenerate embedding if we have new content
+    if combined_text or request.full_description:
+        # Combine all text for embedding
+        all_text = job.title
+        if request.full_description:
+            all_text += f"\n{request.full_description}"
+        elif job.description:
+            all_text += f"\n{job.description}"
+        if combined_text:
+            all_text += f"\n{combined_text}"
+        if job.skills_required:
+            all_text += f"\nSkills: {', '.join(job.skills_required)}"
+
+        # Generate new embedding
+        new_embedding = await generate_embedding(all_text[:8000])  # Limit to ~8k chars
+        job.embedding = new_embedding
+
+    await db.commit()
+    await db.refresh(job)
+
+    return ExtractAttachmentsResponse(
+        job_id=job.id,
+        attachment_text=combined_text,
+        full_description=request.full_description,
+        attachment_count=len(request.attachments),
+        attachment_metadata=[
+            AttachmentMetadata(**m) for m in metadata
+        ],
+        extraction_errors=extraction_errors,
     )

@@ -64,6 +64,11 @@ class JobResponse(BaseModel):
     match_score: Optional[float] = None
     analysis: Optional[dict] = None
 
+    # Full job posting data
+    full_description: Optional[str] = None
+    attachment_text: Optional[str] = None
+    attachment_metadata: Optional[List[dict]] = None
+
     posted_date: Optional[datetime] = None
     scraped_at: datetime
     created_at: datetime
@@ -150,3 +155,41 @@ class CoverLetterRegenerateRequest(BaseModel):
     focus_skills: Optional[List[str]] = None
     custom_instructions: Optional[str] = None
     feedback: Optional[str] = None  # What to improve
+
+
+# Attachment extraction schemas
+
+class AttachmentData(BaseModel):
+    """Schema for a single attachment to extract text from."""
+
+    data: str  # Base64-encoded file content
+    filename: str
+    content_type: str
+
+
+class AttachmentMetadata(BaseModel):
+    """Schema for attachment extraction metadata."""
+
+    filename: str
+    content_type: str
+    size: int
+    extraction_status: str  # success, partial, failed, unsupported
+    error: Optional[str] = None
+
+
+class ExtractAttachmentsRequest(BaseModel):
+    """Schema for attachment extraction request."""
+
+    attachments: List[AttachmentData]
+    full_description: Optional[str] = None  # Complete job description from posting page
+
+
+class ExtractAttachmentsResponse(BaseModel):
+    """Schema for attachment extraction response."""
+
+    job_id: str
+    attachment_text: str
+    full_description: Optional[str] = None
+    attachment_count: int
+    attachment_metadata: List[AttachmentMetadata]
+    extraction_errors: List[str]

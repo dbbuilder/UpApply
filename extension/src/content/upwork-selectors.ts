@@ -184,6 +184,39 @@ export const SELECTORS = {
     'a[href*="/jobs/"]',
     '[data-test="job-link"]',
   ],
+
+  // View job posting link (on /apply pages)
+  viewJobPostingLink: [
+    '.fe-job-details a[href*="/jobs/~"]',
+    'a[href*="/jobs/~"][class*="up-n-link"]',
+    'a.air3-link[href*="/jobs/~"]',
+    '[data-test="view-posting-link"]',
+    'a[href*="/freelance-jobs/"]',
+  ],
+
+  // Full job posting page selectors (different from /apply page)
+  jobPostingFullDescription: [
+    '[data-test="Description"]',
+    '[data-test="job-description"]',
+    '.cfe-ui-job-description-text',
+    '.job-description .text-body',
+    '.description.text-body-sm',
+    'section.job-description',
+  ],
+
+  // Job posting attachments
+  jobPostingAttachments: [
+    '[data-test="attachments"] a',
+    '.attachments-section a[href]',
+    '.job-attachments a',
+    'a[href*="/attachment/"]',
+    'a[href*="/ab/attachments/"]',
+    '.air3-card-section a[href*="upwork.com"][download]',
+    '.job-details a[href*=".pdf"]',
+    '.job-details a[href*=".doc"]',
+    '.job-details a[href*=".png"]',
+    '.job-details a[href*=".jpg"]',
+  ],
 } as const;
 
 /**

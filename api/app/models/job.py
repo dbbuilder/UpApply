@@ -62,6 +62,12 @@ class Job(Base):
         Vector(settings.embedding_dimensions), nullable=True
     )
 
+    # Full job posting data (from "View job posting" link)
+    full_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    attachment_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    attachment_metadata: Mapped[Optional[List[dict]]] = mapped_column(JSONB, nullable=True)
+    # [{filename, content_type, size, extraction_status, error}]
+
     # Analysis results (cached)
     match_score: Mapped[Optional[float]] = mapped_column(Numeric(5, 2), nullable=True)
     analysis: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
