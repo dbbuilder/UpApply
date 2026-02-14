@@ -1,7 +1,7 @@
 """Add attachment text fields to jobs table.
 
-Revision ID: 005
-Revises: 004
+Revision ID: 005_add_attachment_fields
+Revises: 004_add_screening_answers_and_proposals
 Create Date: 2025-01-13
 """
 from typing import Sequence, Union
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '005'
-down_revision: Union[str, None] = '004'
+revision: str = '005_add_attachment_fields'
+down_revision: Union[str, None] = '004_add_screening_answers_and_proposals'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

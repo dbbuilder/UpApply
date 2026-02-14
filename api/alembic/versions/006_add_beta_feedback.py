@@ -1,7 +1,7 @@
 """Add beta_feedback table for tester feedback collection.
 
-Revision ID: 006
-Revises: 005
+Revision ID: 006_add_beta_feedback
+Revises: 005_add_attachment_fields
 Create Date: 2025-01-13
 """
 from typing import Sequence, Union
@@ -10,8 +10,8 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision: str = '006'
-down_revision: Union[str, None] = '005'
+revision: str = '006_add_beta_feedback'
+down_revision: Union[str, None] = '005_add_attachment_fields'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
