@@ -1,5 +1,8 @@
 # UpApply Project Status
 
+> **Note:** This document has been superseded by the consolidated roadmap at
+> [`docs/ROADMAP-2026-01-13.md`](docs/ROADMAP-2026-01-13.md). Retained for historical reference.
+
 **Last Updated:** January 11, 2026
 **Repository:** https://github.com/dbbuilder/UpApply
 
