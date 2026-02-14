@@ -1,6 +1,6 @@
 """Add screening_answers and proposals tables.
 
-Revision ID: 004_add_screening_answers_and_proposals
+Revision ID: 004_screening_proposals
 Revises: 003_add_preferred_closing
 Create Date: 2026-01-12
 """
@@ -10,7 +10,7 @@ from pgvector.sqlalchemy import Vector
 
 
 # revision identifiers
-revision = '004_add_screening_answers_and_proposals'
+revision = '004_screening_proposals'
 down_revision = '003_add_preferred_closing'
 branch_labels = None
 depends_on = None
