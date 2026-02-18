@@ -18,17 +18,23 @@ export default function MemoriesPage() {
     outcome: '',
   });
   const [newSkill, setNewSkill] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadMemories();
   }, []);
 
   const loadMemories = async () => {
+    setLoading(true);
+    setError(null);
     try {
       const result = await apiClient.getMemories();
       setMemories(result);
-    } catch (error) {
-      console.error('Failed to load memories:', error);
+    } catch (err) {
+      console.error('Failed to load memories:', err);
+      setError(err instanceof TypeError
+        ? 'Server unavailable. Please retry.'
+        : 'Failed to load memories.');
     } finally {
       setLoading(false);
     }
@@ -248,6 +254,15 @@ export default function MemoriesPage() {
         {loading && (
           <div className="text-center py-8">
             <div className="animate-pulse-slow text-gray-500">Loading memories...</div>
+          </div>
+        )}
+
+        {error && !loading && (
+          <div className="card bg-red-50 text-center py-4">
+            <p className="text-sm text-red-700">{error}</p>
+            <button type="button" onClick={loadMemories} className="btn-outline text-sm mt-2">
+              Retry
+            </button>
           </div>
         )}
 

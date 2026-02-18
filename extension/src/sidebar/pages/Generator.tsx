@@ -30,13 +30,20 @@ export default function GeneratorPage() {
     currentJob,
     jobAnalysis,
     analysisLoading,
+    analysisError,
     coverLetter,
     coverLetterLoading,
+    coverLetterError,
+    savedJobId,
+    applicationId,
     setCurrentView,
     analyzeCurrentJob,
     generateCoverLetter,
+    regenerateCoverLetter,
     fillCoverLetter,
     fillScreeningQuestion,
+    saveCurrentJob,
+    createApplication,
     logout,
   } = useAppStore();
 
@@ -49,7 +56,16 @@ export default function GeneratorPage() {
   const [fetchingFullJob, setFetchingFullJob] = useState(false);
   const [fullJobFetched, setFullJobFetched] = useState(false);
   const [attachmentCount, setAttachmentCount] = useState(0);
+  const [attachmentStatuses, setAttachmentStatuses] = useState<string[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // State for regeneration feedback
+  const [showFeedbackInput, setShowFeedbackInput] = useState(false);
+  const [feedbackText, setFeedbackText] = useState('');
+
+  // State for application tracking
+  const [showAppliedPrompt, setShowAppliedPrompt] = useState(false);
+  const [markingApplied, setMarkingApplied] = useState(false);
 
   useEffect(() => {
     // Request current job data from stored cache first
@@ -93,10 +109,35 @@ export default function GeneratorPage() {
     generateCoverLetter();
   };
 
+  const handleRegenerate = () => {
+    if (showFeedbackInput && feedbackText.trim()) {
+      regenerateCoverLetter(feedbackText.trim());
+      setFeedbackText('');
+      setShowFeedbackInput(false);
+    } else {
+      setShowFeedbackInput(true);
+    }
+  };
+
+  const handleRegenerateFresh = () => {
+    setShowFeedbackInput(false);
+    setFeedbackText('');
+    generateCoverLetter();
+  };
+
   const handleFill = async () => {
     const success = await fillCoverLetter();
     if (success) {
-      // Show success feedback
+      setShowAppliedPrompt(true);
+    }
+  };
+
+  const handleMarkAsApplied = async () => {
+    setMarkingApplied(true);
+    const success = await createApplication();
+    setMarkingApplied(false);
+    if (success) {
+      setShowAppliedPrompt(false);
     }
   };
 
@@ -232,6 +273,7 @@ export default function GeneratorPage() {
   const handleFetchFullJob = async () => {
     setFetchingFullJob(true);
     setFetchError(null);
+    setAttachmentStatuses([]);
 
     try {
       // First, get the "View job posting" link from the current page
@@ -263,12 +305,22 @@ export default function GeneratorPage() {
       const { fullDescription, attachments } = extractResponse.data;
       console.log('UpApply: Extracted', attachments.length, 'attachments');
 
-      // If there are attachments, download and send to backend
-      if (attachments.length > 0 && jobAnalysis) {
+      // Save the job to get a job_id for attachment extraction
+      let jobId = savedJobId;
+      if (!jobId) {
+        jobId = await saveCurrentJob();
+      }
+
+      // If there are attachments and we have a job_id, download and send to backend
+      if (attachments.length > 0 && jobId) {
         const attachmentData: AttachmentData[] = [];
+        const statuses: string[] = [];
 
         for (const att of attachments) {
           try {
+            statuses.push(`Downloading ${att.filename}...`);
+            setAttachmentStatuses([...statuses]);
+
             const downloadResponse = await new Promise<{
               success: boolean;
               data?: string;
@@ -284,19 +336,27 @@ export default function GeneratorPage() {
                 filename: att.filename,
                 content_type: downloadResponse.contentType || att.contentType,
               });
+              statuses[statuses.length - 1] = `Downloaded ${att.filename}`;
+            } else {
+              statuses[statuses.length - 1] = `Failed: ${att.filename}`;
             }
+            setAttachmentStatuses([...statuses]);
           } catch (err) {
             console.error('Failed to download attachment:', att.filename, err);
+            statuses[statuses.length - 1] = `Error: ${att.filename}`;
+            setAttachmentStatuses([...statuses]);
           }
         }
 
         // Send to backend for text extraction
         if (attachmentData.length > 0) {
           try {
-            // We need a job ID - if we don't have one, we can't save yet
-            // For now, just log that we have attachments
-            console.log('UpApply: Downloaded', attachmentData.length, 'attachments for text extraction');
-            setAttachmentCount(attachmentData.length);
+            const extractResult = await apiClient.extractJobAttachments(
+              jobId,
+              attachmentData,
+              fullDescription || undefined,
+            );
+            console.log('UpApply: Extracted text from', extractResult.attachment_count, 'attachments');
           } catch (err) {
             console.error('Failed to extract attachment text:', err);
           }
@@ -334,6 +394,13 @@ export default function GeneratorPage() {
           </button>
           <button
             type="button"
+            onClick={() => setCurrentView('history')}
+            className="text-gray-600 hover:text-gray-900 text-sm"
+          >
+            History
+          </button>
+          <button
+            type="button"
             onClick={() => setCurrentView('analytics')}
             className="text-gray-600 hover:text-gray-900 text-sm"
           >
@@ -361,7 +428,7 @@ export default function GeneratorPage() {
       <div className="flex-1 overflow-auto p-4 space-y-4">
         {!currentJob || !currentJob.title ? (
           <div className="card text-center py-8">
-            <div className="text-gray-400 text-4xl mb-3">💼</div>
+            <div className="text-gray-400 text-4xl mb-3">&#128188;</div>
             <h3 className="font-medium text-gray-900">No Job Detected</h3>
             <p className="text-sm text-gray-500 mt-1">
               Navigate to an Upwork job page to get started
@@ -404,23 +471,30 @@ export default function GeneratorPage() {
                   >
                     {fetchingFullJob ? (
                       <>
-                        <span className="animate-spin">⏳</span>
+                        <span className="animate-spin">&#9203;</span>
                         Fetching full job details...
                       </>
                     ) : (
                       <>
-                        📄 Fetch full job posting & attachments
+                        &#128196; Fetch full job posting & attachments
                       </>
                     )}
                   </button>
                 ) : (
                   <div className="text-sm text-gray-500 flex items-center gap-1">
-                    ✓ Full job loaded
+                    &#10003; Full job loaded
                     {attachmentCount > 0 && (
                       <span className="text-emerald-600">
                         ({attachmentCount} attachment{attachmentCount !== 1 ? 's' : ''})
                       </span>
                     )}
+                  </div>
+                )}
+                {fetchingFullJob && attachmentStatuses.length > 0 && (
+                  <div className="mt-2 text-xs text-gray-500 space-y-1">
+                    {attachmentStatuses.map((status, i) => (
+                      <p key={i}>{status}</p>
+                    ))}
                   </div>
                 )}
                 {fetchError && (
@@ -429,8 +503,23 @@ export default function GeneratorPage() {
               </div>
             </div>
 
+            {/* Analysis Error */}
+            {analysisError && (
+              <div className="card bg-red-50 border-red-200">
+                <h4 className="font-medium text-red-800 mb-1">Analysis Failed</h4>
+                <p className="text-sm text-red-700">{analysisError}</p>
+                <button
+                  type="button"
+                  onClick={handleAnalyze}
+                  className="btn-outline text-sm mt-2"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
             {/* Analysis */}
-            {!jobAnalysis && !analysisLoading && (
+            {!jobAnalysis && !analysisLoading && !analysisError && (
               <button
                 type="button"
                 onClick={handleAnalyze}
@@ -461,7 +550,7 @@ export default function GeneratorPage() {
                     <h5 className="text-sm font-medium text-red-800 mb-1">Warnings</h5>
                     <ul className="text-sm text-red-700 space-y-1">
                       {jobAnalysis.deal_breaker_warnings.map((warning, i) => (
-                        <li key={i}>• {warning}</li>
+                        <li key={i}>&#8226; {warning}</li>
                       ))}
                     </ul>
                   </div>
@@ -474,7 +563,7 @@ export default function GeneratorPage() {
                     <ul className="text-sm text-gray-600 space-y-1">
                       {jobAnalysis.strengths.map((strength, i) => (
                         <li key={i} className="text-green-600">
-                          ✓ {strength}
+                          &#10003; {strength}
                         </li>
                       ))}
                     </ul>
@@ -530,8 +619,23 @@ export default function GeneratorPage() {
               </div>
             )}
 
+            {/* Cover Letter Error */}
+            {coverLetterError && (
+              <div className="card bg-red-50 border-red-200">
+                <h4 className="font-medium text-red-800 mb-1">Generation Failed</h4>
+                <p className="text-sm text-red-700">{coverLetterError}</p>
+                <button
+                  type="button"
+                  onClick={handleGenerate}
+                  className="btn-outline text-sm mt-2"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
             {/* Generate button */}
-            {jobAnalysis && !coverLetter && !coverLetterLoading && (
+            {jobAnalysis && !coverLetter && !coverLetterLoading && !coverLetterError && (
               <button
                 type="button"
                 onClick={handleGenerate}
@@ -572,13 +676,44 @@ export default function GeneratorPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={handleGenerate}
+                      onClick={handleRegenerate}
                       className="text-gray-500 hover:text-gray-700 text-sm"
                     >
-                      Regenerate
+                      {showFeedbackInput ? 'Submit' : 'Regenerate'}
                     </button>
+                    {showFeedbackInput && (
+                      <button
+                        type="button"
+                        onClick={handleRegenerateFresh}
+                        className="text-gray-400 hover:text-gray-600 text-sm"
+                      >
+                        Fresh
+                      </button>
+                    )}
                   </div>
                 </div>
+
+                {/* Feedback input for regeneration */}
+                {showFeedbackInput && (
+                  <div className="mb-3">
+                    <input
+                      type="text"
+                      value={feedbackText}
+                      onChange={(e) => setFeedbackText(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && feedbackText.trim() && handleRegenerate()}
+                      placeholder="What should be different? (e.g., more technical, shorter...)"
+                      className="input text-sm"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => { setShowFeedbackInput(false); setFeedbackText(''); }}
+                      className="text-xs text-gray-400 mt-1"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
 
                 <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-700 whitespace-pre-wrap max-h-[300px] overflow-auto">
                   {coverLetter}
@@ -591,6 +726,36 @@ export default function GeneratorPage() {
                 >
                   Fill in Upwork Form
                 </button>
+
+                {/* Mark as Applied prompt */}
+                {showAppliedPrompt && !applicationId && (
+                  <div className="mt-3 p-3 bg-blue-50 rounded-lg">
+                    <p className="text-sm text-blue-800 mb-2">Form filled! Did you submit the proposal?</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleMarkAsApplied}
+                        disabled={markingApplied}
+                        className="btn-primary text-sm flex-1"
+                      >
+                        {markingApplied ? 'Saving...' : 'Yes, Mark as Applied'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowAppliedPrompt(false)}
+                        className="btn-outline text-sm flex-1"
+                      >
+                        Not Yet
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {applicationId && (
+                  <div className="mt-3 p-2 bg-green-50 rounded-lg text-sm text-green-700 text-center">
+                    &#10003; Application tracked
+                  </div>
+                )}
               </div>
             )}
 

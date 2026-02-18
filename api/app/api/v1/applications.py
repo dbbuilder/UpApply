@@ -1,5 +1,5 @@
 """Application endpoints for tracking job applications."""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -224,7 +224,7 @@ async def update_application(
 
     # Track submission time
     if update_data.status == ApplicationStatus.SUBMITTED and not application.submitted_at:
-        application.submitted_at = datetime.utcnow()
+        application.submitted_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(application)
@@ -257,7 +257,7 @@ async def record_outcome(
     application.status = outcome.status
     application.outcome_notes = outcome.outcome_notes
     application.client_response = outcome.client_response
-    application.outcome_recorded_at = datetime.utcnow()
+    application.outcome_recorded_at = datetime.now(timezone.utc)
 
     if outcome.earnings:
         application.earnings = outcome.earnings
@@ -268,7 +268,7 @@ async def record_outcome(
         ApplicationStatus.INTERVIEWED,
         ApplicationStatus.HIRED,
     ] and not application.responded_at:
-        application.responded_at = datetime.utcnow()
+        application.responded_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(application)

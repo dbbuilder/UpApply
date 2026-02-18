@@ -1,17 +1,36 @@
 """FastAPI application entry point."""
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+import sentry_sdk
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
 from app.core.database import init_db, check_db_connection
+from app.core.rate_limit import limiter
 from app.api.v1 import router as api_v1_router
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
+    # Initialize Sentry if DSN is configured
+    sentry_dsn = getattr(settings, "sentry_dsn", None) or ""
+    if sentry_dsn:
+        sentry_sdk.init(
+            dsn=sentry_dsn,
+            environment=settings.environment,
+            traces_sample_rate=0.1,
+            send_default_pii=False,
+        )
+        logger.info("Sentry initialized for environment: %s", settings.environment)
+
     # Startup
     await init_db()
     yield
@@ -24,6 +43,10 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS middleware - allow all origins for Chrome extension compatibility
 app.add_middleware(

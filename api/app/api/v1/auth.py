@@ -2,7 +2,7 @@
 import logging
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,13 +16,15 @@ from app.core.security import (
 from app.core.config import settings
 from app.models.user import User, UserProfile
 from app.schemas.auth import UserRegister, UserLogin, Token, UserResponse
+from app.core.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
+@limiter.limit("3/minute")
+async def register(request: Request, user_data: UserRegister, db: AsyncSession = Depends(get_db)):
     """Register a new user."""
     try:
         # Check if email already exists
@@ -64,12 +66,13 @@ async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
         logger.exception(f"Registration error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Registration failed: {str(e)}",
+            detail="Registration failed. Please try again.",
         )
 
 
 @router.post("/login", response_model=Token)
-async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def login(request: Request, user_data: UserLogin, db: AsyncSession = Depends(get_db)):
     """Login and get access token."""
     # Find user
     result = await db.execute(select(User).where(User.email == user_data.email))

@@ -6,17 +6,23 @@ export default function AnalyticsPage() {
   const { setCurrentView } = useAppStore();
   const [dashboard, setDashboard] = useState<AnalyticsDashboard | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadDashboard();
   }, []);
 
   const loadDashboard = async () => {
+    setLoading(true);
+    setError(null);
     try {
       const data = await apiClient.getAnalyticsDashboard();
       setDashboard(data);
-    } catch (error) {
-      console.error('Failed to load dashboard:', error);
+    } catch (err) {
+      console.error('Failed to load dashboard:', err);
+      setError(err instanceof TypeError
+        ? 'Server unavailable. Please retry.'
+        : 'Failed to load analytics.');
     } finally {
       setLoading(false);
     }
@@ -51,7 +57,7 @@ export default function AnalyticsPage() {
           onClick={() => setCurrentView('generator')}
           className="text-gray-600 hover:text-gray-900"
         >
-          ← Back
+          &larr; Back
         </button>
         <h1 className="font-bold text-gray-900">Analytics</h1>
         <div className="w-12" />
@@ -65,7 +71,16 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        {!loading && !dashboard && (
+        {error && !loading && (
+          <div className="card bg-red-50 text-center py-4">
+            <p className="text-sm text-red-700">{error}</p>
+            <button type="button" onClick={loadDashboard} className="btn-outline text-sm mt-2">
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!loading && !error && !dashboard && (
           <div className="text-center py-8 text-gray-500">
             <p>Unable to load analytics.</p>
           </div>

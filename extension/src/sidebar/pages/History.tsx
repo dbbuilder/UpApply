@@ -7,12 +7,15 @@ export default function HistoryPage() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [jobs, setJobs] = useState<Record<string, Job>>({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
   }, []);
 
   const loadData = async () => {
+    setLoading(true);
+    setError(null);
     try {
       const [appsResult, jobsResult] = await Promise.all([
         apiClient.getApplications(),
@@ -25,10 +28,24 @@ export default function HistoryPage() {
         jobsMap[job.id] = job;
       });
       setJobs(jobsMap);
-    } catch (error) {
-      console.error('Failed to load data:', error);
+    } catch (err) {
+      console.error('Failed to load data:', err);
+      setError(err instanceof TypeError
+        ? 'Server unavailable. Please retry.'
+        : 'Failed to load history.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOutcomeChange = async (appId: string, newStatus: string) => {
+    try {
+      await apiClient.updateApplicationOutcome(appId, { status: newStatus });
+      setApplications(prev =>
+        prev.map(app => app.id === appId ? { ...app, status: newStatus } : app)
+      );
+    } catch (err) {
+      console.error('Failed to update outcome:', err);
     }
   };
 
@@ -67,7 +84,7 @@ export default function HistoryPage() {
           onClick={() => setCurrentView('generator')}
           className="text-gray-600 hover:text-gray-900"
         >
-          ← Back
+          &larr; Back
         </button>
         <h1 className="font-bold text-gray-900">Application History</h1>
         <div className="w-12" />
@@ -81,10 +98,21 @@ export default function HistoryPage() {
           </div>
         )}
 
-        {!loading && applications.length === 0 && (
+        {error && !loading && (
+          <div className="card bg-red-50 text-center py-4">
+            <p className="text-sm text-red-700">{error}</p>
+            <button type="button" onClick={loadData} className="btn-outline text-sm mt-2">
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!loading && !error && applications.length === 0 && (
           <div className="text-center py-8 text-gray-500">
             <p>No applications yet.</p>
-            <p className="text-sm mt-1">Your submitted applications will appear here.</p>
+            <p className="text-sm mt-1">
+              Generate a cover letter, fill the Upwork form, and mark it as applied to start tracking.
+            </p>
           </div>
         )}
 
@@ -127,6 +155,24 @@ export default function HistoryPage() {
                     <span className="font-medium">Client:</span> {app.client_response}
                   </div>
                 )}
+
+                {/* Outcome selector */}
+                <div className="mt-3 pt-2 border-t border-gray-100">
+                  <label className="text-xs text-gray-500 block mb-1">Update outcome:</label>
+                  <select
+                    value={app.status}
+                    onChange={(e) => handleOutcomeChange(app.id, e.target.value)}
+                    className="input text-sm py-1"
+                  >
+                    <option value="submitted">Submitted</option>
+                    <option value="viewed">Viewed</option>
+                    <option value="responded">Responded</option>
+                    <option value="interviewed">Interviewed</option>
+                    <option value="hired">Hired</option>
+                    <option value="declined">Declined</option>
+                    <option value="no_response">No Response</option>
+                  </select>
+                </div>
               </div>
             );
           })}

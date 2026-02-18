@@ -2,26 +2,10 @@
  * Background service worker for UpApply extension.
  * Handles communication between content scripts and sidebar.
  */
+import type { JobData } from '../types';
 
 // Store current job data for sidebar access
 let currentJobData: JobData | null = null;
-
-interface JobData {
-  url: string;
-  title: string | null;
-  description: string | null;
-  budgetType: string | null;
-  budgetAmount: string | null;
-  skills: string[];
-  experienceLevel: string | null;
-  projectLength: string | null;
-  clientInfo: {
-    rating: string | null;
-    location: string | null;
-    totalSpent: string | null;
-    hireRate: string | null;
-  };
-}
 
 // Listen for messages from content script and sidebar
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

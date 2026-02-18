@@ -1,5 +1,5 @@
 """Feedback and analytics endpoints."""
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from collections import defaultdict
 
@@ -171,7 +171,7 @@ async def get_analytics_dashboard(
 
     # Weekly application trend (last 8 weeks)
     weekly_applications = []
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     for weeks_ago in range(7, -1, -1):
         week_start = now - timedelta(weeks=weeks_ago + 1)
         week_end = now - timedelta(weeks=weeks_ago)

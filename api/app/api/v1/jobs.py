@@ -1,5 +1,5 @@
 """Job and cover letter endpoints."""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -29,10 +29,7 @@ from app.services.job_analysis import (
     analyze_skill_match,
     find_relevant_memories,
     find_relevant_proposals,
-    check_deal_breakers,
-    generate_strengths_and_concerns,
-    calculate_match_score,
-    generate_recommendation,
+    run_full_analysis,
 )
 from app.services.cover_letter import (
     generate_cover_letter,
@@ -73,58 +70,25 @@ async def analyze_job(
     job_skills = request.skills_required or []
     client_info = request.client_info.model_dump() if request.client_info else None
 
-    # Analyze skill match
-    skill_matches, missing_skills = await analyze_skill_match(job_skills, profile)
-
-    # Find relevant memories
-    relevant_memories = await find_relevant_memories(
+    result = await run_full_analysis(
         db=db,
         user_id=current_user.id,
-        job_description=request.description,
-        job_skills=job_skills,
-        limit=5,
-    )
-
-    # Check deal breakers
-    deal_breakers = check_deal_breakers(
+        profile=profile,
         job_description=request.description,
         job_skills=job_skills,
         budget_amount=request.budget_amount,
-        budget_min=None,  # Not in analysis request
         client_info=client_info,
-        profile=profile,
     )
-
-    # Generate strengths and concerns
-    strengths, concerns = generate_strengths_and_concerns(
-        skill_matches=skill_matches,
-        missing_skills=missing_skills,
-        relevant_memories=relevant_memories,
-        profile=profile,
-        budget_amount=request.budget_amount,
-    )
-
-    # Calculate match score
-    match_score = calculate_match_score(
-        skill_matches=skill_matches,
-        missing_skills=missing_skills,
-        relevant_memories=relevant_memories,
-        deal_breakers=deal_breakers,
-        profile=profile,
-    )
-
-    # Generate recommendation
-    recommendation = generate_recommendation(match_score, deal_breakers, concerns)
 
     return JobAnalysisResponse(
-        match_score=match_score,
-        skill_matches=skill_matches,
-        missing_skills=missing_skills,
-        strengths=strengths,
-        concerns=concerns,
-        deal_breaker_warnings=deal_breakers,
-        relevant_memories=relevant_memories,
-        recommendation=recommendation,
+        match_score=result.match_score,
+        skill_matches=result.skill_matches,
+        missing_skills=result.missing_skills,
+        strengths=result.strengths,
+        concerns=result.concerns,
+        deal_breaker_warnings=result.deal_breaker_warnings,
+        relevant_memories=result.relevant_memories,
+        recommendation=result.recommendation,
     )
 
 
@@ -158,53 +122,27 @@ async def create_job(
         job_text += f"\nSkills: {', '.join(job_skills)}"
     embedding = await generate_embedding(job_text)
 
-    # Analyze the job
-    skill_matches, missing_skills = await analyze_skill_match(job_skills, profile)
-
-    relevant_memories = await find_relevant_memories(
+    # Run full analysis
+    result = await run_full_analysis(
         db=db,
         user_id=current_user.id,
-        job_description=job_data.description,
-        job_skills=job_skills,
-        limit=5,
-    )
-
-    deal_breakers = check_deal_breakers(
+        profile=profile,
         job_description=job_data.description,
         job_skills=job_skills,
         budget_amount=job_data.budget_amount,
         budget_min=job_data.budget_min,
         client_info=client_info,
-        profile=profile,
     )
-
-    strengths, concerns = generate_strengths_and_concerns(
-        skill_matches=skill_matches,
-        missing_skills=missing_skills,
-        relevant_memories=relevant_memories,
-        profile=profile,
-        budget_amount=job_data.budget_amount,
-    )
-
-    match_score = calculate_match_score(
-        skill_matches=skill_matches,
-        missing_skills=missing_skills,
-        relevant_memories=relevant_memories,
-        deal_breakers=deal_breakers,
-        profile=profile,
-    )
-
-    recommendation = generate_recommendation(match_score, deal_breakers, concerns)
 
     # Build analysis dict
     analysis = {
-        "skill_matches": [m.model_dump() for m in skill_matches],
-        "missing_skills": missing_skills,
-        "strengths": strengths,
-        "concerns": concerns,
-        "deal_breaker_warnings": deal_breakers,
-        "relevant_memory_ids": [m["id"] for m in relevant_memories],
-        "recommendation": recommendation,
+        "skill_matches": [m.model_dump() for m in result.skill_matches],
+        "missing_skills": result.missing_skills,
+        "strengths": result.strengths,
+        "concerns": result.concerns,
+        "deal_breaker_warnings": result.deal_breaker_warnings,
+        "relevant_memory_ids": [m["id"] for m in result.relevant_memories],
+        "recommendation": result.recommendation,
     }
 
     # Create job
@@ -223,9 +161,9 @@ async def create_job(
         project_length=job_data.project_length,
         client_info=client_info,
         posted_date=job_data.posted_date,
-        scraped_at=datetime.utcnow(),
+        scraped_at=datetime.now(timezone.utc),
         embedding=embedding,
-        match_score=match_score,
+        match_score=result.match_score,
         analysis=analysis,
     )
 
@@ -301,54 +239,27 @@ async def get_job_match(
     # Get fresh analysis
     profile = await get_user_profile(current_user, db)
     job_skills = job.skills_required or []
-    client_info = job.client_info
 
-    skill_matches, missing_skills = await analyze_skill_match(job_skills, profile)
-
-    relevant_memories = await find_relevant_memories(
+    result = await run_full_analysis(
         db=db,
         user_id=current_user.id,
-        job_description=job.description,
-        job_skills=job_skills,
-        limit=5,
-    )
-
-    deal_breakers = check_deal_breakers(
+        profile=profile,
         job_description=job.description,
         job_skills=job_skills,
         budget_amount=job.budget_amount,
         budget_min=job.budget_min,
-        client_info=client_info,
-        profile=profile,
+        client_info=job.client_info,
     )
-
-    strengths, concerns = generate_strengths_and_concerns(
-        skill_matches=skill_matches,
-        missing_skills=missing_skills,
-        relevant_memories=relevant_memories,
-        profile=profile,
-        budget_amount=job.budget_amount,
-    )
-
-    match_score = calculate_match_score(
-        skill_matches=skill_matches,
-        missing_skills=missing_skills,
-        relevant_memories=relevant_memories,
-        deal_breakers=deal_breakers,
-        profile=profile,
-    )
-
-    recommendation = generate_recommendation(match_score, deal_breakers, concerns)
 
     return JobAnalysisResponse(
-        match_score=match_score,
-        skill_matches=skill_matches,
-        missing_skills=missing_skills,
-        strengths=strengths,
-        concerns=concerns,
-        deal_breaker_warnings=deal_breakers,
-        relevant_memories=relevant_memories,
-        recommendation=recommendation,
+        match_score=result.match_score,
+        skill_matches=result.skill_matches,
+        missing_skills=result.missing_skills,
+        strengths=result.strengths,
+        concerns=result.concerns,
+        deal_breaker_warnings=result.deal_breaker_warnings,
+        relevant_memories=result.relevant_memories,
+        recommendation=result.recommendation,
     )
 
 
@@ -413,46 +324,26 @@ async def generate_cover_letter_endpoint(
             job_text += f"\nSkills: {', '.join(job_skills)}"
         embedding = await generate_embedding(job_text)
 
-        # Analyze
-        skill_matches, missing_skills = await analyze_skill_match(job_skills, profile)
-        relevant_memories = await find_relevant_memories(
+        # Run full analysis
+        ar = await run_full_analysis(
             db=db,
             user_id=current_user.id,
-            job_description=job_data.description,
-            job_skills=job_skills,
-            limit=5,
-        )
-        deal_breakers = check_deal_breakers(
+            profile=profile,
             job_description=job_data.description,
             job_skills=job_skills,
             budget_amount=job_data.budget_amount,
             budget_min=job_data.budget_min,
             client_info=client_info,
-            profile=profile,
-        )
-        strengths, concerns = generate_strengths_and_concerns(
-            skill_matches=skill_matches,
-            missing_skills=missing_skills,
-            relevant_memories=relevant_memories,
-            profile=profile,
-            budget_amount=job_data.budget_amount,
-        )
-        match_score = calculate_match_score(
-            skill_matches=skill_matches,
-            missing_skills=missing_skills,
-            relevant_memories=relevant_memories,
-            deal_breakers=deal_breakers,
-            profile=profile,
         )
 
         analysis = {
-            "skill_matches": [m.model_dump() for m in skill_matches],
-            "missing_skills": missing_skills,
-            "strengths": strengths,
-            "concerns": concerns,
-            "deal_breaker_warnings": deal_breakers,
-            "relevant_memory_ids": [m["id"] for m in relevant_memories],
-            "recommendation": generate_recommendation(match_score, deal_breakers, concerns),
+            "skill_matches": [m.model_dump() for m in ar.skill_matches],
+            "missing_skills": ar.missing_skills,
+            "strengths": ar.strengths,
+            "concerns": ar.concerns,
+            "deal_breaker_warnings": ar.deal_breaker_warnings,
+            "relevant_memory_ids": [m["id"] for m in ar.relevant_memories],
+            "recommendation": ar.recommendation,
         }
 
         job = Job(
@@ -470,9 +361,9 @@ async def generate_cover_letter_endpoint(
             project_length=job_data.project_length,
             client_info=client_info,
             posted_date=job_data.posted_date,
-            scraped_at=datetime.utcnow(),
+            scraped_at=datetime.now(timezone.utc),
             embedding=embedding,
-            match_score=match_score,
+            match_score=ar.match_score,
             analysis=analysis,
         )
         db.add(job)

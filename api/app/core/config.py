@@ -53,6 +53,9 @@ class Settings(BaseSettings):
                 return [origin.strip() for origin in v.split(",")]
         return v
 
+    # Monitoring
+    sentry_dsn: str = ""
+
     # AI
     openai_api_key: str = ""
     default_model: str = "gpt-4o-mini"
@@ -63,6 +66,18 @@ class Settings(BaseSettings):
     secret_key: str = "dev-secret-key-change-in-production"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
+
+    @field_validator("secret_key", mode="after")
+    @classmethod
+    def check_secret_key_in_production(cls, v: str, info) -> str:
+        """Prevent default secret key in production."""
+        env = info.data.get("environment", "development")
+        if env == "production" and v == "dev-secret-key-change-in-production":
+            raise ValueError(
+                "SECRET_KEY must be changed from default in production. "
+                "Set the SECRET_KEY environment variable."
+            )
+        return v
 
     @property
     def is_production(self) -> bool:

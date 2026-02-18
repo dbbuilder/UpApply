@@ -1,4 +1,5 @@
 """Job analysis and matching service."""
+from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +8,19 @@ from app.core.embeddings import generate_embedding
 from app.models.user import UserProfile
 from app.models.memory import Memory
 from app.schemas.job import SkillMatch
+
+
+@dataclass
+class AnalysisResult:
+    """Complete job analysis result."""
+    match_score: float
+    skill_matches: List[SkillMatch]
+    missing_skills: List[str]
+    strengths: List[str]
+    concerns: List[str]
+    deal_breaker_warnings: List[str]
+    relevant_memories: List[Dict]
+    recommendation: str
 
 
 # Skill synonyms for fuzzy matching
@@ -332,6 +346,66 @@ def generate_recommendation(
         return "Moderate match - apply if interested in the project"
     else:
         return "Lower match - may require additional skills demonstration"
+
+
+async def run_full_analysis(
+    db: AsyncSession,
+    user_id: str,
+    profile: UserProfile,
+    job_description: str,
+    job_skills: List[str],
+    budget_amount: Optional[str] = None,
+    budget_min: Optional[float] = None,
+    client_info: Optional[Dict] = None,
+) -> AnalysisResult:
+    """Run complete job analysis pipeline and return consolidated result."""
+    skill_matches, missing_skills = await analyze_skill_match(job_skills, profile)
+
+    relevant_memories = await find_relevant_memories(
+        db=db,
+        user_id=user_id,
+        job_description=job_description,
+        job_skills=job_skills,
+        limit=5,
+    )
+
+    deal_breakers = check_deal_breakers(
+        job_description=job_description,
+        job_skills=job_skills,
+        budget_amount=budget_amount,
+        budget_min=budget_min,
+        client_info=client_info,
+        profile=profile,
+    )
+
+    strengths, concerns = generate_strengths_and_concerns(
+        skill_matches=skill_matches,
+        missing_skills=missing_skills,
+        relevant_memories=relevant_memories,
+        profile=profile,
+        budget_amount=budget_amount,
+    )
+
+    match_score = calculate_match_score(
+        skill_matches=skill_matches,
+        missing_skills=missing_skills,
+        relevant_memories=relevant_memories,
+        deal_breakers=deal_breakers,
+        profile=profile,
+    )
+
+    recommendation = generate_recommendation(match_score, deal_breakers, concerns)
+
+    return AnalysisResult(
+        match_score=match_score,
+        skill_matches=skill_matches,
+        missing_skills=missing_skills,
+        strengths=strengths,
+        concerns=concerns,
+        deal_breaker_warnings=deal_breakers,
+        relevant_memories=relevant_memories,
+        recommendation=recommendation,
+    )
 
 
 async def find_relevant_proposals(

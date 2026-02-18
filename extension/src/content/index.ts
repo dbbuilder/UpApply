@@ -9,51 +9,7 @@ import {
   querySelector,
   querySelectorAll,
 } from './upwork-selectors';
-
-interface ScreeningQuestion {
-  question: string;
-  inputSelector: string;  // CSS selector to find/fill the input
-}
-
-interface JobData {
-  url: string;
-  title: string | null;
-  description: string | null;
-  budgetType: string | null;
-  budgetAmount: string | null;
-  skills: string[];
-  experienceLevel: string | null;
-  projectLength: string | null;
-  screeningQuestions: ScreeningQuestion[];
-  clientInfo: {
-    rating: string | null;
-    location: string | null;
-    totalSpent: string | null;
-    hireRate: string | null;
-  };
-}
-
-interface ScrapedProposal {
-  proposalId: string | null;
-  jobTitle: string | null;
-  jobUrl: string | null;
-  coverLetter: string | null;
-  bidAmount: number | null;
-  bidType: string | null;
-  status: string | null;
-  submittedAt: string | null;
-}
-
-interface AttachmentInfo {
-  url: string;
-  filename: string;
-  contentType: string;
-}
-
-interface JobPostingData {
-  fullDescription: string | null;
-  attachments: AttachmentInfo[];
-}
+import type { ScreeningQuestion, JobData, ScrapedProposal, AttachmentInfo, JobPostingData } from '../types';
 
 /**
  * Extract screening questions from the page.

@@ -1,12 +1,12 @@
 """Beta feedback endpoints for tester feedback collection."""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user_optional
+from app.core.security import get_current_user, get_current_user_optional
 from app.models.user import User
 from app.models.beta_feedback import BetaFeedback
 from app.schemas.beta_feedback import (
@@ -14,12 +14,15 @@ from app.schemas.beta_feedback import (
     BetaFeedbackResponse,
     BetaFeedbackList,
 )
+from app.core.rate_limit import limiter
 
 router = APIRouter()
 
 
 @router.post("", response_model=BetaFeedbackResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/hour")
 async def submit_beta_feedback(
+    request: Request,
     feedback_data: BetaFeedbackCreate,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
@@ -52,13 +55,10 @@ async def list_beta_feedback(
     feedback_type: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    List beta feedback (for review purposes).
-
-    In production, this should be protected or removed.
-    """
+    """List beta feedback (requires authentication)."""
     query = select(BetaFeedback)
 
     if feedback_type:

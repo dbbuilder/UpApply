@@ -2,30 +2,8 @@
  * Zustand store for sidebar state management.
  */
 import { create } from 'zustand';
-import { apiClient, Profile, JobAnalysisResponse } from '../lib/api-client';
-
-interface ScreeningQuestion {
-  question: string;
-  inputSelector: string;
-}
-
-interface JobData {
-  url: string;
-  title: string | null;
-  description: string | null;
-  budgetType: string | null;
-  budgetAmount: string | null;
-  skills: string[];
-  experienceLevel: string | null;
-  projectLength: string | null;
-  screeningQuestions?: ScreeningQuestion[];
-  clientInfo: {
-    rating: string | null;
-    location: string | null;
-    totalSpent: string | null;
-    hireRate: string | null;
-  };
-}
+import { apiClient, Profile, JobAnalysisResponse, ApplicationOutcome } from '../lib/api-client';
+import type { JobData } from '../types';
 
 interface User {
   id: string;
@@ -47,10 +25,17 @@ interface AppState {
   currentJob: JobData | null;
   jobAnalysis: JobAnalysisResponse | null;
   analysisLoading: boolean;
+  analysisError: string | null;
 
   // Generated cover letter
   coverLetter: string | null;
+  coverLetterId: string | null;
   coverLetterLoading: boolean;
+  coverLetterError: string | null;
+
+  // Job tracking
+  savedJobId: string | null;
+  applicationId: string | null;
 
   // UI
   currentView: 'auth' | 'setup' | 'generator' | 'memories' | 'history' | 'analytics' | 'feedback';
@@ -74,8 +59,12 @@ interface AppState {
   loadProfile: () => Promise<void>;
   analyzeCurrentJob: () => Promise<void>;
   generateCoverLetter: () => Promise<void>;
+  regenerateCoverLetter: (feedback?: string) => Promise<void>;
   fillCoverLetter: () => Promise<boolean>;
   fillScreeningQuestion: (selector: string, answer: string) => Promise<boolean>;
+  saveCurrentJob: () => Promise<string | null>;
+  createApplication: (bidAmount?: number) => Promise<boolean>;
+  updateApplicationOutcome: (id: string, data: ApplicationOutcome) => Promise<boolean>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -88,8 +77,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentJob: null,
   jobAnalysis: null,
   analysisLoading: false,
+  analysisError: null,
   coverLetter: null,
+  coverLetterId: null,
   coverLetterLoading: false,
+  coverLetterError: null,
+  savedJobId: null,
+  applicationId: null,
   currentView: 'auth',
   setupStep: 1,
 
@@ -101,7 +95,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { currentJob } = get();
     // Only reset analysis/letter if it's a different job (different URL)
     if (currentJob?.url !== job?.url) {
-      set({ currentJob: job, jobAnalysis: null, coverLetter: null });
+      set({
+        currentJob: job,
+        jobAnalysis: null,
+        coverLetter: null,
+        coverLetterId: null,
+        savedJobId: null,
+        applicationId: null,
+        analysisError: null,
+        coverLetterError: null,
+      });
     } else {
       // Same job, just update the data without resetting generated content
       set({ currentJob: job });
@@ -182,6 +185,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       currentJob: null,
       jobAnalysis: null,
       coverLetter: null,
+      coverLetterId: null,
+      savedJobId: null,
+      applicationId: null,
+      analysisError: null,
+      coverLetterError: null,
       currentView: 'auth',
     });
   },
@@ -208,7 +216,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
-    set({ analysisLoading: true });
+    set({ analysisLoading: true, analysisError: null });
     try {
       const analysis = await apiClient.analyzeJob({
         title: currentJob.title,
@@ -226,7 +234,33 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ jobAnalysis: analysis, analysisLoading: false });
     } catch (error) {
       console.error('Analysis error:', error);
-      set({ analysisLoading: false });
+      const message = error instanceof TypeError
+        ? 'Server unavailable. The API may be starting up (Render cold start can take ~30s). Please retry.'
+        : error instanceof Error ? error.message : 'Analysis failed';
+      set({ analysisLoading: false, analysisError: message });
+    }
+  },
+
+  // Save current job to backend and get a job_id
+  saveCurrentJob: async () => {
+    const { currentJob, savedJobId } = get();
+    if (savedJobId) return savedJobId;
+    if (!currentJob || !currentJob.title || !currentJob.description) return null;
+
+    try {
+      const job = await apiClient.createJob({
+        upwork_url: currentJob.url,
+        title: currentJob.title,
+        description: currentJob.description,
+        skills_required: currentJob.skills,
+        budget_type: currentJob.budgetType || undefined,
+        budget_amount: currentJob.budgetAmount || undefined,
+      });
+      set({ savedJobId: job.id });
+      return job.id;
+    } catch (error) {
+      console.error('Failed to save job:', error);
+      return null;
     }
   },
 
@@ -237,7 +271,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
-    set({ coverLetterLoading: true });
+    set({ coverLetterLoading: true, coverLetterError: null });
     try {
       const result = await apiClient.generateCoverLetter({
         job_data: {
@@ -249,10 +283,41 @@ export const useAppStore = create<AppState>((set, get) => ({
           budget_amount: currentJob.budgetAmount || undefined,
         },
       });
-      set({ coverLetter: result.content, coverLetterLoading: false });
+      set({
+        coverLetter: result.content,
+        coverLetterId: result.id,
+        savedJobId: result.job_id,
+        coverLetterLoading: false,
+      });
     } catch (error) {
       console.error('Generation error:', error);
-      set({ coverLetterLoading: false });
+      const message = error instanceof TypeError
+        ? 'Server unavailable. The API may be starting up (Render cold start can take ~30s). Please retry.'
+        : error instanceof Error ? error.message : 'Generation failed';
+      set({ coverLetterLoading: false, coverLetterError: message });
+    }
+  },
+
+  // Regenerate cover letter with optional feedback
+  regenerateCoverLetter: async (feedback?: string) => {
+    const { coverLetterId } = get();
+    if (!coverLetterId) {
+      // Fall back to fresh generation
+      return get().generateCoverLetter();
+    }
+
+    set({ coverLetterLoading: true, coverLetterError: null });
+    try {
+      const result = await apiClient.regenerateCoverLetter(coverLetterId, feedback);
+      set({
+        coverLetter: result.content,
+        coverLetterId: result.id,
+        coverLetterLoading: false,
+      });
+    } catch (error) {
+      console.error('Regeneration error:', error);
+      const message = error instanceof Error ? error.message : 'Regeneration failed';
+      set({ coverLetterLoading: false, coverLetterError: message });
     }
   },
 
@@ -281,6 +346,36 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       );
     });
+  },
+
+  // Create application tracking record
+  createApplication: async (bidAmount?: number) => {
+    const { savedJobId, coverLetterId } = get();
+    if (!savedJobId) return false;
+
+    try {
+      const app = await apiClient.createApplication({
+        job_id: savedJobId,
+        cover_letter_id: coverLetterId || undefined,
+        bid_amount: bidAmount,
+      });
+      set({ applicationId: app.id });
+      return true;
+    } catch (error) {
+      console.error('Failed to create application:', error);
+      return false;
+    }
+  },
+
+  // Update application outcome
+  updateApplicationOutcome: async (id: string, data: ApplicationOutcome) => {
+    try {
+      await apiClient.updateApplicationOutcome(id, data);
+      return true;
+    } catch (error) {
+      console.error('Failed to update outcome:', error);
+      return false;
+    }
   },
 }));
 
