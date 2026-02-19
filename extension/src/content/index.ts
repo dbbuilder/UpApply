@@ -436,7 +436,7 @@ function init() {
     type: 'CONTENT_SCRIPT_READY',
     url: window.location.href,
     isJobPage: isJobPage(),
-  });
+  }).catch(() => { /* sidebar/background may not be listening */ });
 
   // If we're on a job page, extract and send initial data
   if (isJobPage()) {
@@ -450,7 +450,7 @@ function init() {
         chrome.runtime.sendMessage({
           type: 'JOB_DATA_EXTRACTED',
           data: jobData,
-        });
+        }).catch(() => { /* no listener */ });
       } else {
         console.log('UpApply: No job data found, retrying in 2s...');
         // Retry after more time for slow-loading pages
@@ -460,7 +460,7 @@ function init() {
           chrome.runtime.sendMessage({
             type: 'JOB_DATA_EXTRACTED',
             data: retryData,
-          });
+          }).catch(() => { /* no listener */ });
         }, 2000);
       }
     }, 1500);
@@ -488,7 +488,7 @@ const observer = new MutationObserver(() => {
         chrome.runtime.sendMessage({
           type: 'JOB_DATA_EXTRACTED',
           data: jobData,
-        });
+        }).catch(() => { /* no listener */ });
       }, 1000);
     }
   }

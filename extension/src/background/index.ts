@@ -430,14 +430,9 @@ chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
   .catch((error) => console.error(error));
 
-// Listen for tab updates to extract job data on Upwork pages
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab.url?.includes('upwork.com')) {
-    // Request job data from content script
-    chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_JOB_DATA' }).catch(() => {
-      // Content script might not be loaded yet
-    });
-  }
-});
+// Listen for tab updates on Upwork pages
+// Note: We don't extract job data here because the content script's init()
+// handles extraction with proper delays for SPA content rendering.
+// Extracting here causes premature null results.
 
 console.log('UpApply Background: Service worker started');
