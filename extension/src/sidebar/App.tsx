@@ -8,6 +8,7 @@ import HistoryPage from './pages/History';
 import AnalyticsPage from './pages/Analytics';
 import BetaFeedbackPage from './pages/BetaFeedback';
 import SkillsPage from './pages/Skills';
+import EditProfilePage from './pages/EditProfile';
 
 function App() {
   const { currentView, isLoading, checkAuth } = useAppStore();
@@ -42,6 +43,8 @@ function App() {
         return <BetaFeedbackPage />;
       case 'skills':
         return <SkillsPage />;
+      case 'profile':
+        return <EditProfilePage />;
       default:
         return <GeneratorPage />;
     }

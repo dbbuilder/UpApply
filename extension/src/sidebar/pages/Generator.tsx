@@ -81,15 +81,11 @@ export default function GeneratorPage() {
       }
     });
 
-    // Also actively request extraction from content script
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'EXTRACT_JOB_DATA' }, (response) => {
-          console.log('UpApply Sidebar: EXTRACT_JOB_DATA response:', response);
-          if (response?.success && response.data) {
-            useAppStore.getState().setCurrentJob(response.data);
-          }
-        });
+    // Also actively request extraction via background (handles script injection)
+    chrome.runtime.sendMessage({ type: 'REQUEST_JOB_EXTRACTION' }, (response) => {
+      if (chrome.runtime.lastError) return; // No listener or not on Upwork
+      if (response?.success && response.data) {
+        useAppStore.getState().setCurrentJob(response.data);
       }
     });
   }, []);
