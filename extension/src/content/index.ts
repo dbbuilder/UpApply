@@ -461,34 +461,6 @@ function init() {
     isJobPage: isJobPage(),
   }).catch(() => { /* sidebar/background may not be listening */ });
 
-  // If we're on a job page, extract and send initial data
-  if (isJobPage()) {
-    // Wait for dynamic content to load (proposal pages can be slower)
-    setTimeout(() => {
-      const jobData = extractJobData();
-      console.log('UpApply: Extracted job data:', jobData);
-
-      // Only send if we found something useful
-      if (jobData.title || jobData.description) {
-        chrome.runtime.sendMessage({
-          type: 'JOB_DATA_EXTRACTED',
-          data: jobData,
-        }).catch(() => { /* no listener */ });
-      } else {
-        console.log('UpApply: No job data found, retrying in 2s...');
-        // Retry after more time for slow-loading pages
-        setTimeout(() => {
-          const retryData = extractJobData();
-          console.log('UpApply: Retry extracted job data:', retryData);
-          chrome.runtime.sendMessage({
-            type: 'JOB_DATA_EXTRACTED',
-            data: retryData,
-          }).catch(() => { /* no listener */ });
-        }, 2000);
-      }
-    }, 1500);
-  }
-
   // Watch for SPA navigation
   let lastUrl = window.location.href;
   const observer = new MutationObserver(() => {

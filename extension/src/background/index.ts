@@ -433,11 +433,19 @@ chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
   .catch((error) => console.error(error));
 
+// Debounce extraction per tab to avoid duplicate EXTRACT_JOB_DATA messages
+const pendingExtractions = new Map<number, ReturnType<typeof setTimeout>>();
+
 // Listen for tab updates to extract job data on Upwork pages
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url?.includes('upwork.com')) {
+    // Cancel any pending extraction for this tab
+    const existing = pendingExtractions.get(tabId);
+    if (existing) clearTimeout(existing);
+
     // Delay extraction to let SPA content render (avoids null title)
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      pendingExtractions.delete(tabId);
       chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_JOB_DATA' }, (response) => {
         if (chrome.runtime.lastError) return; // Content script not loaded
         if (response?.success && response.data) {
@@ -450,6 +458,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         }
       });
     }, 2000);
+    pendingExtractions.set(tabId, timer);
   }
 });
 

@@ -430,7 +430,7 @@ async def find_relevant_proposals(
     sql = text("""
         SELECT
             id, job_title, cover_letter_text, job_skills,
-            bid_amount, bid_type, was_hired, outcome,
+            bid_amount, bid_type, was_hired, status,
             1 - (embedding <=> CAST(:embedding AS vector)) as similarity
         FROM proposals
         WHERE user_id = :user_id
@@ -462,7 +462,7 @@ async def find_relevant_proposals(
                 "bid_amount": float(row.bid_amount) if row.bid_amount else None,
                 "bid_type": row.bid_type,
                 "was_hired": row.was_hired,
-                "outcome": row.outcome,
+                "status": row.status,
                 "similarity": row.similarity,
             })
 
