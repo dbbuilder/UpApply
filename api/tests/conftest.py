@@ -17,7 +17,7 @@ from app.main import app
 # Use the same DATABASE_URL but target a test database, or fall back to default
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/upapply_test",
+    "postgresql+asyncpg://upapply:upapply@localhost:5435/upapply_test",
 )
 
 test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
@@ -26,11 +26,12 @@ TestSessionLocal = async_sessionmaker(
 )
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def setup_database():
     """Create test database tables once per session."""
     async with test_engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with test_engine.begin() as conn:
@@ -38,25 +39,18 @@ async def setup_database():
     await test_engine.dispose()
 
 
-@pytest_asyncio.fixture
-async def db_session(setup_database):
-    """Provide a transactional database session that rolls back after each test."""
-    async with test_engine.connect() as conn:
-        transaction = await conn.begin()
-        session = AsyncSession(bind=conn, expire_on_commit=False)
-        try:
-            yield session
-        finally:
-            await session.close()
-            await transaction.rollback()
-
-
-@pytest_asyncio.fixture
-async def client(db_session):
-    """Provide an async HTTP client wired to the test database."""
+@pytest_asyncio.fixture(loop_scope="session")
+async def client(setup_database):
+    """Provide an async HTTP client with the app using the test database."""
 
     async def override_get_db():
-        yield db_session
+        async with TestSessionLocal() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
 
     app.dependency_overrides[get_db] = override_get_db
 
@@ -68,8 +62,16 @@ async def client(db_session):
 
     app.dependency_overrides.clear()
 
+    # Truncate all tables after each test for isolation
+    async with test_engine.begin() as conn:
+        await conn.execute(text(
+            "TRUNCATE TABLE beta_feedback, feedback, screening_answers, proposals, "
+            "applications, cover_letters, jobs, memories, user_profiles, users "
+            "RESTART IDENTITY CASCADE"
+        ))
 
-@pytest_asyncio.fixture
+
+@pytest_asyncio.fixture(loop_scope="session")
 async def auth_headers(client: AsyncClient):
     """Register a test user and return auth headers."""
     response = await client.post(
@@ -80,7 +82,7 @@ async def auth_headers(client: AsyncClient):
     return {"Authorization": f"Bearer {token}"}
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(loop_scope="session")
 async def auth_headers_with_profile(client: AsyncClient, auth_headers: dict):
     """Auth headers for a user with a completed profile."""
     # Complete minimal profile setup
