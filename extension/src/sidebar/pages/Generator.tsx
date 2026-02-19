@@ -45,6 +45,7 @@ export default function GeneratorPage() {
     saveCurrentJob,
     createApplication,
     logout,
+    addSkillToProfile,
   } = useAppStore();
 
   // State for screening question answers
@@ -66,6 +67,10 @@ export default function GeneratorPage() {
   // State for application tracking
   const [showAppliedPrompt, setShowAppliedPrompt] = useState(false);
   const [markingApplied, setMarkingApplied] = useState(false);
+
+  // State for adding skills from missing list
+  const [addingSkill, setAddingSkill] = useState<string | null>(null);
+  const [addedSkills, setAddedSkills] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     // Request current job data from stored cache first
@@ -265,6 +270,15 @@ export default function GeneratorPage() {
     setQuestionAnswers(prev => ({ ...prev, [`q${index}`]: answer }));
   };
 
+  const handleAddMissingSkill = async (skillName: string) => {
+    setAddingSkill(skillName);
+    const success = await addSkillToProfile(skillName, 'beginner');
+    setAddingSkill(null);
+    if (success) {
+      setAddedSkills(prev => new Set(prev).add(skillName));
+    }
+  };
+
   const handleAnswerChange = (index: number, value: string) => {
     setQuestionAnswers(prev => ({ ...prev, [`q${index}`]: value }));
   };
@@ -385,6 +399,13 @@ export default function GeneratorPage() {
       <header className="bg-white border-b px-4 py-3 flex items-center justify-between">
         <h1 className="font-bold text-gray-900">UpApply</h1>
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setCurrentView('skills')}
+            className="text-gray-600 hover:text-gray-900 text-sm"
+          >
+            Skills
+          </button>
           <button
             type="button"
             onClick={() => setCurrentView('memories')}
@@ -609,8 +630,21 @@ export default function GeneratorPage() {
                     <h5 className="text-sm font-medium text-gray-700 mb-1">Missing Skills</h5>
                     <div className="flex flex-wrap gap-1">
                       {jobAnalysis.missing_skills.map((skill) => (
-                        <span key={skill} className="badge badge-red">
+                        <span key={skill} className="badge badge-red inline-flex items-center gap-1">
                           {skill}
+                          {addedSkills.has(skill) ? (
+                            <span className="text-green-600 text-xs" title="Added to profile">&#10003;</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleAddMissingSkill(skill)}
+                              disabled={addingSkill === skill}
+                              className="text-red-400 hover:text-green-600 text-xs font-bold ml-0.5"
+                              title="Add to profile"
+                            >
+                              {addingSkill === skill ? '...' : '+'}
+                            </button>
+                          )}
                         </span>
                       ))}
                     </div>

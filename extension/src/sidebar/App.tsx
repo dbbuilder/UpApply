@@ -7,6 +7,7 @@ import MemoriesPage from './pages/Memories';
 import HistoryPage from './pages/History';
 import AnalyticsPage from './pages/Analytics';
 import BetaFeedbackPage from './pages/BetaFeedback';
+import SkillsPage from './pages/Skills';
 
 function App() {
   const { currentView, isLoading, checkAuth } = useAppStore();
@@ -39,6 +40,8 @@ function App() {
         return <AnalyticsPage />;
       case 'feedback':
         return <BetaFeedbackPage />;
+      case 'skills':
+        return <SkillsPage />;
       default:
         return <GeneratorPage />;
     }

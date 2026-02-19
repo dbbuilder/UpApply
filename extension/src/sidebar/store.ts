@@ -38,7 +38,7 @@ interface AppState {
   applicationId: string | null;
 
   // UI
-  currentView: 'auth' | 'setup' | 'generator' | 'memories' | 'history' | 'analytics' | 'feedback';
+  currentView: 'auth' | 'setup' | 'generator' | 'memories' | 'history' | 'analytics' | 'feedback' | 'skills';
   setupStep: number;
 
   // Actions
@@ -65,6 +65,9 @@ interface AppState {
   saveCurrentJob: () => Promise<string | null>;
   createApplication: (bidAmount?: number) => Promise<boolean>;
   updateApplicationOutcome: (id: string, data: ApplicationOutcome) => Promise<boolean>;
+  addSkillToProfile: (skillName: string, level?: string) => Promise<boolean>;
+  removeSkillFromProfile: (skillName: string) => Promise<boolean>;
+  updateSkillInProfile: (skillName: string, level: string, years?: number) => Promise<boolean>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -374,6 +377,70 @@ export const useAppStore = create<AppState>((set, get) => ({
       return true;
     } catch (error) {
       console.error('Failed to update outcome:', error);
+      return false;
+    }
+  },
+
+  // Add a skill to the user's profile
+  addSkillToProfile: async (skillName: string, level: string = 'beginner') => {
+    const { profile } = get();
+    if (!profile) return false;
+
+    const existingSkills = profile.skills || [];
+    // Check if skill already exists (case-insensitive)
+    if (existingSkills.some(s => s.name.toLowerCase() === skillName.toLowerCase())) {
+      return false;
+    }
+
+    const updatedSkills = [...existingSkills, { name: skillName, level }];
+    try {
+      const updated = await apiClient.updateProfile({ skills: updatedSkills });
+      set({ profile: updated });
+      return true;
+    } catch (error) {
+      console.error('Failed to add skill:', error);
+      return false;
+    }
+  },
+
+  // Remove a skill from the user's profile
+  removeSkillFromProfile: async (skillName: string) => {
+    const { profile } = get();
+    if (!profile) return false;
+
+    const existingSkills = profile.skills || [];
+    const updatedSkills = existingSkills.filter(
+      s => s.name.toLowerCase() !== skillName.toLowerCase()
+    );
+
+    try {
+      const updated = await apiClient.updateProfile({ skills: updatedSkills });
+      set({ profile: updated });
+      return true;
+    } catch (error) {
+      console.error('Failed to remove skill:', error);
+      return false;
+    }
+  },
+
+  // Update a skill's level/years in the profile
+  updateSkillInProfile: async (skillName: string, level: string, years?: number) => {
+    const { profile } = get();
+    if (!profile) return false;
+
+    const existingSkills = profile.skills || [];
+    const updatedSkills = existingSkills.map(s =>
+      s.name.toLowerCase() === skillName.toLowerCase()
+        ? { ...s, level, years }
+        : s
+    );
+
+    try {
+      const updated = await apiClient.updateProfile({ skills: updatedSkills });
+      set({ profile: updated });
+      return true;
+    } catch (error) {
+      console.error('Failed to update skill:', error);
       return false;
     }
   },
