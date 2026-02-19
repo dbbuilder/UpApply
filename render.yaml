@@ -8,6 +8,9 @@ services:
     plan: starter
     healthCheckPath: /health
     autoDeploy: true
+    scaling:
+      minInstances: 1
+      maxInstances: 1
     envVars:
       - key: DATABASE_URL
         fromDatabase:
