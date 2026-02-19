@@ -328,7 +328,7 @@ export default function EditProfilePage() {
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 mb-1 block">Preferred Closing</label>
-                <input type="text" value={preferredClosing} onChange={e => setPreferredClosing(e.target.value)} className="input text-sm w-full" placeholder="e.g. Best regards, Chris" />
+                <textarea value={preferredClosing} onChange={e => setPreferredClosing(e.target.value)} rows={3} className="input text-sm w-full" placeholder={"e.g.\nBest regards,\nChris"} />
               </div>
             </div>
           </>
