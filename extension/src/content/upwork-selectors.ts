@@ -13,14 +13,24 @@ export const SELECTORS = {
     '.fe-job-details section h3',
     '.fe-job-details h3',
     '.fe-job-details .content h3',
-    // Job details page selectors
+    // Job details page selectors (standalone /jobs/~ page)
+    'h4[data-test="job-title-link"]',
     '[data-test="job-title-link"]',
+    'header h4',
+    '.job-details-header h4',
+    '.air3-card-section h4',
     'h4 a[href*="/jobs/"]',
     '[data-test="job-title"]',
     '.job-title-link',
-    // Generic fallbacks (excluding "Submit a Proposal" h1)
+    // Visitor job page (cfe-ui-job-details)
+    '.cfe-ui-job-details h1',
+    '.cfe-ui-job-details h2',
+    '.up-card-header h4',
+    '.job-details-content h4',
+    // Generic fallbacks
     '.fe-job-details h2',
     'h2.h4',
+    'h1.h4',
   ],
 
   jobDescription: [
@@ -28,12 +38,19 @@ export const SELECTORS = {
     '.fe-job-details .description.text-body-sm',
     '.fe-job-details .description span',
     '.fe-job-details .description',
-    // Job details page selectors
+    // Job details page selectors (standalone /jobs/~ page)
     '[data-test="Description"]',
+    '[data-test="UpCJobAbout"] [data-test="Description"]',
     '[data-test="job-description"]',
     '[data-test="job-description-text"]',
     '.job-description',
     '.cfe-ui-job-description',
+    '.cfe-ui-job-description-text',
+    // Visitor job page patterns
+    '.job-details-content .description',
+    '.up-card-section .text-body',
+    '.air3-card-section .text-body',
+    '.air3-card-section .break',
     // Generic fallback
     '.description',
   ],

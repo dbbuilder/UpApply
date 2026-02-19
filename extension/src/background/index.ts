@@ -67,8 +67,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         setTimeout(() => {
           chrome.tabs.sendMessage(tab.id!, { type: 'EXTRACT_JOB_DATA' }, (response) => {
             console.log('UpApply Background: Extraction response:', response);
+            if (response?.debug) {
+              console.log('UpApply Background: DEBUG - page headings:', response.debug);
+            }
             if (chrome.runtime.lastError) {
-              console.error('UpApply Background: Error:', chrome.runtime.lastError);
+              console.error('UpApply Background: Error:', chrome.runtime.lastError.message);
               sendResponse({ success: false, error: 'Content script not loaded. Please refresh the Upwork page and try again.' });
             } else if (response?.success) {
               currentJobData = response.data;

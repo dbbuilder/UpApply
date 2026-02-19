@@ -47,15 +47,6 @@ function extractScreeningQuestions(): ScreeningQuestion[] {
 function extractJobData(): JobData {
   const url = window.location.href;
 
-  // Debug: Check if key elements exist
-  const feJobDetails = document.querySelector('.fe-job-details');
-  const feUiApplication = document.querySelector('.fe-ui-application-vue');
-  console.log('UpApply: Page elements found:', {
-    '.fe-job-details': !!feJobDetails,
-    '.fe-ui-application-vue': !!feUiApplication,
-    'any h3 in .fe-job-details': feJobDetails?.querySelector('h3')?.textContent?.substring(0, 50),
-  });
-
   // Extract basic job info
   const title = extractText(SELECTORS.jobTitle);
   const description = extractText(SELECTORS.jobDescription);
@@ -63,10 +54,21 @@ function extractJobData(): JobData {
   const experienceLevel = extractText(SELECTORS.experienceLevel);
   const projectLength = extractText(SELECTORS.projectLength);
 
+  // Debug: if extraction failed, dump what we can find
+  if (!title) {
+    const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5')).slice(0, 10);
+    console.log('UpApply: Title not found. Page headings:', headings.map(h => ({
+      tag: h.tagName,
+      class: h.className.substring(0, 60),
+      text: h.textContent?.trim().substring(0, 80),
+      parent: h.parentElement?.className.substring(0, 60),
+    })));
+  }
+
   console.log('UpApply: Extraction results:', {
-    title,
+    title: title?.substring(0, 60),
     descriptionLength: description?.length,
-    skills,
+    skillCount: skills.length,
   });
 
   // Extract budget info
@@ -353,7 +355,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       try {
         const jobData = extractJobData();
         console.log('UpApply: Extraction complete, title:', jobData.title);
-        sendResponse({ success: true, data: jobData });
+        if (!jobData.title) {
+          // Send debug info back so it's visible in the background/sidebar console
+          const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5')).slice(0, 8);
+          const debug = headings.map(h => `<${h.tagName} class="${h.className.substring(0, 40)}"> ${h.textContent?.trim().substring(0, 60)}`);
+          console.log('UpApply: DEBUG headings:', debug);
+          sendResponse({ success: true, data: jobData, debug });
+        } else {
+          sendResponse({ success: true, data: jobData });
+        }
       } catch (err) {
         console.error('UpApply: Extraction error:', err);
         sendResponse({ success: false, error: String(err) });
@@ -426,9 +436,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 /**
+ * Guard against re-injection. The background script may re-inject
+ * the content script, but we only want to initialize once per page.
+ */
+const INIT_FLAG = '__upapply_initialized__';
+
+/**
  * Initialize content script.
  */
 function init() {
+  // Prevent duplicate init from re-injection
+  if ((window as unknown as Record<string, unknown>)[INIT_FLAG]) {
+    console.log('UpApply: Already initialized, skipping');
+    return;
+  }
+  (window as unknown as Record<string, unknown>)[INIT_FLAG] = true;
+
   console.log('UpApply: Content script loaded on', window.location.href);
 
   // Notify background script that we're ready
@@ -465,6 +488,28 @@ function init() {
       }
     }, 1500);
   }
+
+  // Watch for SPA navigation
+  let lastUrl = window.location.href;
+  const observer = new MutationObserver(() => {
+    if (window.location.href !== lastUrl) {
+      lastUrl = window.location.href;
+      console.log('UpApply: URL changed to', lastUrl);
+
+      // Re-extract job data on navigation
+      if (isJobPage()) {
+        setTimeout(() => {
+          const jobData = extractJobData();
+          chrome.runtime.sendMessage({
+            type: 'JOB_DATA_EXTRACTED',
+            data: jobData,
+          }).catch(() => { /* no listener */ });
+        }, 2000);
+      }
+    }
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 // Initialize when DOM is ready
@@ -473,25 +518,3 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
-
-// Watch for SPA navigation
-let lastUrl = window.location.href;
-const observer = new MutationObserver(() => {
-  if (window.location.href !== lastUrl) {
-    lastUrl = window.location.href;
-    console.log('UpApply: URL changed to', lastUrl);
-
-    // Re-extract job data on navigation
-    if (isJobPage()) {
-      setTimeout(() => {
-        const jobData = extractJobData();
-        chrome.runtime.sendMessage({
-          type: 'JOB_DATA_EXTRACTED',
-          data: jobData,
-        }).catch(() => { /* no listener */ });
-      }, 1000);
-    }
-  }
-});
-
-observer.observe(document.body, { childList: true, subtree: true });
