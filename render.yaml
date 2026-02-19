@@ -10,7 +10,8 @@ services:
     autoDeploy: true
     scaling:
       minInstances: 1
-      maxInstances: 1
+      maxInstances: 2
+      targetCPUPercent: 80
     envVars:
       - key: DATABASE_URL
         fromDatabase:
