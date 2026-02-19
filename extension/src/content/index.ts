@@ -10,6 +10,7 @@ import {
   querySelectorAll,
 } from './upwork-selectors';
 import type { ScreeningQuestion, JobData, ScrapedProposal, AttachmentInfo, JobPostingData } from '../types';
+import { initDraftSaver } from './draft-saver';
 
 /**
  * Extract screening questions from the page.
@@ -461,6 +462,9 @@ function init() {
     isJobPage: isJobPage(),
   }).catch(() => { /* sidebar/background may not be listening */ });
 
+  // Initialize draft saver on proposal/apply pages
+  initDraftSaver();
+
   // Watch for SPA navigation
   let lastUrl = window.location.href;
   const observer = new MutationObserver(() => {
@@ -478,6 +482,9 @@ function init() {
           }).catch(() => { /* no listener */ });
         }, 2000);
       }
+
+      // Re-initialize draft saver if navigated to apply page
+      initDraftSaver();
     }
   });
 
