@@ -72,6 +72,9 @@ export default function GeneratorPage() {
   const [addingSkill, setAddingSkill] = useState<string | null>(null);
   const [addedSkills, setAddedSkills] = useState<Set<string>>(new Set());
 
+  // State for inclusions
+  const [inclusions, setInclusions] = useState('');
+
   useEffect(() => {
     // Request current job data from stored cache first
     chrome.runtime.sendMessage({ type: 'GET_CURRENT_JOB' }, (response) => {
@@ -107,7 +110,7 @@ export default function GeneratorPage() {
   };
 
   const handleGenerate = () => {
-    generateCoverLetter();
+    generateCoverLetter(inclusions.trim() || undefined);
   };
 
   const handleRegenerate = () => {
@@ -123,7 +126,7 @@ export default function GeneratorPage() {
   const handleRegenerateFresh = () => {
     setShowFeedbackInput(false);
     setFeedbackText('');
-    generateCoverLetter();
+    generateCoverLetter(inclusions.trim() || undefined);
   };
 
   const handleFill = async () => {
@@ -664,15 +667,29 @@ export default function GeneratorPage() {
               </div>
             )}
 
-            {/* Generate button */}
+            {/* Inclusions + Generate button */}
             {jobAnalysis && !coverLetter && !coverLetterLoading && !coverLetterError && (
-              <button
-                type="button"
-                onClick={handleGenerate}
-                className="btn-primary w-full"
-              >
-                Generate Cover Letter
-              </button>
+              <div className="space-y-2">
+                <div>
+                  <label className="text-xs font-medium text-gray-600 mb-1 block">
+                    Include in cover letter <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <textarea
+                    value={inclusions}
+                    onChange={e => setInclusions(e.target.value)}
+                    rows={3}
+                    className="input text-sm w-full"
+                    placeholder={'Concepts to weave in, or "exact phrases" in quotes\ne.g. I built a similar SaaS dashboard\n"10+ years of React experience"'}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGenerate}
+                  className="btn-primary w-full"
+                >
+                  Generate Cover Letter
+                </button>
+              </div>
             )}
 
             {coverLetterLoading && (

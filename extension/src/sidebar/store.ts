@@ -58,7 +58,7 @@ interface AppState {
   logout: () => Promise<void>;
   loadProfile: () => Promise<void>;
   analyzeCurrentJob: () => Promise<void>;
-  generateCoverLetter: () => Promise<void>;
+  generateCoverLetter: (inclusions?: string) => Promise<void>;
   regenerateCoverLetter: (feedback?: string) => Promise<void>;
   fillCoverLetter: () => Promise<boolean>;
   fillScreeningQuestion: (selector: string, answer: string) => Promise<boolean>;
@@ -268,7 +268,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   // Generate cover letter
-  generateCoverLetter: async () => {
+  generateCoverLetter: async (inclusions?: string) => {
     const { currentJob } = get();
     if (!currentJob || !currentJob.title || !currentJob.description) {
       return;
@@ -285,6 +285,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           budget_type: currentJob.budgetType || undefined,
           budget_amount: currentJob.budgetAmount || undefined,
         },
+        custom_instructions: inclusions || undefined,
       });
       set({
         coverLetter: result.content,

@@ -410,6 +410,7 @@ async def generate_cover_letter_endpoint(
         relevant_memories=relevant_memories,
         profile=profile,
         past_proposals=past_proposals,
+        inclusions=request.custom_instructions,
     )
 
     # Save cover letter

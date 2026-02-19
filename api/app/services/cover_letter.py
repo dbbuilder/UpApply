@@ -182,6 +182,7 @@ def build_user_prompt(
     relevant_memories: List[Dict],
     profile: UserProfile,
     past_proposals: Optional[List[Dict]] = None,
+    inclusions: Optional[str] = None,
 ) -> str:
     """Build user prompt with job and match details."""
     parts = [
@@ -217,9 +218,52 @@ def build_user_prompt(
         if matching_highlights:
             parts.append(f"\n\nUSER'S PREFERRED FOCUS (emphasize these if relevant):\n{', '.join(matching_highlights)}")
 
+    if inclusions:
+        formatted_inclusions = format_inclusions(inclusions)
+        if formatted_inclusions:
+            parts.append(f"\n\nUSER INCLUSIONS:\n{formatted_inclusions}")
+
     parts.append("\n\nGenerate a personalized, compelling cover letter for this job. Learn from the past cover letter examples if provided, especially the successful ones.")
 
     return "".join(parts)
+
+
+def format_inclusions(inclusions: str) -> str:
+    """Parse inclusion instructions.
+
+    Text in "quotes" should be included verbatim as exact phrases.
+    Unquoted text is treated as concepts to weave in naturally.
+    """
+    if not inclusions or not inclusions.strip():
+        return ""
+
+    import re as _re
+    exact: list[str] = []
+    concepts: list[str] = []
+
+    # Extract quoted phrases
+    remaining = inclusions
+    for match in _re.finditer(r'"([^"]+)"', inclusions):
+        exact.append(match.group(1))
+        remaining = remaining.replace(match.group(0), '')
+
+    # Remaining unquoted text = concepts
+    for part in remaining.split('\n'):
+        part = part.strip().strip('-').strip('*').strip()
+        if part:
+            concepts.append(part)
+
+    parts: list[str] = []
+    if exact:
+        parts.append("EXACT PHRASES TO INCLUDE (use these word-for-word somewhere in the letter):")
+        for phrase in exact:
+            parts.append(f'  - "{phrase}"')
+    if concepts:
+        parts.append("CONCEPTS TO WEAVE IN (incorporate these ideas naturally):")
+        for concept in concepts:
+            parts.append(f"  - {concept}")
+
+    return "\n".join(parts)
 
 
 def append_closing(content: str, closing: Optional[str]) -> str:
@@ -244,6 +288,7 @@ async def generate_cover_letter(
     profile: UserProfile,
     model: Optional[str] = None,
     past_proposals: Optional[List[Dict]] = None,
+    inclusions: Optional[str] = None,
 ) -> str:
     """Generate a personalized cover letter using OpenAI.
 
@@ -264,6 +309,7 @@ async def generate_cover_letter(
         relevant_memories=relevant_memories,
         profile=profile,
         past_proposals=past_proposals,
+        inclusions=inclusions,
     )
 
     response = await client.chat.completions.create(
