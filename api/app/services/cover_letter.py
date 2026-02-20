@@ -266,6 +266,18 @@ def format_inclusions(inclusions: str) -> str:
     return "\n".join(parts)
 
 
+def append_prototype_url(content: str, url: Optional[str]) -> str:
+    """Append prototype URL sentence to cover letter if provided."""
+    if not url or not url.strip():
+        return content
+    sentence = (
+        "To demonstrate my excitement about this project and my capacity and velocity "
+        f"to deliver, I created a prototype of this project at {url.strip()}. "
+        "Please consider it as you review my application and how well I fit your needs."
+    )
+    return f"{content}\n\n{sentence}"
+
+
 def append_closing(content: str, closing: Optional[str]) -> str:
     """Append user's preferred closing to cover letter if provided."""
     if not closing:
@@ -289,6 +301,7 @@ async def generate_cover_letter(
     model: Optional[str] = None,
     past_proposals: Optional[List[Dict]] = None,
     inclusions: Optional[str] = None,
+    prototype_url: Optional[str] = None,
 ) -> str:
     """Generate a personalized cover letter using OpenAI.
 
@@ -324,7 +337,8 @@ async def generate_cover_letter(
 
     raw_content = response.choices[0].message.content.strip()
     cleaned = clean_cover_letter(raw_content)
-    return append_closing(cleaned, profile.preferred_closing)
+    with_prototype = append_prototype_url(cleaned, prototype_url)
+    return append_closing(with_prototype, profile.preferred_closing)
 
 
 @retry(

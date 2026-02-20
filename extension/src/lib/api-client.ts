@@ -549,6 +549,7 @@ export interface CoverLetterGenerateRequest {
   job_id?: string;
   job_data?: JobCreate;
   custom_instructions?: string;
+  prototype_url?: string;
 }
 
 export interface CoverLetter {

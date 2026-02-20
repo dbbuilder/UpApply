@@ -72,8 +72,9 @@ export default function GeneratorPage() {
   const [addingSkill, setAddingSkill] = useState<string | null>(null);
   const [addedSkills, setAddedSkills] = useState<Set<string>>(new Set());
 
-  // State for inclusions
+  // State for inclusions and prototype URL
   const [inclusions, setInclusions] = useState('');
+  const [prototypeUrl, setPrototypeUrl] = useState('');
 
   useEffect(() => {
     // Request current job data from stored cache first
@@ -110,7 +111,7 @@ export default function GeneratorPage() {
   };
 
   const handleGenerate = () => {
-    generateCoverLetter(inclusions.trim() || undefined);
+    generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined);
   };
 
   const handleRegenerate = () => {
@@ -126,7 +127,7 @@ export default function GeneratorPage() {
   const handleRegenerateFresh = () => {
     setShowFeedbackInput(false);
     setFeedbackText('');
-    generateCoverLetter(inclusions.trim() || undefined);
+    generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined);
   };
 
   const handleFill = async () => {
@@ -681,6 +682,23 @@ export default function GeneratorPage() {
                     className="input text-sm w-full"
                     placeholder={'Concepts to weave in, or "exact phrases" in quotes\ne.g. I built a similar SaaS dashboard\n"10+ years of React experience"'}
                   />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600 mb-1 block">
+                    Prototype URL <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="url"
+                    value={prototypeUrl}
+                    onChange={e => setPrototypeUrl(e.target.value)}
+                    className="input text-sm w-full"
+                    placeholder="https://your-prototype.vercel.app"
+                  />
+                  {prototypeUrl.trim() && (
+                    <p className="text-xs text-gray-400 mt-1 italic">
+                      Will add: "...I created a prototype of this project at {prototypeUrl.trim()}..."
+                    </p>
+                  )}
                 </div>
                 <button
                   type="button"
