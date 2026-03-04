@@ -197,6 +197,76 @@ function extractProposals(): ScrapedProposal[] {
 }
 
 /**
+ * Wait for new proposal links to appear after a page navigation click.
+ * Resolves when the first proposal link's href changes or a timeout occurs.
+ */
+function waitForProposalPageChange(previousFirstId: string | null, timeoutMs = 4000): Promise<void> {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs;
+    const check = () => {
+      const first = document.querySelector<HTMLAnchorElement>('a[data-ev-label="jpn_list_details_link"]');
+      const firstId = first?.getAttribute('href') || null;
+      if (firstId && firstId !== previousFirstId) {
+        resolve();
+      } else if (Date.now() >= deadline) {
+        resolve(); // timeout — extract whatever's there
+      } else {
+        setTimeout(check, 150);
+      }
+    };
+    setTimeout(check, 150);
+  });
+}
+
+/**
+ * Extract proposals across all pagination pages by clicking "next page"
+ * until the last page is reached.
+ */
+async function extractAllProposals(): Promise<ScrapedProposal[]> {
+  const paginationDiv = document.querySelector('[data-ev-max_page_count]');
+  const totalPages = paginationDiv
+    ? parseInt(paginationDiv.getAttribute('data-ev-max_page_count') || '1', 10)
+    : 1;
+
+  console.log('UpApply: Proposals pagination — total pages:', totalPages);
+
+  const all: ScrapedProposal[] = [];
+  const seenIds = new Set<string>();
+
+  const addPage = (page: ScrapedProposal[]) => {
+    for (const p of page) {
+      if (p.proposalId && !seenIds.has(p.proposalId)) {
+        seenIds.add(p.proposalId);
+        all.push(p);
+      }
+    }
+  };
+
+  // Page 1 is already loaded
+  addPage(extractProposals());
+
+  for (let page = 2; page <= totalPages; page++) {
+    const firstLink = document.querySelector<HTMLAnchorElement>('a[data-ev-label="jpn_list_details_link"]');
+    const previousFirstHref = firstLink?.getAttribute('href') || null;
+
+    const nextBtn = document.querySelector<HTMLButtonElement>('button[data-test="next-page"]:not(:disabled)');
+    if (!nextBtn) {
+      console.log('UpApply: No next button found at page', page - 1, '— stopping');
+      break;
+    }
+
+    console.log('UpApply: Clicking to page', page, 'of', totalPages);
+    nextBtn.click();
+    await waitForProposalPageChange(previousFirstHref);
+
+    addPage(extractProposals());
+  }
+
+  console.log('UpApply: Total proposals across all pages:', all.length);
+  return all;
+}
+
+/**
  * Infer content type from URL or filename.
  */
 function inferContentType(url: string, filename: string): string {
@@ -412,12 +482,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           const count = document.querySelectorAll(sel).length;
           if (count > 0 && count < 200) debugHits.push(`"${sel}" × ${count}`);
         }
-        try {
-          const proposals = extractProposals();
-          sendResponse({ success: true, data: proposals, url: window.location.href, debug: debugHits });
-        } catch (err) {
-          sendResponse({ success: false, error: String(err), debug: debugHits });
-        }
+        (async () => {
+          try {
+            const proposals = await extractAllProposals();
+            sendResponse({ success: true, data: proposals, url: window.location.href, debug: debugHits });
+          } catch (err) {
+            sendResponse({ success: false, error: String(err), debug: debugHits });
+          }
+        })();
+        return; // async path — don't fall through to break
       }
       break;
     }
