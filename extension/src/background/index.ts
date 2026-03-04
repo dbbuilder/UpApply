@@ -245,6 +245,65 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       return true;
 
+    case 'SCRAPE_JOB_CARDS':
+      // Forward to active tab's content script (user should be on saved jobs or search page)
+      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+        const tab = tabs[0];
+        if (!tab?.id || !tab?.url?.includes('upwork.com')) {
+          sendResponse({ success: false, error: 'Not on an Upwork page' });
+          return;
+        }
+        try {
+          const manifest = chrome.runtime.getManifest();
+          const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+          if (contentScriptPath) {
+            await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [contentScriptPath] });
+          }
+        } catch (e) { /* already loaded */ }
+        setTimeout(() => {
+          chrome.tabs.sendMessage(tab.id!, { type: 'SCRAPE_JOB_CARDS' }, (response) => {
+            if (chrome.runtime.lastError) {
+              sendResponse({ success: false, error: 'Content script not loaded. Please refresh.' });
+            } else {
+              console.log('UpApply Job cards scrape:', response?.success, '—', response?.data?.length ?? 0, 'cards');
+              sendResponse(response || { success: false, error: 'No response' });
+            }
+          });
+        }, 200);
+      });
+      return true;
+
+    case 'SEARCH_UPWORK_JOBS':
+      // Open a background tab, scrape search results, close tab, return cards
+      (async () => {
+        const query = encodeURIComponent(message.query || '');
+        const searchUrl = `https://www.upwork.com/nx/search/jobs/?q=${query}&sort=recency`;
+        console.log('UpApply Background: Opening search tab for:', searchUrl);
+        const tab = await chrome.tabs.create({ url: searchUrl, active: false });
+        if (!tab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }
+        try {
+          await waitForTabLoad(tab.id);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const manifest = chrome.runtime.getManifest();
+          const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+          if (contentScriptPath) {
+            try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [contentScriptPath] }); }
+            catch (e) { /* already loaded */ }
+          }
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const response = await new Promise<{ success: boolean; data?: unknown; error?: string }>((resolve) => {
+            chrome.tabs.sendMessage(tab.id!, { type: 'SCRAPE_JOB_CARDS' }, (resp) => {
+              if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
+              else resolve(resp || { success: false, error: 'No response' });
+            });
+          });
+          sendResponse(response);
+        } finally {
+          try { await chrome.tabs.remove(tab.id); } catch (e) { /* ignore */ }
+        }
+      })();
+      return true;
+
     case 'GET_VIEW_POSTING_LINK':
       // Forward to content script in active tab
       chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {

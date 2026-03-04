@@ -133,6 +133,162 @@ function isMyProposalsPage(): boolean {
 }
 
 /**
+ * Check if the current page has job card listings (saved jobs or search results).
+ */
+function isJobCardPage(): boolean {
+  const url = window.location.href;
+  return url.includes('/nx/search/jobs') || url.includes('/nx/find-work/');
+}
+
+interface ScrapedJobCard {
+  upworkJobId: string;
+  upworkUrl: string;
+  title: string;
+  description: string;
+  jobType: string | null;
+  experienceLevel: string | null;
+  postedDateRaw: string | null;
+  clientInfo: {
+    paymentVerified: boolean;
+    rating: string | null;
+    totalSpent: string | null;
+  };
+}
+
+/**
+ * Extract job cards from a saved-jobs or search-results page.
+ * Structure: article[data-test="JobTile"] with data-test-key=jobId
+ */
+function extractJobCards(): ScrapedJobCard[] {
+  const cards: ScrapedJobCard[] = [];
+  const articles = document.querySelectorAll('article[data-test="JobTile"]');
+
+  articles.forEach((article) => {
+    const titleLink = article.querySelector<HTMLAnchorElement>('a[data-test="job-tile-title-link"]');
+    if (!titleLink) return;
+
+    const title = titleLink.textContent?.trim() || '';
+    const href = titleLink.getAttribute('href') || '';
+    const fullUrl = href.startsWith('http') ? href : `https://www.upwork.com${href}`;
+
+    // Extract job ID from URL: ~0(\d+) pattern
+    const idMatch = fullUrl.match(/~0?(\d{15,})/);
+    if (!idMatch) return;
+    const upworkJobId = idMatch[1];
+
+    const description = article.querySelector('[data-test="UpCLineClamp JobDescription"]')
+      ?.textContent?.trim() || '';
+
+    const jobTypeEl = article.querySelector('[data-test="job-type-label"]');
+    const jobType = jobTypeEl?.textContent?.trim().toLowerCase().includes('fixed')
+      ? 'fixed'
+      : jobTypeEl?.textContent?.trim().toLowerCase().includes('hourly')
+      ? 'hourly'
+      : null;
+
+    const expEl = article.querySelector('[data-test="experience-level"]');
+    const experienceLevel = expEl?.textContent?.trim() || null;
+
+    const dateEl = article.querySelector('[data-test="job-pubilshed-date"]');
+    const postedDateRaw = dateEl?.textContent?.trim() || null;
+
+    const paymentVerified = !!article.querySelector('[data-test="payment-verified"]');
+    const ratingEl = article.querySelector('[data-test="total-feedback"]');
+    const rating = ratingEl?.textContent?.trim() || null;
+    const spentEl = article.querySelector('[data-test="total-spent"]');
+    const totalSpent = spentEl?.textContent?.trim() || null;
+
+    cards.push({
+      upworkJobId,
+      upworkUrl: fullUrl.split('?')[0], // strip query params
+      title,
+      description,
+      jobType,
+      experienceLevel,
+      postedDateRaw,
+      clientInfo: { paymentVerified, rating, totalSpent },
+    });
+  });
+
+  return cards;
+}
+
+/**
+ * Extract job cards across all pagination pages.
+ */
+async function extractAllJobCards(): Promise<ScrapedJobCard[]> {
+  // Use same cross-instance lock as proposals
+  const lockKey = '__upapplyJobCardScrapingPromise';
+  const win = window as unknown as Record<string, unknown>;
+
+  if (win[lockKey]) {
+    console.log('UpApply: Joining existing job card scrape');
+    return win[lockKey] as Promise<ScrapedJobCard[]>;
+  }
+
+  const promise = (async () => {
+    const all: ScrapedJobCard[] = [];
+
+    // Read total pages from pagination attribute
+    const paginationEl = document.querySelector('[data-ev-max_page_count]');
+    const totalPages = paginationEl
+      ? parseInt(paginationEl.getAttribute('data-ev-max_page_count') || '1', 10)
+      : 1;
+    const pagesToScrape = Math.min(totalPages, 50); // cap at 50 pages
+
+    console.log('UpApply: Job card scrape — total pages:', totalPages, 'scraping up to:', pagesToScrape);
+
+    all.push(...extractJobCards());
+    console.log('UpApply: Page 1 —', all.length, 'job cards');
+
+    for (let page = 2; page <= pagesToScrape; page++) {
+      const nextBtn = document.querySelector<HTMLButtonElement>('button[data-test="next-page"]');
+      if (!nextBtn || nextBtn.disabled) break;
+
+      const firstCardId = document.querySelector('article[data-test="JobTile"]')?.getAttribute('data-test-key');
+      nextBtn.click();
+
+      // Wait for page to change
+      await new Promise<void>((resolve) => {
+        const start = Date.now();
+        const poll = setInterval(() => {
+          const newId = document.querySelector('article[data-test="JobTile"]')?.getAttribute('data-test-key');
+          if (newId !== firstCardId || Date.now() - start > 3000) {
+            clearInterval(poll);
+            resolve();
+          }
+        }, 100);
+      });
+
+      // Wait for next button to re-enable
+      await new Promise<void>((resolve) => {
+        const start = Date.now();
+        const poll = setInterval(() => {
+          const btn = document.querySelector<HTMLButtonElement>('button[data-test="next-page"]');
+          if (!btn?.disabled || Date.now() - start > 2000) {
+            clearInterval(poll);
+            resolve();
+          }
+        }, 100);
+      });
+
+      const pageCards = extractJobCards();
+      all.push(...pageCards);
+      console.log('UpApply: Page', page, '—', pageCards.length, 'job cards (total:', all.length, ')');
+    }
+
+    return all;
+  })();
+
+  win[lockKey] = promise;
+  try {
+    return await promise;
+  } finally {
+    delete win[lockKey];
+  }
+}
+
+/**
  * Extract proposals from the My Proposals page.
  */
 function extractProposals(): ScrapedProposal[] {
@@ -536,10 +692,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       break;
     }
 
+    case 'SCRAPE_JOB_CARDS': {
+      if (!isJobCardPage()) {
+        sendResponse({ success: false, error: 'Not on a job listings page', url: window.location.href });
+      } else {
+        (async () => {
+          try {
+            const cards = await extractAllJobCards();
+            sendResponse({ success: true, data: cards, url: window.location.href });
+          } catch (err) {
+            sendResponse({ success: false, error: String(err) });
+          }
+        })();
+        return true;
+      }
+      break;
+    }
+
     case 'GET_PAGE_TYPE':
       sendResponse({
         isJobPage: isJobPage(),
         isMyProposalsPage: isMyProposalsPage(),
+        isJobCardPage: isJobCardPage(),
         url: window.location.href,
       });
       break;

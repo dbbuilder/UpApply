@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../store';
-import { apiClient, Proposal, Job } from '../../lib/api-client';
+import { apiClient, Proposal, Job, JobImportItem } from '../../lib/api-client';
 
-type TabType = 'proposals' | 'jobs';
+type TabType = 'proposals' | 'jobs' | 'search';
 
 function InsightsBar({ proposals, jobs }: { proposals: Proposal[]; jobs: Job[] }) {
   // Compute skill frequency weighted by outcome (proposals count 2x, hired 3x)
@@ -408,7 +408,104 @@ export default function HistoryPage() {
     }
   };
 
-  const isLoading = activeTab === 'proposals' ? proposalsLoading : jobsLoading;
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchResults, setSearchResults] = useState<Job[]>([]);
+  const [searchStatus, setSearchStatus] = useState<string | null>(null);
+  const [savedImporting, setSavedImporting] = useState(false);
+  const [savedImportStatus, setSavedImportStatus] = useState<string | null>(null);
+
+  const handleImportSavedJobs = async () => {
+    setSavedImporting(true);
+    setSavedImportStatus('Checking page...');
+    try {
+      const scrapeResult = await new Promise<{ success: boolean; data?: JobImportItem[]; error?: string }>(
+        (resolve) => chrome.runtime.sendMessage({ type: 'SCRAPE_JOB_CARDS' }, resolve)
+      );
+
+      if (!scrapeResult?.success || !scrapeResult.data?.length) {
+        setSavedImportStatus(
+          scrapeResult?.error?.includes('Not on a job listings page')
+            ? 'Navigate to upwork.com/nx/search/jobs/saved first, then click Import.'
+            : `Nothing found. ${scrapeResult?.error || ''}`
+        );
+        return;
+      }
+
+      const rawCards = scrapeResult.data as unknown as Array<{
+        upworkJobId: string; upworkUrl: string; title: string; description: string;
+        jobType?: string; experienceLevel?: string; postedDateRaw?: string; clientInfo?: Record<string, unknown>;
+      }>;
+
+      const items: JobImportItem[] = rawCards.map((c) => ({
+        upwork_job_id: c.upworkJobId,
+        upwork_url: c.upworkUrl,
+        title: c.title,
+        description: c.description,
+        job_type: c.jobType,
+        experience_level: c.experienceLevel,
+        posted_date_raw: c.postedDateRaw,
+        client_info: c.clientInfo,
+      }));
+
+      setSavedImportStatus(`Analyzing ${items.length} jobs...`);
+      const imported = await apiClient.importBulkJobs(items, 'saved');
+      setSavedImportStatus(`Added ${imported.length} new jobs to queue.`);
+      await loadJobs();
+    } catch {
+      setSavedImportStatus('Import failed. Try again.');
+    } finally {
+      setSavedImporting(false);
+      setTimeout(() => setSavedImportStatus(null), 6000);
+    }
+  };
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+    setSearchLoading(true);
+    setSearchStatus('Searching Upwork...');
+    setSearchResults([]);
+    try {
+      const scrapeResult = await new Promise<{ success: boolean; data?: unknown[]; error?: string }>(
+        (resolve) => chrome.runtime.sendMessage({ type: 'SEARCH_UPWORK_JOBS', query: searchQuery.trim() }, resolve)
+      );
+
+      if (!scrapeResult?.success || !scrapeResult.data?.length) {
+        setSearchStatus(`No results found. ${scrapeResult?.error || ''}`);
+        return;
+      }
+
+      const rawCards = scrapeResult.data as Array<{
+        upworkJobId: string; upworkUrl: string; title: string; description: string;
+        jobType?: string; experienceLevel?: string; postedDateRaw?: string; clientInfo?: Record<string, unknown>;
+      }>;
+
+      const items: JobImportItem[] = rawCards.map((c) => ({
+        upwork_job_id: c.upworkJobId,
+        upwork_url: c.upworkUrl,
+        title: c.title,
+        description: c.description,
+        job_type: c.jobType,
+        experience_level: c.experienceLevel,
+        posted_date_raw: c.postedDateRaw,
+        client_info: c.clientInfo,
+      }));
+
+      setSearchStatus(`Analyzing ${items.length} results...`);
+      const analyzed = await apiClient.importBulkJobs(items, 'search', searchQuery.trim());
+      setSearchResults(analyzed.sort((a, b) => (b.match_score ?? 0) - (a.match_score ?? 0)));
+      setSearchStatus(`Found ${analyzed.length} jobs — scored and sorted by match.`);
+      await loadJobs();
+    } catch (err) {
+      setSearchStatus('Search failed. Try again.');
+      console.error('Search error:', err);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const isLoading = activeTab === 'proposals' ? proposalsLoading : activeTab === 'jobs' ? jobsLoading : false;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -427,28 +524,24 @@ export default function HistoryPage() {
 
       {/* Tabs */}
       <div className="bg-white border-b flex">
-        <button
-          type="button"
-          onClick={() => setActiveTab('proposals')}
-          className={`flex-1 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === 'proposals'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          Proposals {proposals.length > 0 && `(${proposals.length})`}
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('jobs')}
-          className={`flex-1 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === 'jobs'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          Saved Jobs {jobs.length > 0 && `(${jobs.length})`}
-        </button>
+        {([
+          ['proposals', `Proposals${proposals.length > 0 ? ` (${proposals.length})` : ''}`],
+          ['jobs', `Queue${jobs.length > 0 ? ` (${jobs.length})` : ''}`],
+          ['search', 'Search'],
+        ] as [TabType, string][]).map(([tabId, label]) => (
+          <button
+            key={tabId}
+            type="button"
+            onClick={() => setActiveTab(tabId)}
+            className={`flex-1 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === tabId
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       {/* Content */}
@@ -595,18 +688,37 @@ export default function HistoryPage() {
           </>
         )}
 
-        {/* Saved Jobs Tab */}
+        {/* Job Queue Tab */}
         {!isLoading && !error && activeTab === 'jobs' && (
           <>
+            {/* Import saved jobs bar */}
+            <div className="flex items-center gap-2 mb-3">
+              <button
+                type="button"
+                onClick={handleImportSavedJobs}
+                disabled={savedImporting}
+                className="btn-outline text-xs py-1 px-3 disabled:opacity-60 shrink-0"
+              >
+                {savedImporting ? 'Importing...' : '↓ Import Saved'}
+              </button>
+              {savedImportStatus ? (
+                <p className="text-xs text-gray-500 flex-1">{savedImportStatus}</p>
+              ) : (
+                <p className="text-xs text-gray-400 flex-1">
+                  Go to Upwork → Saved Jobs, then click Import
+                </p>
+              )}
+            </div>
+
             {jobs.length > 0 && proposals.length > 0 && (
               <InsightsBar proposals={proposals} jobs={jobs} />
             )}
 
             {jobs.length === 0 ? (
               <div className="text-center py-10 text-gray-500">
-                <p className="font-medium">No saved jobs yet</p>
+                <p className="font-medium">No jobs in queue yet</p>
                 <p className="text-sm mt-1">
-                  Analyze jobs on Upwork and they'll appear here.
+                  Import your Upwork saved jobs or use Search.
                 </p>
               </div>
             ) : (
@@ -619,6 +731,67 @@ export default function HistoryPage() {
                     onQuickApply={() => handleQuickApply(job)}
                   />
                 ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Search Tab */}
+        {activeTab === 'search' && (
+          <>
+            {/* Search form */}
+            <div className="mb-4">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && !searchLoading && handleSearch()}
+                  placeholder="e.g. React developer TypeScript"
+                  className="input flex-1 text-sm"
+                  disabled={searchLoading}
+                />
+                <button
+                  type="button"
+                  onClick={handleSearch}
+                  disabled={searchLoading || !searchQuery.trim()}
+                  className="btn-primary text-sm px-4 disabled:opacity-60 shrink-0"
+                >
+                  {searchLoading ? '...' : 'Search'}
+                </button>
+              </div>
+              {searchStatus && (
+                <p className="text-xs text-gray-500 mt-2">{searchStatus}</p>
+              )}
+            </div>
+
+            {searchLoading && (
+              <div className="text-center py-8 text-gray-500 text-sm">
+                Searching Upwork and analyzing matches...
+              </div>
+            )}
+
+            {!searchLoading && searchResults.length > 0 && (
+              <>
+                <p className="text-xs text-gray-400 mb-3">
+                  Results are added to your Queue with 7-day expiry
+                </p>
+                <div className="space-y-3">
+                  {searchResults.map((job) => (
+                    <JobCard
+                      key={job.id}
+                      job={job}
+                      applyStatus={applyStatuses[job.id] || null}
+                      onQuickApply={() => handleQuickApply(job)}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+
+            {!searchLoading && searchResults.length === 0 && !searchStatus && (
+              <div className="text-center py-10 text-gray-400">
+                <p className="text-sm">Search Upwork jobs and get match scores instantly</p>
               </div>
             )}
           </>

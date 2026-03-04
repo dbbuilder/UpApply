@@ -69,6 +69,10 @@ class JobResponse(BaseModel):
     attachment_text: Optional[str] = None
     attachment_metadata: Optional[List[dict]] = None
 
+    is_saved: bool = False
+    source: Optional[str] = None
+    expires_at: Optional[datetime] = None
+
     posted_date: Optional[datetime] = None
     scraped_at: datetime
     created_at: datetime
@@ -194,3 +198,25 @@ class ExtractAttachmentsResponse(BaseModel):
     attachment_count: int
     attachment_metadata: List[AttachmentMetadata]
     extraction_errors: List[str]
+
+
+class JobImportItem(BaseModel):
+    """A single job from a saved list or search results page."""
+
+    upwork_job_id: str
+    upwork_url: str
+    title: str
+    description: str  # snippet is fine
+    job_type: Optional[str] = None  # "hourly" | "fixed"
+    experience_level: Optional[str] = None
+    posted_date_raw: Optional[str] = None  # relative string like "2 hours ago"
+    client_info: Optional[dict] = None
+    skills: Optional[List[str]] = None
+
+
+class JobBulkImportRequest(BaseModel):
+    """Import multiple jobs from saved list or search results."""
+
+    jobs: List[JobImportItem]
+    source: str  # "saved" | "search"
+    search_query: Optional[str] = None  # populated for source="search"

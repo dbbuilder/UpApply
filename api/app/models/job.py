@@ -73,6 +73,12 @@ class Job(Base):
     analysis: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     # {skill_matches, missing_skills, strengths, concerns, deal_breaker_warnings}
 
+    # Source tracking
+    is_saved: Mapped[bool] = mapped_column(default=False, nullable=False)
+    source: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # "extension" | "saved" | "search"
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Timestamps
     posted_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     scraped_at: Mapped[datetime] = mapped_column(

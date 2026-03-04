@@ -212,9 +212,20 @@ class ApiClient {
     });
   }
 
-  async getJobs(minScore?: number) {
-    const params = minScore ? `?min_score=${minScore}` : '';
-    return this.request<Job[]>(`/api/v1/jobs${params}`);
+  async getJobs(minScore?: number, source?: string, isSaved?: boolean) {
+    const p = new URLSearchParams();
+    if (minScore !== undefined) p.set('min_score', String(minScore));
+    if (source) p.set('source', source);
+    if (isSaved !== undefined) p.set('is_saved', String(isSaved));
+    const qs = p.toString();
+    return this.request<Job[]>(`/api/v1/jobs${qs ? `?${qs}` : ''}`);
+  }
+
+  async importBulkJobs(jobs: JobImportItem[], source: 'saved' | 'search', searchQuery?: string) {
+    return this.request<Job[]>('/api/v1/jobs/import-bulk', {
+      method: 'POST',
+      body: { jobs, source, search_query: searchQuery },
+    });
   }
 
   async getJob(id: string) {
@@ -561,11 +572,33 @@ export interface Job {
   id: string;
   user_id: string;
   upwork_url: string;
+  upwork_job_id?: string;
   title: string;
   description: string;
+  skills_required?: string[];
+  experience_level?: string;
+  budget_type?: string;
+  budget_amount?: string;
+  client_info?: Record<string, unknown>;
   match_score?: number;
   analysis?: JobAnalysisResponse;
+  is_saved?: boolean;
+  source?: string;
+  expires_at?: string;
+  scraped_at: string;
   created_at: string;
+}
+
+export interface JobImportItem {
+  upwork_job_id: string;
+  upwork_url: string;
+  title: string;
+  description: string;
+  job_type?: string;
+  experience_level?: string;
+  posted_date_raw?: string;
+  client_info?: Record<string, unknown>;
+  skills?: string[];
 }
 
 export interface CoverLetterGenerateRequest {

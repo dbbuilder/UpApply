@@ -24,6 +24,7 @@ from app.schemas.job import (
     ExtractAttachmentsRequest,
     ExtractAttachmentsResponse,
     AttachmentMetadata,
+    JobBulkImportRequest,
 )
 from app.services.job_analysis import (
     find_relevant_proposals,
@@ -177,6 +178,8 @@ async def list_jobs(
     limit: int = 50,
     offset: int = 0,
     min_score: Optional[float] = None,
+    source: Optional[str] = None,
+    is_saved: Optional[bool] = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -185,6 +188,15 @@ async def list_jobs(
 
     if min_score is not None:
         query = query.where(Job.match_score >= min_score)
+    if source is not None:
+        query = query.where(Job.source == source)
+    if is_saved is not None:
+        query = query.where(Job.is_saved == is_saved)
+
+    # Exclude expired search results
+    query = query.where(
+        (Job.expires_at == None) | (Job.expires_at > datetime.now(timezone.utc))  # noqa: E711
+    )
 
     query = query.order_by(Job.match_score.desc(), Job.created_at.desc())
     query = query.limit(limit).offset(offset)
@@ -193,6 +205,85 @@ async def list_jobs(
     jobs = result.scalars().all()
 
     return jobs
+
+
+@router.post("/import-bulk", response_model=List[JobResponse])
+async def import_bulk_jobs(
+    request: JobBulkImportRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import jobs from saved list or search results, running analysis on each."""
+    profile = await get_user_profile(current_user, db)
+    created_jobs: list[Job] = []
+    expires_at = None
+    if request.source == "search":
+        expires_at = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) + __import__("datetime").timedelta(days=7)
+
+    for item in request.jobs:
+        # Skip duplicates
+        existing = await db.execute(
+            select(Job).where(
+                Job.user_id == current_user.id,
+                Job.upwork_job_id == item.upwork_job_id,
+            )
+        )
+        if existing.scalar_one_or_none():
+            continue
+
+        # Generate embedding
+        job_text = f"{item.title}\n{item.description}"
+        if item.skills:
+            job_text += f"\nSkills: {', '.join(item.skills)}"
+        embedding = await generate_embedding(job_text)
+
+        # Run analysis
+        ar = await run_full_analysis(
+            db=db,
+            user_id=current_user.id,
+            profile=profile,
+            job_description=item.description,
+            job_skills=item.skills or [],
+            client_info=item.client_info,
+        )
+
+        analysis = {
+            "skill_matches": [m.model_dump() for m in ar.skill_matches],
+            "missing_skills": ar.missing_skills,
+            "strengths": ar.strengths,
+            "concerns": ar.concerns,
+            "deal_breaker_warnings": ar.deal_breaker_warnings,
+            "recommendation": ar.recommendation,
+        }
+
+        job = Job(
+            user_id=current_user.id,
+            upwork_job_id=item.upwork_job_id,
+            upwork_url=item.upwork_url,
+            title=item.title,
+            description=item.description,
+            budget_type=item.job_type,
+            skills_required=item.skills or [],
+            experience_level=item.experience_level,
+            client_info=item.client_info,
+            embedding=embedding,
+            match_score=ar.match_score,
+            analysis=analysis,
+            is_saved=request.source == "saved",
+            source=request.source,
+            expires_at=expires_at,
+            scraped_at=datetime.now(timezone.utc),
+        )
+        db.add(job)
+        created_jobs.append(job)
+
+    await db.commit()
+    for job in created_jobs:
+        await db.refresh(job)
+
+    return created_jobs
 
 
 @router.get("/{job_id}", response_model=JobResponse)
