@@ -27,8 +27,9 @@ router = APIRouter()
 async def register(request: Request, user_data: UserRegister, db: AsyncSession = Depends(get_db)):
     """Register a new user."""
     try:
+        email = user_data.email.lower().strip()
         # Check if email already exists
-        result = await db.execute(select(User).where(User.email == user_data.email))
+        result = await db.execute(select(User).where(User.email == email))
         existing_user = result.scalar_one_or_none()
 
         if existing_user:
@@ -38,9 +39,9 @@ async def register(request: Request, user_data: UserRegister, db: AsyncSession =
             )
 
         # Create user
-        logger.info(f"Creating user with email: {user_data.email}")
+        logger.info(f"Creating user with email: {email}")
         user = User(
-            email=user_data.email,
+            email=email,
             hashed_password=hash_password(user_data.password),
         )
         db.add(user)
@@ -74,8 +75,8 @@ async def register(request: Request, user_data: UserRegister, db: AsyncSession =
 @limiter.limit("5/minute")
 async def login(request: Request, user_data: UserLogin, db: AsyncSession = Depends(get_db)):
     """Login and get access token."""
-    # Find user
-    result = await db.execute(select(User).where(User.email == user_data.email))
+    # Find user (normalize email to lowercase)
+    result = await db.execute(select(User).where(User.email == user_data.email.lower().strip()))
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(user_data.password, user.hashed_password):
