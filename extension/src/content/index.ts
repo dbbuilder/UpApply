@@ -166,8 +166,8 @@ function extractProposals(): ScrapedProposal[] {
     const row = link.closest('tr');
     const sublocation = row?.getAttribute('data-ev-sublocation') || '';
     let status = 'submitted';
-    if (sublocation === 'active_candidacies') status = 'active';
-    else if (sublocation === 'interviews') status = 'interview';
+    if (sublocation === 'active_candidacies') status = 'responded';
+    else if (sublocation === 'interviews') status = 'interviewed';
 
     // Date is in <td data-cy="time-slot">
     let submittedAt: string | null = null;

@@ -507,6 +507,9 @@ async def import_proposals_from_upwork(
 
         embedding = await generate_embedding(text_for_embedding) if text_for_embedding else None
 
+        client_responded = status_str in ("responded", "interviewed", "hired")
+        was_hired = status_str == "hired"
+
         proposal = Proposal(
             user_id=current_user.id,
             upwork_proposal_id=upwork_proposal_id,
@@ -516,6 +519,8 @@ async def import_proposals_from_upwork(
             bid_amount=bid_amount,
             bid_type=bid_type,
             status=status_str,
+            client_responded=client_responded,
+            was_hired=was_hired,
             submitted_at=submitted_at,
             source="scraped",
             embedding=embedding,
