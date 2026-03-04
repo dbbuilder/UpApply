@@ -396,53 +396,41 @@ export default function GeneratorPage() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
-      <header className="bg-white border-b px-4 py-3 flex items-center justify-between">
-        <h1 className="font-bold text-gray-900">UpApply</h1>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setCurrentView('skills')}
-            className="text-gray-600 hover:text-gray-900 text-sm"
-          >
-            Skills
-          </button>
-          <button
-            type="button"
-            onClick={() => setCurrentView('memories')}
-            className="text-gray-600 hover:text-gray-900 text-sm"
-          >
-            Memories
-          </button>
-          <button
-            type="button"
-            onClick={() => setCurrentView('history')}
-            className="text-gray-600 hover:text-gray-900 text-sm"
-          >
-            History
-          </button>
-          <button
-            type="button"
-            onClick={() => setCurrentView('analytics')}
-            className="text-gray-600 hover:text-gray-900 text-sm"
-          >
-            Stats
-          </button>
-          <button
-            type="button"
-            onClick={() => setCurrentView('feedback')}
-            className="text-amber-600 hover:text-amber-700 text-sm"
-            title="Send feedback"
-          >
-            Feedback
-          </button>
+      <header className="bg-white border-b">
+        {/* Tier 1: Logo + Logout */}
+        <div className="px-4 py-2 flex items-center justify-between border-b border-gray-100">
+          <h1 className="font-bold text-gray-900 text-sm">UpApply</h1>
           <button
             type="button"
             onClick={logout}
-            className="text-gray-400 hover:text-gray-600 text-sm"
+            className="text-gray-400 hover:text-gray-600 text-xs"
           >
             Logout
           </button>
         </div>
+        {/* Tier 2: Nav tabs */}
+        <nav className="flex">
+          {[
+            { view: 'skills' as const, label: 'Skills' },
+            { view: 'memories' as const, label: 'Memories' },
+            { view: 'history' as const, label: 'Pipeline' },
+            { view: 'analytics' as const, label: 'Stats' },
+            { view: 'feedback' as const, label: 'Feedback' },
+          ].map(({ view, label }) => (
+            <button
+              key={view}
+              type="button"
+              onClick={() => setCurrentView(view)}
+              className={`flex-1 py-2 text-xs font-medium border-b-2 transition-colors ${
+                view === 'feedback'
+                  ? 'border-transparent text-amber-600 hover:text-amber-700 hover:border-amber-300'
+                  : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
       </header>
 
       {/* Content */}
