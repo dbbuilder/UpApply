@@ -443,6 +443,56 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 const INIT_FLAG = '__upapply_initialized__';
 
 /**
+ * Auto-fill cover letter from a pending Quick Apply initiated by the sidebar.
+ * Checks chrome.storage for a pendingAutoFill entry matching this apply page.
+ */
+async function checkPendingAutoFill(): Promise<void> {
+  if (!window.location.href.includes('/apply')) return;
+
+  const result = await chrome.storage.local.get('pendingAutoFill');
+  const pending = result.pendingAutoFill as {
+    jobUrl: string;
+    jobId: string;
+    coverLetter: string;
+    timestamp: number;
+  } | undefined;
+
+  if (!pending) return;
+
+  // Expire after 5 minutes
+  if (Date.now() - pending.timestamp > 5 * 60 * 1000) {
+    await chrome.storage.local.remove('pendingAutoFill');
+    return;
+  }
+
+  // Match by job slug (~XXXX) so URL format differences don't matter
+  const urlSlug = window.location.href.match(/(~[a-zA-Z0-9]+)/)?.[1];
+  const pendingSlug = pending.jobUrl?.match(/(~[a-zA-Z0-9]+)/)?.[1];
+  if (!urlSlug || urlSlug !== pendingSlug) return;
+
+  // Consume the pending fill immediately so it doesn't apply twice
+  await chrome.storage.local.remove('pendingAutoFill');
+  console.log('UpApply: Pending auto-fill found for job slug', urlSlug);
+
+  const tryFill = (): boolean => fillCoverLetter(pending.coverLetter);
+
+  // Try immediately; if form not rendered yet, wait via MutationObserver
+  if (!tryFill()) {
+    const observer = new MutationObserver(() => {
+      if (tryFill()) {
+        observer.disconnect();
+        console.log('UpApply: Pending auto-fill applied via observer');
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    // Give up after 15 seconds
+    setTimeout(() => observer.disconnect(), 15000);
+  } else {
+    console.log('UpApply: Pending auto-fill applied immediately');
+  }
+}
+
+/**
  * Initialize content script.
  */
 function init() {
@@ -461,6 +511,9 @@ function init() {
     url: window.location.href,
     isJobPage: isJobPage(),
   }).catch(() => { /* sidebar/background may not be listening */ });
+
+  // Check for Quick Apply pending fill (fires when sidebar opens an apply page)
+  checkPendingAutoFill().catch(() => {});
 
   // Initialize draft saver on proposal/apply pages
   initDraftSaver();
@@ -485,6 +538,9 @@ function init() {
 
       // Re-initialize draft saver if navigated to apply page
       initDraftSaver();
+
+      // Check for pending Quick Apply fill after SPA navigation
+      checkPendingAutoFill().catch(() => {});
     }
   });
 

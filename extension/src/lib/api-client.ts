@@ -340,6 +340,13 @@ class ApiClient {
     });
   }
 
+  async updateProposal(id: string, data: Partial<ProposalCreate> & { was_hired?: boolean; client_responded?: boolean }) {
+    return this.request<Proposal>(`/api/v1/proposals/${id}`, {
+      method: 'PUT',
+      body: data,
+    });
+  }
+
   async getProposalStats() {
     return this.request<ProposalStats>('/api/v1/proposals/stats');
   }
