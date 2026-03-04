@@ -118,8 +118,7 @@ function extractJobData(): JobData {
  * Check if we're on a job details page.
  */
 function isJobPage(): boolean {
-  return window.location.href.includes('/jobs/') ||
-         window.location.href.includes('/nx/proposals/');
+  return window.location.href.includes('/jobs/');
 }
 
 /**

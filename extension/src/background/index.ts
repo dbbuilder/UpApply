@@ -234,6 +234,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (chrome.runtime.lastError) {
               sendResponse({ success: false, error: 'Content script not loaded. Please refresh the page.' });
             } else {
+              if (response?.debug?.length) {
+                console.log('UpApply Proposals debug — selectors that matched: ' + response.debug.join(' | '));
+              }
+              console.log('UpApply Proposals scrape result:', response?.success, '— found', response?.data?.length ?? 0, 'proposals', 'url:', response?.url);
               sendResponse(response || { success: false, error: 'No response' });
             }
           });
@@ -436,9 +440,11 @@ chrome.sidePanel
 // Debounce extraction per tab to avoid duplicate EXTRACT_JOB_DATA messages
 const pendingExtractions = new Map<number, ReturnType<typeof setTimeout>>();
 
-// Listen for tab updates to extract job data on Upwork pages
+// Listen for tab updates to extract job data on Upwork job pages
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab.url?.includes('upwork.com')) {
+  const url = tab.url ?? '';
+  const isJobUrl = url.includes('upwork.com') && url.includes('/jobs/');
+  if (changeInfo.status === 'complete' && isJobUrl) {
     // Cancel any pending extraction for this tab
     const existing = pendingExtractions.get(tabId);
     if (existing) clearTimeout(existing);
