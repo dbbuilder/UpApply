@@ -1,14 +1,14 @@
 """Add source, is_saved, and expires_at to jobs table.
 
-Revision ID: 008
-Revises: 007
+Revision ID: 008_add_job_source_fields
+Revises: 007_lowercase_emails
 Create Date: 2026-03-04
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = '008'
-down_revision = '007'
+revision = '008_add_job_source_fields'
+down_revision = '007_lowercase_emails'
 branch_labels = None
 depends_on = None
 

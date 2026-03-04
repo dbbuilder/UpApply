@@ -273,6 +273,69 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       return true;
 
+    case 'IMPORT_SAVED_JOBS':
+      // Navigate to saved jobs page in background tab, scrape, close, return cards
+      (async () => {
+        const savedUrl = 'https://www.upwork.com/nx/search/jobs/saved/';
+        console.log('UpApply Background: Opening saved jobs tab:', savedUrl);
+        const savedTab = await chrome.tabs.create({ url: savedUrl, active: false });
+        if (!savedTab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }
+        try {
+          await waitForTabLoad(savedTab.id);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const manifest = chrome.runtime.getManifest();
+          const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+          if (contentScriptPath) {
+            try { await chrome.scripting.executeScript({ target: { tabId: savedTab.id }, files: [contentScriptPath] }); }
+            catch (e) { /* already loaded */ }
+          }
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const response = await new Promise<{ success: boolean; data?: unknown; error?: string }>((resolve) => {
+            chrome.tabs.sendMessage(savedTab.id!, { type: 'SCRAPE_JOB_CARDS' }, (resp) => {
+              if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
+              else resolve(resp || { success: false, error: 'No response' });
+            });
+          });
+          sendResponse(response);
+        } finally {
+          try { await chrome.tabs.remove(savedTab.id); } catch (e) { /* ignore */ }
+        }
+      })();
+      return true;
+
+    case 'IMPORT_PROPOSALS':
+      // Navigate to proposals page in background tab, scrape all proposals, close, return
+      (async () => {
+        const proposalsUrl = 'https://www.upwork.com/nx/find-work/proposals';
+        console.log('UpApply Background: Opening proposals tab:', proposalsUrl);
+        const propTab = await chrome.tabs.create({ url: proposalsUrl, active: false });
+        if (!propTab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }
+        try {
+          await waitForTabLoad(propTab.id);
+          await new Promise(resolve => setTimeout(resolve, 2500));
+          const manifest = chrome.runtime.getManifest();
+          const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+          if (contentScriptPath) {
+            try { await chrome.scripting.executeScript({ target: { tabId: propTab.id }, files: [contentScriptPath] }); }
+            catch (e) { /* already loaded */ }
+          }
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const response = await new Promise<{ success: boolean; data?: unknown; error?: string; debug?: string[] }>((resolve) => {
+            chrome.tabs.sendMessage(propTab.id!, { type: 'SCRAPE_PROPOSALS' }, (resp) => {
+              if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
+              else resolve(resp || { success: false, error: 'No response' });
+            });
+          });
+          if (response?.debug?.length) {
+            console.log('UpApply Proposals debug:', response.debug.join(' | '));
+          }
+          sendResponse(response);
+        } finally {
+          try { await chrome.tabs.remove(propTab.id); } catch (e) { /* ignore */ }
+        }
+      })();
+      return true;
+
     case 'SEARCH_UPWORK_JOBS':
       // Open a background tab, scrape search results, close tab, return cards
       (async () => {

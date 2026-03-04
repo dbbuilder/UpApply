@@ -304,19 +304,15 @@ export default function HistoryPage() {
 
   const handleImportFromUpwork = async () => {
     setImporting(true);
-    setImportStatus('Checking page...');
+    setImportStatus('Opening proposals page...');
     try {
-      // Ask background to scrape the active tab (must be on My Proposals page)
+      // Open proposals page in background tab, scrape, close automatically
       const scrapeResult = await new Promise<{ success: boolean; data?: unknown[]; error?: string }>(
-        (resolve) => chrome.runtime.sendMessage({ type: 'SCRAPE_PROPOSALS' }, resolve)
+        (resolve) => chrome.runtime.sendMessage({ type: 'IMPORT_PROPOSALS' }, resolve)
       );
 
       if (!scrapeResult?.success || !scrapeResult.data?.length) {
-        setImportStatus(
-          scrapeResult?.error === 'Not on My Proposals page'
-            ? 'Navigate to upwork.com/nx/find-work/proposals first, then click Import.'
-            : `Nothing found. ${scrapeResult?.error || 'No proposals on this page.'}`
-        );
+        setImportStatus(`Nothing found. ${scrapeResult?.error || 'No proposals found.'}`);
         return;
       }
 
@@ -418,18 +414,15 @@ export default function HistoryPage() {
 
   const handleImportSavedJobs = async () => {
     setSavedImporting(true);
-    setSavedImportStatus('Checking page...');
+    setSavedImportStatus('Opening saved jobs page...');
     try {
+      // Open saved jobs page in background tab, scrape, close automatically
       const scrapeResult = await new Promise<{ success: boolean; data?: JobImportItem[]; error?: string }>(
-        (resolve) => chrome.runtime.sendMessage({ type: 'SCRAPE_JOB_CARDS' }, resolve)
+        (resolve) => chrome.runtime.sendMessage({ type: 'IMPORT_SAVED_JOBS' }, resolve)
       );
 
       if (!scrapeResult?.success || !scrapeResult.data?.length) {
-        setSavedImportStatus(
-          scrapeResult?.error?.includes('Not on a job listings page')
-            ? 'Navigate to upwork.com/nx/search/jobs/saved first, then click Import.'
-            : `Nothing found. ${scrapeResult?.error || ''}`
-        );
+        setSavedImportStatus(`Nothing found. ${scrapeResult?.error || ''}`);
         return;
       }
 
@@ -665,7 +658,7 @@ export default function HistoryPage() {
               <div className="text-center py-8 text-gray-500">
                 <p className="font-medium">No proposals yet</p>
                 <p className="text-sm mt-1">
-                  Navigate to your Upwork My Proposals page and click Import above.
+                  Click Import above — it will open your Upwork proposals page automatically.
                 </p>
               </div>
             ) : (
@@ -705,7 +698,7 @@ export default function HistoryPage() {
                 <p className="text-xs text-gray-500 flex-1">{savedImportStatus}</p>
               ) : (
                 <p className="text-xs text-gray-400 flex-1">
-                  Go to Upwork → Saved Jobs, then click Import
+                  Auto-opens Upwork saved jobs page and imports
                 </p>
               )}
             </div>
