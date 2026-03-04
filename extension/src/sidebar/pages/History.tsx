@@ -229,6 +229,8 @@ export default function HistoryPage() {
   const [applyStatuses, setApplyStatuses] = useState<Record<string, string>>({});
 
   const [error, setError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
 
   const loadProposals = useCallback(async () => {
     setProposalsLoading(true);
@@ -271,6 +273,38 @@ export default function HistoryPage() {
       loadJobs();
     }
   }, [activeTab, loadProposals, loadJobs]);
+
+  const handleImportFromUpwork = async () => {
+    setImporting(true);
+    setImportStatus('Checking page...');
+    try {
+      // Ask background to scrape the active tab (must be on My Proposals page)
+      const scrapeResult = await new Promise<{ success: boolean; data?: unknown[]; error?: string }>(
+        (resolve) => chrome.runtime.sendMessage({ type: 'SCRAPE_PROPOSALS' }, resolve)
+      );
+
+      if (!scrapeResult?.success || !scrapeResult.data?.length) {
+        setImportStatus(
+          scrapeResult?.error === 'Not on My Proposals page'
+            ? 'Navigate to upwork.com/nx/find-work/proposals first, then click Import.'
+            : `Nothing found. ${scrapeResult?.error || 'No proposals on this page.'}`
+        );
+        return;
+      }
+
+      setImportStatus(`Importing ${scrapeResult.data.length} proposals...`);
+      const imported = await apiClient.importProposalsFromUpwork(
+        scrapeResult.data as Record<string, unknown>[]
+      );
+      setImportStatus(`Imported ${imported.length} new proposals.`);
+      await loadProposals();
+    } catch {
+      setImportStatus('Import failed. Try again.');
+    } finally {
+      setImporting(false);
+      setTimeout(() => setImportStatus(null), 5000);
+    }
+  };
 
   const handleOutcomeChange = async (proposalId: string, status: string, wasHired: boolean) => {
     try {
@@ -411,15 +445,35 @@ export default function HistoryPage() {
         {/* Proposals Tab */}
         {!isLoading && !error && activeTab === 'proposals' && (
           <>
+            {/* Import bar */}
+            <div className="flex items-center gap-2 mb-3">
+              <button
+                type="button"
+                onClick={handleImportFromUpwork}
+                disabled={importing}
+                className="btn-outline text-xs py-1 px-3 disabled:opacity-60"
+              >
+                {importing ? 'Importing...' : '↓ Import from Upwork'}
+              </button>
+              {importStatus && (
+                <p className="text-xs text-gray-500 flex-1">{importStatus}</p>
+              )}
+              {!importStatus && (
+                <p className="text-xs text-gray-400 flex-1">
+                  Go to upwork.com/nx/find-work/proposals, then click Import
+                </p>
+              )}
+            </div>
+
             {proposals.length > 0 && (
               <InsightsBar proposals={proposals} jobs={jobs} />
             )}
 
             {proposals.length === 0 ? (
-              <div className="text-center py-10 text-gray-500">
+              <div className="text-center py-8 text-gray-500">
                 <p className="font-medium">No proposals yet</p>
                 <p className="text-sm mt-1">
-                  Import from the My Proposals page or submit applications via the Generator.
+                  Navigate to your Upwork My Proposals page and click Import above.
                 </p>
               </div>
             ) : (
