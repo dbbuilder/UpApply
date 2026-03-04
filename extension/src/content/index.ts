@@ -246,7 +246,7 @@ function waitForProposalPageChange(previousFirstId: string | null, timeoutMs = 4
  * when multiple content script instances are active.
  */
 async function extractAllProposals(): Promise<ScrapedProposal[]> {
-  const win = window as Record<string, unknown>;
+  const win = window as unknown as Record<string, unknown>;
 
   // If another instance already started scraping, share its result
   if (win[SCRAPE_KEY]) {
