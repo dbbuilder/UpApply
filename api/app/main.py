@@ -64,12 +64,12 @@ app.include_router(api_v1_router, prefix="/api/v1")
 @app.get("/admin/users")
 async def admin_users(x_admin_key: str = None):
     """Temporary admin endpoint — list all users/profiles."""
-    from fastapi import Header, HTTPException
+    from fastapi import HTTPException
     from sqlalchemy import text
-    from app.core.database import AsyncSessionLocal
+    from app.core.database import async_session_maker
     if x_admin_key != "upapply-admin-2026":
         raise HTTPException(status_code=403, detail="Forbidden")
-    async with AsyncSessionLocal() as db:
+    async with async_session_maker() as db:
         rows = await db.execute(text("""
             SELECT u.email, u.created_at::date as joined,
                    p.full_name, p.professional_title, p.setup_completed,
