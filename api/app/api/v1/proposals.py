@@ -409,7 +409,7 @@ async def import_proposals_from_upwork(
             user_id=current_user.id,
             upwork_proposal_id=upwork_proposal_id,
             upwork_job_url=job_url,
-            cover_letter_text=cover_letter_text,
+            cover_letter_text=cover_letter_text or "",
             job_title=job_title,
             bid_amount=bid_amount,
             bid_type=bid_type,
