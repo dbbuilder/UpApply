@@ -196,8 +196,9 @@ function extractProposals(): ScrapedProposal[] {
   return proposals;
 }
 
-// Prevent concurrent scraping runs across multiple content script instances
-let _scrapingInProgress = false;
+// window-level key for the shared scraping promise (shared across all
+// instances of this content script injected into the same tab).
+const SCRAPE_KEY = '__upapplyScrapingPromise';
 
 /**
  * Wait for the next-page button to become enabled (not disabled).
@@ -245,13 +246,16 @@ function waitForProposalPageChange(previousFirstId: string | null, timeoutMs = 4
  * when multiple content script instances are active.
  */
 async function extractAllProposals(): Promise<ScrapedProposal[]> {
-  if (_scrapingInProgress) {
-    console.log('UpApply: Scraping already in progress in another instance, skipping');
-    return [];
-  }
-  _scrapingInProgress = true;
+  const win = window as Record<string, unknown>;
 
-  try {
+  // If another instance already started scraping, share its result
+  if (win[SCRAPE_KEY]) {
+    console.log('UpApply: Joining existing scrape in progress');
+    return win[SCRAPE_KEY] as Promise<ScrapedProposal[]>;
+  }
+
+  // Become the leader — store the promise so other instances join it
+  const scrapePromise = (async (): Promise<ScrapedProposal[]> => {
     const paginationDiv = document.querySelector('[data-ev-max_page_count]');
     const totalPages = paginationDiv
       ? parseInt(paginationDiv.getAttribute('data-ev-max_page_count') || '1', 10)
@@ -290,12 +294,17 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
       await waitForProposalPageChange(previousFirstHref);
 
       addPage(extractProposals());
-  }
+    }
 
     console.log('UpApply: Total proposals across all pages:', all.length);
     return all;
+  })();
+
+  win[SCRAPE_KEY] = scrapePromise;
+  try {
+    return await scrapePromise;
   } finally {
-    _scrapingInProgress = false;
+    delete win[SCRAPE_KEY];
   }
 }
 
