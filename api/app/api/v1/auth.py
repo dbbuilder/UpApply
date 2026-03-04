@@ -122,10 +122,28 @@ async def get_current_user_info(
     )
     profile = result.scalar_one_or_none()
 
+    # A profile is considered "complete" if setup_completed is True OR if the
+    # profile has real data (name/title/goals/skills), which handles accounts
+    # created before the wizard existed or where the final step was skipped.
+    profile_has_data = (
+        profile is not None and (
+            profile.setup_completed
+            or bool(profile.full_name)
+            or bool(profile.professional_title)
+            or bool(profile.career_goals)
+            or bool(profile.skills)
+        )
+    )
+
+    # Auto-heal: persist setup_completed so future calls don't re-check
+    if profile is not None and not profile.setup_completed and profile_has_data:
+        profile.setup_completed = True
+        await db.commit()
+
     return UserResponse(
         id=current_user.id,
         email=current_user.email,
         is_active=current_user.is_active,
         is_verified=current_user.is_verified,
-        has_profile=profile is not None and profile.setup_completed,
+        has_profile=profile_has_data,
     )
