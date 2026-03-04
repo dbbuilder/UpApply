@@ -351,6 +351,22 @@ class ApiClient {
     return this.request<ProposalStats>('/api/v1/proposals/stats');
   }
 
+  async getProposalInsights() {
+    return this.request<{
+      insights: {
+        whats_working: string;
+        whats_not_landing: string;
+        recommendations: string[];
+        job_types_to_target: string[];
+        job_types_to_avoid: string[];
+        positioning_tip: string;
+      } | null;
+      proposal_count?: number;
+      response_rate?: number;
+      message?: string;
+    }>('/api/v1/proposals/insights');
+  }
+
   // Attachment extraction
   async extractJobAttachments(
     jobId: string,

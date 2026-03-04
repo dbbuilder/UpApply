@@ -1,4 +1,5 @@
 """Proposal endpoints with pgvector semantic search."""
+import json
 from typing import List, Optional
 from datetime import datetime
 
@@ -6,11 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.core.embeddings import generate_embedding
+from app.core.embeddings import generate_embedding, get_openai_client
 from app.models.user import User
 from app.models.proposal import Proposal
+from app.models.user_profile import UserProfile
 from app.schemas.proposal import (
     ProposalCreate,
     ProposalUpdate,
@@ -125,6 +128,105 @@ async def get_proposal_stats(
         "hire_rate": (row.hired / row.total * 100) if row.total else 0,
         "response_rate": (row.responded / row.total * 100) if row.total else 0,
     }
+
+
+@router.get("/insights")
+async def get_proposal_insights(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Use AI to analyze proposal history and generate actionable insights."""
+    # Fetch all proposals
+    result = await db.execute(
+        select(Proposal)
+        .where(Proposal.user_id == current_user.id)
+        .order_by(Proposal.submitted_at.desc().nullslast())
+    )
+    proposals = result.scalars().all()
+
+    if len(proposals) < 3:
+        return {"insights": None, "message": "Submit at least 3 proposals to unlock AI insights."}
+
+    # Fetch user profile for context
+    profile_result = await db.execute(
+        select(UserProfile).where(UserProfile.user_id == current_user.id)
+    )
+    profile = profile_result.scalar_one_or_none()
+
+    # Build a structured summary for the AI
+    status_counts: dict = {}
+    for p in proposals:
+        s = p.status or "submitted"
+        status_counts[s] = status_counts.get(s, 0) + 1
+
+    active_titles = [p.job_title for p in proposals if p.status in ("active", "interview") and p.job_title]
+    silent_titles = [p.job_title for p in proposals if p.status == "submitted" and p.job_title]
+    hired_titles  = [p.job_title for p in proposals if p.was_hired and p.job_title]
+
+    bid_amounts = [float(p.bid_amount) for p in proposals if p.bid_amount]
+    avg_bid = sum(bid_amounts) / len(bid_amounts) if bid_amounts else None
+
+    recent_titles = [p.job_title for p in proposals[:10] if p.job_title]
+
+    profile_summary = ""
+    if profile:
+        profile_summary = f"""
+Freelancer profile:
+- Title: {profile.professional_title or 'not set'}
+- Skills: {', '.join((profile.skills or [])[:15])}
+- Goals: {(profile.career_goals or '')[:200]}
+- Preferred rate: {profile.hourly_rate_min or '?'}–{profile.hourly_rate_max or '?'}/hr
+""".strip()
+
+    summary = f"""
+Proposal history ({len(proposals)} total):
+- Status breakdown: {json.dumps(status_counts)}
+- Response rate: {round(len(active_titles) / len(proposals) * 100)}% ({len(active_titles)} responses out of {len(proposals)})
+- Hired: {len(hired_titles)} times
+
+Job titles that GOT a response ({len(active_titles)}):
+{chr(10).join(f'  - {t}' for t in active_titles[:20])}
+
+Job titles that went SILENT ({len(silent_titles)} sample):
+{chr(10).join(f'  - {t}' for t in silent_titles[:20])}
+
+{f'Hired for: {chr(10).join(f"  - {t}" for t in hired_titles)}' if hired_titles else ''}
+
+{f'Average bid: ${avg_bid:.0f}/hr' if avg_bid else 'No bid data yet'}
+
+10 most recent applications:
+{chr(10).join(f'  - {t}' for t in recent_titles)}
+
+{profile_summary}
+""".strip()
+
+    client = get_openai_client()
+    response = await client.chat.completions.create(
+        model=settings.default_model,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are an expert Upwork career coach analyzing a freelancer's proposal history. "
+                    "Be specific, data-driven, and brutally honest. Focus on what will actually improve results. "
+                    "Return a JSON object with these exact keys: "
+                    "whats_working (string, 2-3 sentences on patterns in responded/hired proposals), "
+                    "whats_not_landing (string, 2-3 sentences on patterns in ignored proposals), "
+                    "recommendations (array of 3-5 specific actionable strings), "
+                    "job_types_to_target (array of 3-5 job category strings based on response patterns), "
+                    "job_types_to_avoid (array of 2-3 job category strings with poor response rates), "
+                    "positioning_tip (string, one specific advice about how to position yourself better). "
+                    "Be concrete — mention actual job title patterns, not generic advice."
+                ),
+            },
+            {"role": "user", "content": summary},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.4,
+    )
+
+    insights = json.loads(response.choices[0].message.content)
+    return {"insights": insights, "proposal_count": len(proposals), "response_rate": round(len(active_titles) / len(proposals) * 100)}
 
 
 @router.get("/{proposal_id}", response_model=ProposalResponse)

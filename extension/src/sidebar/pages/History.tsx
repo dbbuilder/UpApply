@@ -232,6 +232,33 @@ export default function HistoryPage() {
   const [importing, setImporting] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
+  const [insights, setInsights] = useState<{
+    whats_working: string;
+    whats_not_landing: string;
+    recommendations: string[];
+    job_types_to_target: string[];
+    job_types_to_avoid: string[];
+    positioning_tip: string;
+  } | null>(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsMessage, setInsightsMessage] = useState<string | null>(null);
+
+  const loadInsights = useCallback(async () => {
+    setInsightsLoading(true);
+    try {
+      const data = await apiClient.getProposalInsights();
+      if (data.insights) {
+        setInsights(data.insights);
+      } else {
+        setInsightsMessage(data.message || null);
+      }
+    } catch {
+      // silently fail — insights are supplementary
+    } finally {
+      setInsightsLoading(false);
+    }
+  }, []);
+
   const loadProposals = useCallback(async () => {
     setProposalsLoading(true);
     setError(null);
@@ -269,10 +296,11 @@ export default function HistoryPage() {
   useEffect(() => {
     if (activeTab === 'proposals') {
       loadProposals();
+      loadInsights();
     } else {
       loadJobs();
     }
-  }, [activeTab, loadProposals, loadJobs]);
+  }, [activeTab, loadProposals, loadJobs, loadInsights]);
 
   const handleImportFromUpwork = async () => {
     setImporting(true);
@@ -467,6 +495,77 @@ export default function HistoryPage() {
 
             {proposals.length > 0 && (
               <InsightsBar proposals={proposals} jobs={jobs} />
+            )}
+
+            {/* AI Insights Panel */}
+            {(insightsLoading || insights || insightsMessage) && (
+              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-indigo-800">AI Pipeline Insights</h3>
+                  {!insightsLoading && (
+                    <button
+                      onClick={loadInsights}
+                      className="text-xs text-indigo-500 hover:text-indigo-700"
+                    >
+                      Refresh
+                    </button>
+                  )}
+                </div>
+
+                {insightsLoading && (
+                  <p className="text-xs text-indigo-500 animate-pulse">Analyzing your proposal history…</p>
+                )}
+
+                {insightsMessage && !insightsLoading && (
+                  <p className="text-xs text-gray-500">{insightsMessage}</p>
+                )}
+
+                {insights && !insightsLoading && (
+                  <div className="space-y-3 text-xs">
+                    <div>
+                      <p className="font-semibold text-green-700 mb-1">✓ What's working</p>
+                      <p className="text-gray-700">{insights.whats_working}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-orange-700 mb-1">✗ What's not landing</p>
+                      <p className="text-gray-700">{insights.whats_not_landing}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-indigo-700 mb-1">→ Target these job types</p>
+                      <div className="flex flex-wrap gap-1">
+                        {insights.job_types_to_target.map((t, i) => (
+                          <span key={i} className="bg-green-100 text-green-800 px-2 py-0.5 rounded-full">{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                    {insights.job_types_to_avoid.length > 0 && (
+                      <div>
+                        <p className="font-semibold text-red-700 mb-1">✗ Avoid these</p>
+                        <div className="flex flex-wrap gap-1">
+                          {insights.job_types_to_avoid.map((t, i) => (
+                            <span key={i} className="bg-red-100 text-red-800 px-2 py-0.5 rounded-full">{t}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div>
+                      <p className="font-semibold text-purple-700 mb-1">💡 Positioning tip</p>
+                      <p className="text-gray-700">{insights.positioning_tip}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-blue-700 mb-2">Action items</p>
+                      <ul className="space-y-1">
+                        {insights.recommendations.map((r, i) => (
+                          <li key={i} className="flex gap-2">
+                            <span className="text-blue-400 shrink-0">{i + 1}.</span>
+                            <span className="text-gray-700">{r}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
 
             {proposals.length === 0 ? (
