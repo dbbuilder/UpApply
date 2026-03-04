@@ -196,6 +196,27 @@ function extractProposals(): ScrapedProposal[] {
   return proposals;
 }
 
+// Prevent concurrent scraping runs across multiple content script instances
+let _scrapingInProgress = false;
+
+/**
+ * Wait for the next-page button to become enabled (not disabled).
+ * The button is briefly disabled during page transitions.
+ */
+function waitForNextButton(timeoutMs = 3000): Promise<HTMLButtonElement | null> {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs;
+    const check = () => {
+      const btn = document.querySelector<HTMLButtonElement>('button[data-test="next-page"]');
+      if (!btn) { resolve(null); return; }
+      if (!btn.disabled) { resolve(btn); return; }
+      if (Date.now() >= deadline) { resolve(null); return; }
+      setTimeout(check, 150);
+    };
+    setTimeout(check, 150);
+  });
+}
+
 /**
  * Wait for new proposal links to appear after a page navigation click.
  * Resolves when the first proposal link's href changes or a timeout occurs.
@@ -220,50 +241,62 @@ function waitForProposalPageChange(previousFirstId: string | null, timeoutMs = 4
 
 /**
  * Extract proposals across all pagination pages by clicking "next page"
- * until the last page is reached.
+ * until the last page is reached. Uses a lock to prevent concurrent runs
+ * when multiple content script instances are active.
  */
 async function extractAllProposals(): Promise<ScrapedProposal[]> {
-  const paginationDiv = document.querySelector('[data-ev-max_page_count]');
-  const totalPages = paginationDiv
-    ? parseInt(paginationDiv.getAttribute('data-ev-max_page_count') || '1', 10)
-    : 1;
+  if (_scrapingInProgress) {
+    console.log('UpApply: Scraping already in progress in another instance, skipping');
+    return [];
+  }
+  _scrapingInProgress = true;
 
-  console.log('UpApply: Proposals pagination — total pages:', totalPages);
+  try {
+    const paginationDiv = document.querySelector('[data-ev-max_page_count]');
+    const totalPages = paginationDiv
+      ? parseInt(paginationDiv.getAttribute('data-ev-max_page_count') || '1', 10)
+      : 1;
 
-  const all: ScrapedProposal[] = [];
-  const seenIds = new Set<string>();
+    console.log('UpApply: Proposals pagination — total pages:', totalPages);
 
-  const addPage = (page: ScrapedProposal[]) => {
-    for (const p of page) {
-      if (p.proposalId && !seenIds.has(p.proposalId)) {
-        seenIds.add(p.proposalId);
-        all.push(p);
+    const all: ScrapedProposal[] = [];
+    const seenIds = new Set<string>();
+
+    const addPage = (page: ScrapedProposal[]) => {
+      for (const p of page) {
+        if (p.proposalId && !seenIds.has(p.proposalId)) {
+          seenIds.add(p.proposalId);
+          all.push(p);
+        }
       }
-    }
-  };
+    };
 
-  // Page 1 is already loaded
-  addPage(extractProposals());
-
-  for (let page = 2; page <= totalPages; page++) {
-    const firstLink = document.querySelector<HTMLAnchorElement>('a[data-ev-label="jpn_list_details_link"]');
-    const previousFirstHref = firstLink?.getAttribute('href') || null;
-
-    const nextBtn = document.querySelector<HTMLButtonElement>('button[data-test="next-page"]:not(:disabled)');
-    if (!nextBtn) {
-      console.log('UpApply: No next button found at page', page - 1, '— stopping');
-      break;
-    }
-
-    console.log('UpApply: Clicking to page', page, 'of', totalPages);
-    nextBtn.click();
-    await waitForProposalPageChange(previousFirstHref);
-
+    // Page 1 is already loaded
     addPage(extractProposals());
+
+    for (let page = 2; page <= totalPages; page++) {
+      const firstLink = document.querySelector<HTMLAnchorElement>('a[data-ev-label="jpn_list_details_link"]');
+      const previousFirstHref = firstLink?.getAttribute('href') || null;
+
+      // Wait for next button to be enabled (it's briefly disabled during transitions)
+      const nextBtn = await waitForNextButton();
+      if (!nextBtn) {
+        console.log('UpApply: No enabled next button found at page', page - 1, '— stopping');
+        break;
+      }
+
+      console.log('UpApply: Clicking to page', page, 'of', totalPages);
+      nextBtn.click();
+      await waitForProposalPageChange(previousFirstHref);
+
+      addPage(extractProposals());
   }
 
-  console.log('UpApply: Total proposals across all pages:', all.length);
-  return all;
+    console.log('UpApply: Total proposals across all pages:', all.length);
+    return all;
+  } finally {
+    _scrapingInProgress = false;
+  }
 }
 
 /**
