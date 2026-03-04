@@ -162,9 +162,16 @@ export const SELECTORS = {
   // My Proposals page selectors (for scraping proposal history)
   proposalListItem: [
     '[data-test="proposal-list-item"]',
+    '[data-test="proposals-list"] > li',
+    '[data-test="proposals-list"] > div',
+    '[data-test="proposal-row"]',
     '.proposals-list-item',
     '.my-proposals-list article',
     '.up-card-section.up-card-list-section',
+    '[class*="ProposalListItem"]',
+    '[class*="proposal-list-item"]',
+    'section[aria-label*="proposal" i]',
+    'li[data-ev-label*="proposal" i]',
   ],
 
   proposalJobTitle: [

@@ -126,9 +126,11 @@ function isJobPage(): boolean {
  * Check if we're on the My Proposals page.
  */
 function isMyProposalsPage(): boolean {
-  return window.location.href.includes('/freelancers/proposals') ||
-         window.location.href.includes('/nx/find-work/proposals') ||
-         window.location.href.includes('/ab/proposals');
+  const url = window.location.href;
+  return url.includes('/freelancers/proposals') ||
+         url.includes('/nx/find-work/proposals') ||
+         url.includes('/nx/proposals') ||
+         url.includes('/ab/proposals');
 }
 
 /**
@@ -137,9 +139,30 @@ function isMyProposalsPage(): boolean {
 function extractProposals(): ScrapedProposal[] {
   const proposals: ScrapedProposal[] = [];
 
-  // Find all proposal items
+  // Debug: dump candidate containers to help identify the real selectors
+  const debugSelectors = [
+    '[data-test="proposal-list-item"]',
+    '[data-test="proposals-list"] > *',
+    '[data-test="proposal-row"]',
+    '.proposals-list-item',
+    '.up-card-section.up-card-list-section',
+    'section[data-test]',
+    'article',
+    '[class*="proposal"]',
+    '[class*="Proposal"]',
+    '[class*="job-tile"]',
+    '[class*="JobTile"]',
+    'li[class*="proposal"]',
+    '[data-ev-label*="proposal"]',
+  ];
+  for (const sel of debugSelectors) {
+    const count = document.querySelectorAll(sel).length;
+    if (count > 0) console.log(`UpApply: selector "${sel}" matches ${count} elements`);
+  }
+
+  // Find all proposal items — try multiple selector patterns
   const proposalItems = querySelectorAll(SELECTORS.proposalListItem);
-  console.log('UpApply: Found', proposalItems.length, 'proposal items');
+  console.log('UpApply: Found', proposalItems.length, 'proposal items via SELECTORS.proposalListItem');
 
   for (const item of proposalItems) {
     try {
@@ -399,7 +422,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       } else {
         try {
           const proposals = extractProposals();
-          sendResponse({ success: true, data: proposals });
+          sendResponse({ success: true, data: proposals, url: window.location.href });
         } catch (err) {
           sendResponse({ success: false, error: String(err) });
         }
