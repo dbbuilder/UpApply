@@ -138,88 +138,61 @@ function isMyProposalsPage(): boolean {
  */
 function extractProposals(): ScrapedProposal[] {
   const proposals: ScrapedProposal[] = [];
+  const seen = new Set<string>();
 
-  // Debug: dump candidate containers to help identify the real selectors
-  const debugSelectors = [
-    '[data-test="proposal-list-item"]',
-    '[data-test="proposals-list"] > *',
-    '[data-test="proposal-row"]',
-    '.proposals-list-item',
-    '.up-card-section.up-card-list-section',
-    'section[data-test]',
-    'article',
-    '[class*="proposal"]',
-    '[class*="Proposal"]',
-    '[class*="job-tile"]',
-    '[class*="JobTile"]',
-    'li[class*="proposal"]',
-    '[data-ev-label*="proposal"]',
-  ];
-  for (const sel of debugSelectors) {
-    const count = document.querySelectorAll(sel).length;
-    if (count > 0) console.log(`UpApply: selector "${sel}" matches ${count} elements`);
-  }
+  // Strategy: anchor off proposal list row links.
+  // On /nx/proposals/ the links use data-ev-label="jpn_list_details_link" and
+  // href="/nx/proposals/{numericId}". Status comes from the <tr>'s data-ev-sublocation.
+  // Fallback: any <a href*="/nx/proposals/"> that links to a numeric proposal ID.
+  const proposalLinks = Array.from(
+    document.querySelectorAll<HTMLAnchorElement>(
+      'a[data-ev-label="jpn_list_details_link"], a[href*="/nx/proposals/"]:not([href$="/nx/proposals/"])'
+    )
+  );
+  console.log('UpApply: Found', proposalLinks.length, 'proposal links');
 
-  // Find all proposal items — try multiple selector patterns
-  const proposalItems = querySelectorAll(SELECTORS.proposalListItem);
-  console.log('UpApply: Found', proposalItems.length, 'proposal items via SELECTORS.proposalListItem');
+  for (const link of proposalLinks) {
+    const href = link.getAttribute('href') || '';
+    const proposalUrl = new URL(href, window.location.origin).href;
+    // Extract numeric proposal ID from /nx/proposals/{numericId}
+    const proposalIdMatch = proposalUrl.match(/\/nx\/proposals\/(\d+)/);
+    const proposalId = proposalIdMatch?.[1] || null;
+    if (!proposalId || seen.has(proposalId)) continue;
+    seen.add(proposalId);
 
-  for (const item of proposalItems) {
-    try {
-      // Extract job title and URL
-      const titleElement = item.querySelector('h4 a, .job-title-link, [data-test="proposal-job-title"]');
-      const jobTitle = titleElement?.textContent?.trim() || null;
-      const jobUrl = titleElement?.getAttribute('href') || null;
+    const jobTitle = link.textContent?.trim() || link.getAttribute('aria-label')?.replace(/ Boosted$/, '').trim() || null;
+    if (!jobTitle) continue;
 
-      // Try to get proposal ID from data attributes or URL
-      const proposalId = item.getAttribute('data-proposal-id') ||
-                         jobUrl?.match(/~([a-zA-Z0-9]+)/)?.[1] ||
-                         null;
+    // The <tr> contains data-ev-sublocation indicating which section this is in
+    const row = link.closest('tr');
+    const sublocation = row?.getAttribute('data-ev-sublocation') || '';
+    let status = 'submitted';
+    if (sublocation === 'active_candidacies') status = 'active';
+    else if (sublocation === 'interviews') status = 'interview';
 
-      // Extract cover letter - this might require expanding the proposal
-      const coverLetterElement = item.querySelector('.cover-letter-text, [data-test="proposal-cover-letter"], .proposal-description');
-      const coverLetter = coverLetterElement?.textContent?.trim() || null;
-
-      // Extract bid amount
-      const bidText = item.querySelector('.proposal-bid-amount, [data-test="proposal-bid"]')?.textContent?.trim();
-      let bidAmount: number | null = null;
-      let bidType: string | null = null;
-      if (bidText) {
-        const match = bidText.match(/\$?([\d,]+\.?\d*)/);
-        if (match) {
-          bidAmount = parseFloat(match[1].replace(',', ''));
-        }
-        bidType = bidText.toLowerCase().includes('/hr') || bidText.toLowerCase().includes('hourly')
-          ? 'hourly' : 'fixed';
-      }
-
-      // Extract status
-      const statusElement = item.querySelector('.status-badge, [data-test="proposal-status"], .proposal-status');
-      const status = statusElement?.textContent?.trim()?.toLowerCase() || 'submitted';
-
-      // Extract submitted date
-      const dateElement = item.querySelector('time, [data-test="proposal-date"], .proposal-submitted-date');
-      const submittedAt = dateElement?.getAttribute('datetime') ||
-                          dateElement?.textContent?.trim() ||
-                          null;
-
-      if (jobTitle || coverLetter) {
-        proposals.push({
-          proposalId,
-          jobTitle,
-          jobUrl: jobUrl ? new URL(jobUrl, window.location.origin).href : null,
-          coverLetter,
-          bidAmount,
-          bidType,
-          status,
-          submittedAt,
-        });
-      }
-    } catch (err) {
-      console.error('UpApply: Error extracting proposal:', err);
+    // Date is in <td data-cy="time-slot">
+    let submittedAt: string | null = null;
+    const timeSlot = row?.querySelector('td[data-cy="time-slot"]');
+    if (timeSlot) {
+      // Text like "Initiated\nMar 3, 2026" or "Received\nFeb 28, 2026"
+      const rawText = timeSlot.textContent?.trim() || '';
+      const dateMatch = rawText.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+,\s+\d{4}/);
+      if (dateMatch) submittedAt = dateMatch[0];
     }
+
+    proposals.push({
+      proposalId,
+      jobTitle,
+      jobUrl: proposalUrl, // best available — proposal detail URL
+      coverLetter: null,   // not visible on list page
+      bidAmount: null,     // not visible on list page
+      bidType: null,
+      status,
+      submittedAt,
+    });
   }
 
+  console.log('UpApply: Extracted', proposals.length, 'proposals');
   return proposals;
 }
 
@@ -416,18 +389,38 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ success: questionFilled });
       break;
 
-    case 'SCRAPE_PROPOSALS':
+    case 'SCRAPE_PROPOSALS': {
       if (!isMyProposalsPage()) {
-        sendResponse({ success: false, error: 'Not on My Proposals page' });
+        sendResponse({ success: false, error: 'Not on My Proposals page', url: window.location.href });
       } else {
+        // Collect debug selector hits to send back to background console
+        const debugHits: string[] = [];
+        const debugSelectors = [
+          '[data-test="proposal-list-item"]',
+          '[data-test="proposals-list"] > *',
+          '[data-test="proposal-row"]',
+          '.proposals-list-item',
+          '.up-card-section.up-card-list-section',
+          '[class*="proposal" i]',
+          '[class*="job-tile" i]',
+          '[data-ev-label*="proposal" i]',
+          'article',
+          'li',
+          'section',
+        ];
+        for (const sel of debugSelectors) {
+          const count = document.querySelectorAll(sel).length;
+          if (count > 0 && count < 200) debugHits.push(`"${sel}" × ${count}`);
+        }
         try {
           const proposals = extractProposals();
-          sendResponse({ success: true, data: proposals, url: window.location.href });
+          sendResponse({ success: true, data: proposals, url: window.location.href, debug: debugHits });
         } catch (err) {
-          sendResponse({ success: false, error: String(err) });
+          sendResponse({ success: false, error: String(err), debug: debugHits });
         }
       }
       break;
+    }
 
     case 'GET_PAGE_TYPE':
       sendResponse({

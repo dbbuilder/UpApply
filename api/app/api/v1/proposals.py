@@ -372,8 +372,9 @@ async def import_proposals_from_upwork(
         status_str = raw_data.get("status", "submitted")
         submitted_at_str = raw_data.get("submittedAt")
 
-        if not cover_letter_text:
-            continue  # Skip if no cover letter
+        # Require at least a job title to import
+        if not job_title:
+            continue
 
         # Check for duplicate
         if upwork_proposal_id:
@@ -386,20 +387,23 @@ async def import_proposals_from_upwork(
             if existing.scalar_one_or_none():
                 continue
 
-        # Parse submitted_at if provided
+        # Parse submitted_at — try ISO first, then "Mar 3, 2026" format
         submitted_at = None
         if submitted_at_str:
             try:
                 submitted_at = datetime.fromisoformat(submitted_at_str.replace("Z", "+00:00"))
-            except:
-                pass
+            except Exception:
+                try:
+                    submitted_at = datetime.strptime(submitted_at_str, "%b %d, %Y")
+                except Exception:
+                    pass
 
-        # Generate embedding
-        text_for_embedding = cover_letter_text
+        # Generate embedding from whatever text is available
+        text_for_embedding = cover_letter_text or ""
         if job_title:
-            text_for_embedding = f"Job: {job_title}\n\n{text_for_embedding}"
+            text_for_embedding = f"Job: {job_title}\n\n{text_for_embedding}".strip()
 
-        embedding = await generate_embedding(text_for_embedding)
+        embedding = await generate_embedding(text_for_embedding) if text_for_embedding else None
 
         proposal = Proposal(
             user_id=current_user.id,
