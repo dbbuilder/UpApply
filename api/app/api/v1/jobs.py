@@ -26,8 +26,6 @@ from app.schemas.job import (
     AttachmentMetadata,
 )
 from app.services.job_analysis import (
-    analyze_skill_match,
-    find_relevant_memories,
     find_relevant_proposals,
     run_full_analysis,
 )
@@ -312,6 +310,15 @@ async def generate_cover_letter_endpoint(
         job_skills = job.skills_required or []
         budget = job.budget_amount
         job_id = job.id
+        ar = await run_full_analysis(
+            db=db,
+            user_id=current_user.id,
+            profile=profile,
+            job_description=job_description,
+            job_skills=job_skills,
+            budget_amount=job.budget_amount,
+            client_info=job.client_info,
+        )
     elif request.job_data:
         # Create job first
         job_data = request.job_data
@@ -379,15 +386,9 @@ async def generate_cover_letter_endpoint(
             detail="Either job_id or job_data must be provided",
         )
 
-    # Get skill matches, memories, and past proposals
-    skill_matches, missing_skills = await analyze_skill_match(job_skills, profile)
-    relevant_memories = await find_relevant_memories(
-        db=db,
-        user_id=current_user.id,
-        job_description=job_description,
-        job_skills=job_skills,
-        limit=5,
-    )
+    skill_matches = ar.skill_matches
+    missing_skills = ar.missing_skills
+    relevant_memories = ar.relevant_memories
 
     # Find relevant past proposals to use as writing examples
     past_proposals = await find_relevant_proposals(
@@ -537,16 +538,15 @@ async def regenerate_cover_letter_endpoint(
     else:
         # Generate fresh
         job_skills = job.skills_required or []
-        skill_matches, missing_skills = await analyze_skill_match(job_skills, profile)
-        relevant_memories = await find_relevant_memories(
+        ar = await run_full_analysis(
             db=db,
             user_id=current_user.id,
+            profile=profile,
             job_description=job.description,
             job_skills=job_skills,
-            limit=5,
+            budget_amount=job.budget_amount,
+            client_info=job.client_info,
         )
-
-        # Find relevant past proposals
         past_proposals = await find_relevant_proposals(
             db=db,
             user_id=current_user.id,
@@ -554,15 +554,14 @@ async def regenerate_cover_letter_endpoint(
             job_skills=job_skills,
             limit=3,
         )
-
         content = await generate_cover_letter(
             job_title=job.title,
             job_description=job.description,
             job_skills=job_skills,
             budget=job.budget_amount,
-            skill_matches=skill_matches,
-            missing_skills=missing_skills,
-            relevant_memories=relevant_memories,
+            skill_matches=ar.skill_matches,
+            missing_skills=ar.missing_skills,
+            relevant_memories=ar.relevant_memories,
             profile=profile,
             past_proposals=past_proposals,
         )
