@@ -204,7 +204,7 @@ const SCRAPE_KEY = '__upapplyScrapingPromise';
  * Wait for the next-page button to become enabled (not disabled).
  * The button is briefly disabled during page transitions.
  */
-function waitForNextButton(timeoutMs = 3000): Promise<HTMLButtonElement | null> {
+function waitForNextButton(timeoutMs = 2000): Promise<HTMLButtonElement | null> {
   return new Promise((resolve) => {
     const deadline = Date.now() + timeoutMs;
     const check = () => {
@@ -212,9 +212,9 @@ function waitForNextButton(timeoutMs = 3000): Promise<HTMLButtonElement | null> 
       if (!btn) { resolve(null); return; }
       if (!btn.disabled) { resolve(btn); return; }
       if (Date.now() >= deadline) { resolve(null); return; }
-      setTimeout(check, 150);
+      setTimeout(check, 100);
     };
-    setTimeout(check, 150);
+    setTimeout(check, 100);
   });
 }
 
@@ -222,7 +222,7 @@ function waitForNextButton(timeoutMs = 3000): Promise<HTMLButtonElement | null> 
  * Wait for new proposal links to appear after a page navigation click.
  * Resolves when the first proposal link's href changes or a timeout occurs.
  */
-function waitForProposalPageChange(previousFirstId: string | null, timeoutMs = 4000): Promise<void> {
+function waitForProposalPageChange(previousFirstId: string | null, timeoutMs = 2500): Promise<void> {
   return new Promise((resolve) => {
     const deadline = Date.now() + timeoutMs;
     const check = () => {
