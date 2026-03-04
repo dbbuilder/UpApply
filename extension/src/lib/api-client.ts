@@ -221,10 +221,10 @@ class ApiClient {
     return this.request<Job[]>(`/api/v1/jobs${qs ? `?${qs}` : ''}`);
   }
 
-  async importBulkJobs(jobs: JobImportItem[], source: 'saved' | 'search', searchQuery?: string) {
+  async importBulkJobs(jobs: JobImportItem[], source: 'saved' | 'search', searchQuery?: string, searchQueryId?: string) {
     return this.request<Job[]>('/api/v1/jobs/import-bulk', {
       method: 'POST',
-      body: { jobs, source, search_query: searchQuery },
+      body: { jobs, source, search_query: searchQuery, search_query_id: searchQueryId },
     });
   }
 
@@ -395,6 +395,44 @@ class ApiClient {
     return this.request<BetaFeedbackResponse>('/api/v1/beta-feedback', {
       method: 'POST',
       body: data,
+    });
+  }
+
+  // Search Queries
+  async getSearchQueries() {
+    return this.request<SearchQuery[]>('/api/v1/search-queries');
+  }
+
+  async createSearchQuery(query: string, urlParams?: string, source?: string) {
+    return this.request<SearchQuery>('/api/v1/search-queries', {
+      method: 'POST',
+      body: { query, url_params: urlParams, source },
+    });
+  }
+
+  async deleteSearchQuery(id: string) {
+    return this.request<void>(`/api/v1/search-queries/${id}`, { method: 'DELETE' });
+  }
+
+  async seedSearchQueries() {
+    return this.request<SearchQuery[]>('/api/v1/search-queries/seed', { method: 'POST' });
+  }
+
+  async generateSearchQueries() {
+    return this.request<SearchQuery[]>('/api/v1/search-queries/generate', { method: 'POST' });
+  }
+
+  async recordQueryRun(id: string, stats: { jobs_found: number; avg_score: number; high_score_count: number }) {
+    return this.request<SearchQuery>(`/api/v1/search-queries/${id}/record-run`, {
+      method: 'POST',
+      body: stats,
+    });
+  }
+
+  async bulkImportSearchQueries(queries: Array<{ query: string; url_params?: string; source?: string }>) {
+    return this.request<SearchQuery[]>('/api/v1/search-queries/bulk-import', {
+      method: 'POST',
+      body: { queries },
     });
   }
 }
@@ -820,6 +858,24 @@ export interface BetaFeedbackResponse {
   email?: string;
   page_url?: string;
   extension_version?: string;
+  created_at: string;
+}
+
+// Search Query Types
+export interface SearchQuery {
+  id: string;
+  query: string;
+  url_params?: string;
+  source: string;
+  active: boolean;
+  run_count: number;
+  last_run_at?: string;
+  total_jobs_found: number;
+  avg_match_score?: number;
+  high_score_count: number;
+  performance_score: number;
+  is_stale: boolean;
+  is_low_performer: boolean;
   created_at: string;
 }
 

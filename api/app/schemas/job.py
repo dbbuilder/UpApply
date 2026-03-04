@@ -72,6 +72,7 @@ class JobResponse(BaseModel):
     is_saved: bool = False
     source: Optional[str] = None
     expires_at: Optional[datetime] = None
+    search_query_id: Optional[str] = None
 
     posted_date: Optional[datetime] = None
     scraped_at: datetime
@@ -220,3 +221,4 @@ class JobBulkImportRequest(BaseModel):
     jobs: List[JobImportItem]
     source: str  # "saved" | "search"
     search_query: Optional[str] = None  # populated for source="search"
+    search_query_id: Optional[str] = None  # FK to search_queries.id

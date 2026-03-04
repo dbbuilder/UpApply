@@ -51,6 +51,9 @@ class User(Base):
     proposals: Mapped[List["Proposal"]] = relationship(
         "Proposal", back_populates="user", cascade="all, delete-orphan"
     )
+    search_queries: Mapped[List["SearchQuery"]] = relationship(
+        "SearchQuery", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class UserProfile(Base):
@@ -145,3 +148,4 @@ from app.models.job import Job
 from app.models.application import Application
 from app.models.screening_answer import ScreeningAnswer
 from app.models.proposal import Proposal
+from app.models.search_query import SearchQuery

@@ -8,6 +8,7 @@ from app.models.feedback import Feedback
 from app.models.screening_answer import ScreeningAnswer
 from app.models.proposal import Proposal
 from app.models.beta_feedback import BetaFeedback
+from app.models.search_query import SearchQuery
 
 __all__ = [
     "User",
@@ -21,4 +22,5 @@ __all__ = [
     "ScreeningAnswer",
     "Proposal",
     "BetaFeedback",
+    "SearchQuery",
 ]

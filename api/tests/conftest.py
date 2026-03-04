@@ -66,8 +66,8 @@ async def client(setup_database):
     async with test_engine.begin() as conn:
         await conn.execute(text(
             "TRUNCATE TABLE beta_feedback, feedback, screening_answers, proposals, "
-            "applications, cover_letters, jobs, memories, user_profiles, users "
-            "RESTART IDENTITY CASCADE"
+            "applications, cover_letters, jobs, search_queries, memories, "
+            "user_profiles, users RESTART IDENTITY CASCADE"
         ))
 
 

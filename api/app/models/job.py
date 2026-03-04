@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from app.models.cover_letter import CoverLetter
     from app.models.screening_answer import ScreeningAnswer
     from app.models.proposal import Proposal
+    from app.models.search_query import SearchQuery
 
 
 class Job(Base):
@@ -78,6 +79,11 @@ class Job(Base):
     source: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     # "extension" | "saved" | "search"
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    search_query_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("search_queries.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     # Timestamps
     posted_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -101,6 +107,9 @@ class Job(Base):
     )
     proposals: Mapped[List["Proposal"]] = relationship(
         "Proposal", back_populates="job"
+    )
+    search_query: Mapped[Optional["SearchQuery"]] = relationship(
+        "SearchQuery", back_populates="jobs"
     )
 
     __table_args__ = (

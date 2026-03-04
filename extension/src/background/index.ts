@@ -336,11 +336,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })();
       return true;
 
+    case 'IMPORT_UPWORK_SAVED_SEARCHES':
+      // Navigate to Upwork find-work page in background tab, scrape saved searches, close tab
+      (async () => {
+        const findWorkUrl = 'https://www.upwork.com/nx/find-work/';
+        console.log('UpApply Background: Opening find-work tab for saved searches:', findWorkUrl);
+        const findWorkTab = await chrome.tabs.create({ url: findWorkUrl, active: false });
+        if (!findWorkTab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }
+        try {
+          await waitForTabLoad(findWorkTab.id);
+          await new Promise(resolve => setTimeout(resolve, 2500));
+          const manifest = chrome.runtime.getManifest();
+          const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+          if (contentScriptPath) {
+            try { await chrome.scripting.executeScript({ target: { tabId: findWorkTab.id }, files: [contentScriptPath] }); }
+            catch (e) { /* already loaded */ }
+          }
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const response = await new Promise<{ success: boolean; data?: unknown; error?: string }>((resolve) => {
+            chrome.tabs.sendMessage(findWorkTab.id!, { type: 'SCRAPE_SAVED_SEARCHES' }, (resp) => {
+              if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
+              else resolve(resp || { success: false, error: 'No response' });
+            });
+          });
+          sendResponse(response);
+        } finally {
+          try { await chrome.tabs.remove(findWorkTab.id); } catch (e) { /* ignore */ }
+        }
+      })();
+      return true;
+
     case 'SEARCH_UPWORK_JOBS':
       // Open a background tab, scrape search results, close tab, return cards
       (async () => {
         const query = encodeURIComponent(message.query || '');
-        const searchUrl = `https://www.upwork.com/nx/search/jobs/?q=${query}&sort=recency`;
+        const extraParams = message.urlParams ? `&${message.urlParams}` : '';
+        const searchUrl = `https://www.upwork.com/nx/search/jobs/?q=${query}&sort=recency${extraParams}`;
         console.log('UpApply Background: Opening search tab for:', searchUrl);
         const tab = await chrome.tabs.create({ url: searchUrl, active: false });
         if (!tab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }

@@ -602,6 +602,47 @@ function fillScreeningQuestion(selector: string, answer: string): boolean {
   }
 }
 
+interface ScrapedSavedSearch {
+  query: string;
+  url_params: string;
+  label: string;
+}
+
+/**
+ * Extract saved searches from Upwork's find-work or search pages.
+ * Looks for links to /nx/search/jobs that contain a q= parameter.
+ */
+function extractSavedSearches(): ScrapedSavedSearch[] {
+  const results: ScrapedSavedSearch[] = [];
+  const seen = new Set<string>();
+
+  const links = document.querySelectorAll<HTMLAnchorElement>('a[href*="/nx/search/jobs"]');
+  links.forEach((link) => {
+    try {
+      const url = new URL(link.href);
+      const q = url.searchParams.get('q');
+      if (!q || !q.trim()) return;
+
+      const normalized = q.trim().toLowerCase();
+      if (seen.has(normalized)) return;
+      seen.add(normalized);
+
+      // Build url_params from remaining params (exclude q and nbs)
+      const extra = new URLSearchParams(url.search);
+      extra.delete('q');
+      extra.delete('nbs');
+      const urlParams = extra.toString();
+
+      const label = link.textContent?.trim() || q.trim();
+      results.push({ query: q.trim(), url_params: urlParams, label });
+    } catch {
+      // Ignore malformed URLs
+    }
+  });
+
+  return results;
+}
+
 /**
  * Handle messages from background script or sidebar.
  */
@@ -705,6 +746,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           }
         })();
         return true;
+      }
+      break;
+    }
+
+    case 'SCRAPE_SAVED_SEARCHES': {
+      try {
+        const results = extractSavedSearches();
+        sendResponse({ success: true, data: results, url: window.location.href });
+      } catch (err) {
+        sendResponse({ success: false, error: String(err) });
       }
       break;
     }

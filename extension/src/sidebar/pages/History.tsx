@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../store';
-import { apiClient, Proposal, Job, JobImportItem } from '../../lib/api-client';
+import { apiClient, Proposal, Job, JobImportItem, SearchQuery } from '../../lib/api-client';
 
 type TabType = 'proposals' | 'jobs' | 'search';
 
@@ -293,14 +293,35 @@ export default function HistoryPage() {
     }
   }, []);
 
+  const loadSearchQueries = useCallback(async (autoSeed = false) => {
+    setQueriesLoading(true);
+    try {
+      let data = await apiClient.getSearchQueries();
+      if (autoSeed && data.length === 0) {
+        setQueriesStatus('Seeding initial queries from your profile...');
+        const seeded = await apiClient.seedSearchQueries();
+        setQueriesStatus(`Seeded ${seeded.length} queries from your profile.`);
+        data = await apiClient.getSearchQueries();
+        setTimeout(() => setQueriesStatus(null), 4000);
+      }
+      setSearchQueries(data);
+    } catch {
+      // silently fail
+    } finally {
+      setQueriesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (activeTab === 'proposals') {
       loadProposals();
       loadInsights();
-    } else {
+    } else if (activeTab === 'jobs') {
       loadJobs();
+    } else if (activeTab === 'search') {
+      loadSearchQueries(true); // auto-seed on first open
     }
-  }, [activeTab, loadProposals, loadJobs, loadInsights]);
+  }, [activeTab, loadProposals, loadJobs, loadInsights, loadSearchQueries]);
 
   const handleImportFromUpwork = async () => {
     setImporting(true);
@@ -404,13 +425,24 @@ export default function HistoryPage() {
     }
   };
 
-  // Search state
+  // Search tab — legacy one-shot search (kept for fallback)
   const [searchQuery, setSearchQuery] = useState('');
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchResults, setSearchResults] = useState<Job[]>([]);
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
   const [savedImporting, setSavedImporting] = useState(false);
   const [savedImportStatus, setSavedImportStatus] = useState<string | null>(null);
+
+  // Query Library state
+  const [searchQueries, setSearchQueries] = useState<SearchQuery[]>([]);
+  const [queriesLoading, setQueriesLoading] = useState(false);
+  const [runningQueryId, setRunningQueryId] = useState<string | null>(null);
+  const [runAllProgress, setRunAllProgress] = useState<{ current: number; total: number } | null>(null);
+  const [addQueryText, setAddQueryText] = useState('');
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [generatingQueries, setGeneratingQueries] = useState(false);
+  const [importingSavedSearches, setImportingSavedSearches] = useState(false);
+  const [queriesStatus, setQueriesStatus] = useState<string | null>(null);
 
   const handleImportSavedJobs = async () => {
     setSavedImporting(true);
@@ -495,6 +527,138 @@ export default function HistoryPage() {
       console.error('Search error:', err);
     } finally {
       setSearchLoading(false);
+    }
+  };
+
+  // Query Library handlers
+  const handleRunQuery = async (sq: SearchQuery) => {
+    setRunningQueryId(sq.id);
+    try {
+      const scrapeResult = await new Promise<{ success: boolean; data?: unknown[]; error?: string }>(
+        (resolve) =>
+          chrome.runtime.sendMessage(
+            { type: 'SEARCH_UPWORK_JOBS', query: sq.query, urlParams: sq.url_params },
+            resolve
+          )
+      );
+
+      if (!scrapeResult?.success || !scrapeResult.data?.length) {
+        // Still record a zero run so the query doesn't stay perpetually stale
+        await apiClient.recordQueryRun(sq.id, { jobs_found: 0, avg_score: 0, high_score_count: 0 });
+        await loadSearchQueries();
+        return;
+      }
+
+      const rawCards = scrapeResult.data as Array<{
+        upworkJobId: string; upworkUrl: string; title: string; description: string;
+        jobType?: string; experienceLevel?: string; postedDateRaw?: string; clientInfo?: Record<string, unknown>;
+      }>;
+      const items: JobImportItem[] = rawCards.map((c) => ({
+        upwork_job_id: c.upworkJobId,
+        upwork_url: c.upworkUrl,
+        title: c.title,
+        description: c.description,
+        job_type: c.jobType,
+        experience_level: c.experienceLevel,
+        posted_date_raw: c.postedDateRaw,
+        client_info: c.clientInfo,
+      }));
+
+      const imported = await apiClient.importBulkJobs(items, 'search', sq.query, sq.id);
+      const avgScore = imported.length > 0
+        ? imported.reduce((s, j) => s + (j.match_score ?? 0), 0) / imported.length
+        : 0;
+      const highScore = imported.filter((j) => (j.match_score ?? 0) >= 70).length;
+      await apiClient.recordQueryRun(sq.id, {
+        jobs_found: imported.length,
+        avg_score: avgScore,
+        high_score_count: highScore,
+      });
+      await loadSearchQueries();
+      await loadJobs();
+    } catch {
+      // silently fail per-query
+    } finally {
+      setRunningQueryId(null);
+    }
+  };
+
+  const handleRunAll = async () => {
+    const stale = searchQueries.filter(
+      (sq) =>
+        sq.active &&
+        (!sq.last_run_at || new Date(sq.last_run_at) < new Date(Date.now() - 24 * 60 * 60 * 1000))
+    );
+    if (stale.length === 0) return;
+    setRunAllProgress({ current: 0, total: stale.length });
+    for (let i = 0; i < stale.length; i++) {
+      setRunAllProgress({ current: i + 1, total: stale.length });
+      await handleRunQuery(stale[i]);
+      if (i < stale.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+    }
+    setRunAllProgress(null);
+  };
+
+  const handleAddQuery = async () => {
+    if (!addQueryText.trim()) return;
+    try {
+      await apiClient.createSearchQuery(addQueryText.trim());
+      setAddQueryText('');
+      setShowAddForm(false);
+      await loadSearchQueries();
+    } catch {
+      // duplicate or error — silently ignore
+    }
+  };
+
+  const handleDeleteQuery = async (id: string) => {
+    try {
+      await apiClient.deleteSearchQuery(id);
+      setSearchQueries((prev) => prev.filter((q) => q.id !== id));
+    } catch {
+      // silently fail
+    }
+  };
+
+  const handleGenerateQueries = async () => {
+    setGeneratingQueries(true);
+    setQueriesStatus('Generating AI queries...');
+    try {
+      const generated = await apiClient.generateSearchQueries();
+      setQueriesStatus(
+        generated.length > 0 ? `Generated ${generated.length} new queries.` : 'No new queries generated.'
+      );
+      await loadSearchQueries();
+    } catch {
+      setQueriesStatus('Generation failed. Try again.');
+    } finally {
+      setGeneratingQueries(false);
+      setTimeout(() => setQueriesStatus(null), 5000);
+    }
+  };
+
+  const handleImportSavedSearches = async () => {
+    setImportingSavedSearches(true);
+    setQueriesStatus('Opening Upwork saved searches...');
+    try {
+      const result = await new Promise<{ success: boolean; data?: Array<{ query: string; url_params: string; label: string }>; error?: string }>(
+        (resolve) => chrome.runtime.sendMessage({ type: 'IMPORT_UPWORK_SAVED_SEARCHES' }, resolve)
+      );
+      if (!result?.success || !result.data?.length) {
+        setQueriesStatus(result?.error ? `Import failed: ${result.error}` : 'No saved searches found on Upwork.');
+        return;
+      }
+      const toImport = result.data.map((s) => ({ query: s.query, url_params: s.url_params || undefined, source: 'imported' as const }));
+      const imported = await apiClient.bulkImportSearchQueries(toImport);
+      setQueriesStatus(`Imported ${imported.length} saved searches.`);
+      await loadSearchQueries();
+    } catch {
+      setQueriesStatus('Import failed. Try again.');
+    } finally {
+      setImportingSavedSearches(false);
+      setTimeout(() => setQueriesStatus(null), 5000);
     }
   };
 
@@ -729,11 +893,165 @@ export default function HistoryPage() {
           </>
         )}
 
-        {/* Search Tab */}
+        {/* Search / Query Library Tab */}
         {activeTab === 'search' && (
           <>
-            {/* Search form */}
-            <div className="mb-4">
+            {/* Toolbar */}
+            <div className="flex flex-wrap gap-2 mb-2">
+              <button
+                type="button"
+                onClick={() => setShowAddForm((v) => !v)}
+                className="btn-outline text-xs py-1 px-2"
+              >
+                + Add
+              </button>
+              <button
+                type="button"
+                onClick={handleImportSavedSearches}
+                disabled={importingSavedSearches || !!runAllProgress}
+                className="btn-outline text-xs py-1 px-2 disabled:opacity-60"
+              >
+                {importingSavedSearches ? '...' : '↓ Import'}
+              </button>
+              <button
+                type="button"
+                onClick={handleGenerateQueries}
+                disabled={generatingQueries || !!runAllProgress}
+                className="btn-outline text-xs py-1 px-2 disabled:opacity-60"
+              >
+                {generatingQueries ? '...' : 'AI Generate'}
+              </button>
+              {(() => {
+                const staleCount = searchQueries.filter(
+                  (sq) => sq.active && (!sq.last_run_at || new Date(sq.last_run_at) < new Date(Date.now() - 24 * 60 * 60 * 1000))
+                ).length;
+                return staleCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={handleRunAll}
+                    disabled={!!runAllProgress || !!runningQueryId}
+                    className="btn-primary text-xs py-1 px-2 disabled:opacity-60"
+                  >
+                    {runAllProgress
+                      ? `Running ${runAllProgress.current}/${runAllProgress.total}...`
+                      : `▶ Run Stale (${staleCount})`}
+                  </button>
+                ) : null;
+              })()}
+            </div>
+
+            {/* Add query form */}
+            {showAddForm && (
+              <div className="flex gap-2 mb-2">
+                <input
+                  type="text"
+                  value={addQueryText}
+                  onChange={(e) => setAddQueryText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddQuery(); }}
+                  placeholder="e.g. fractional CTO startup"
+                  className="input flex-1 text-xs"
+                  autoFocus
+                />
+                <button type="button" onClick={handleAddQuery} className="btn-primary text-xs px-3">
+                  Add
+                </button>
+              </div>
+            )}
+
+            {/* Status line */}
+            {queriesStatus && (
+              <p className="text-xs text-gray-500 mb-2">{queriesStatus}</p>
+            )}
+
+            {/* Run-all progress bar */}
+            {runAllProgress && (
+              <div className="mb-3">
+                <div className="w-full bg-gray-200 rounded-full h-1.5">
+                  <div
+                    className="bg-blue-500 h-1.5 rounded-full transition-all"
+                    style={{ width: `${(runAllProgress.current / runAllProgress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {queriesLoading && searchQueries.length === 0 && (
+              <div className="text-center py-8 text-gray-500 text-sm">Loading queries...</div>
+            )}
+
+            {!queriesLoading && searchQueries.length === 0 && !queriesStatus && (
+              <div className="text-center py-10 text-gray-400">
+                <p className="text-sm">No queries yet. Click AI Generate to get started.</p>
+              </div>
+            )}
+
+            {/* Query list */}
+            <div className="space-y-1">
+              {searchQueries.map((sq) => {
+                const isRunning = runningQueryId === sq.id;
+                const statusIcon = sq.is_low_performer ? '⚠' : sq.run_count === 0 ? '○' : sq.is_stale ? '○' : '●';
+                const scoreColor =
+                  sq.performance_score >= 60
+                    ? 'text-green-600'
+                    : sq.performance_score >= 35
+                    ? 'text-yellow-600'
+                    : sq.run_count > 0
+                    ? 'text-red-500'
+                    : 'text-gray-400';
+
+                let ageText = 'New';
+                if (sq.last_run_at) {
+                  const ageMs = Date.now() - new Date(sq.last_run_at).getTime();
+                  const ageH = Math.floor(ageMs / 3_600_000);
+                  ageText = ageH < 24 ? `${ageH}h` : `${Math.floor(ageH / 24)}d`;
+                }
+
+                return (
+                  <div
+                    key={sq.id}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded border text-xs ${
+                      sq.is_low_performer
+                        ? 'border-yellow-200 bg-yellow-50'
+                        : 'border-gray-100 bg-white hover:bg-gray-50'
+                    }`}
+                  >
+                    <span className={`shrink-0 ${sq.is_low_performer ? 'text-yellow-500' : sq.run_count > 0 && !sq.is_stale ? 'text-green-500' : 'text-gray-400'}`}>
+                      {statusIcon}
+                    </span>
+                    <span className="flex-1 truncate text-gray-800" title={sq.query}>
+                      {sq.query}
+                    </span>
+                    <span className={`shrink-0 font-mono ${scoreColor}`}>
+                      {sq.run_count > 0 ? `${sq.performance_score}` : '—'}
+                    </span>
+                    <span className="shrink-0 text-gray-400">{sq.run_count}r</span>
+                    <span className="shrink-0 text-gray-400">{ageText}</span>
+                    <button
+                      type="button"
+                      onClick={() => !isRunning && !runAllProgress && handleRunQuery(sq)}
+                      disabled={isRunning || !!runAllProgress}
+                      className="shrink-0 text-blue-500 hover:text-blue-700 disabled:opacity-40 font-medium"
+                      title="Run this query"
+                    >
+                      {isRunning ? '…' : '▶'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteQuery(sq.id)}
+                      disabled={isRunning || !!runAllProgress}
+                      className="shrink-0 text-gray-300 hover:text-red-400 disabled:opacity-40"
+                      title="Remove query"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* One-shot search fallback */}
+            <div className="mt-4 pt-3 border-t border-gray-100">
+              <p className="text-xs text-gray-400 mb-2">One-shot search</p>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -741,35 +1059,21 @@ export default function HistoryPage() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && !searchLoading && handleSearch()}
                   placeholder="e.g. React developer TypeScript"
-                  className="input flex-1 text-sm"
+                  className="input flex-1 text-xs"
                   disabled={searchLoading}
                 />
                 <button
                   type="button"
                   onClick={handleSearch}
                   disabled={searchLoading || !searchQuery.trim()}
-                  className="btn-primary text-sm px-4 disabled:opacity-60 shrink-0"
+                  className="btn-primary text-xs px-3 disabled:opacity-60 shrink-0"
                 >
-                  {searchLoading ? '...' : 'Search'}
+                  {searchLoading ? '…' : 'Go'}
                 </button>
               </div>
-              {searchStatus && (
-                <p className="text-xs text-gray-500 mt-2">{searchStatus}</p>
-              )}
-            </div>
-
-            {searchLoading && (
-              <div className="text-center py-8 text-gray-500 text-sm">
-                Searching Upwork and analyzing matches...
-              </div>
-            )}
-
-            {!searchLoading && searchResults.length > 0 && (
-              <>
-                <p className="text-xs text-gray-400 mb-3">
-                  Results are added to your Queue with 7-day expiry
-                </p>
-                <div className="space-y-3">
+              {searchStatus && <p className="text-xs text-gray-500 mt-1">{searchStatus}</p>}
+              {!searchLoading && searchResults.length > 0 && (
+                <div className="mt-3 space-y-2">
                   {searchResults.map((job) => (
                     <JobCard
                       key={job.id}
@@ -779,14 +1083,8 @@ export default function HistoryPage() {
                     />
                   ))}
                 </div>
-              </>
-            )}
-
-            {!searchLoading && searchResults.length === 0 && !searchStatus && (
-              <div className="text-center py-10 text-gray-400">
-                <p className="text-sm">Search Upwork jobs and get match scores instantly</p>
-              </div>
-            )}
+              )}
+            </div>
           </>
         )}
       </div>
