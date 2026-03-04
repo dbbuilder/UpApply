@@ -87,14 +87,15 @@ export default function BetaFeedbackPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <header className="bg-white border-b px-4 py-3 flex items-center justify-between">
-        <h1 className="font-bold text-gray-900">Beta Feedback</h1>
         <button
           type="button"
           onClick={() => setCurrentView('generator')}
-          className="text-gray-500 hover:text-gray-700"
+          className="text-gray-600 hover:text-gray-900"
         >
-          Cancel
+          &larr; Back
         </button>
+        <h1 className="font-bold text-gray-900">Beta Feedback</h1>
+        <div className="w-12" />
       </header>
 
       <div className="flex-1 overflow-auto p-4">

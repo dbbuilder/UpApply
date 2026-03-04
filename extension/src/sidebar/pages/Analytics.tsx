@@ -1,28 +1,28 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../store';
-import { apiClient, AnalyticsDashboard } from '../../lib/api-client';
+import { apiClient, ProposalStats } from '../../lib/api-client';
 
 export default function AnalyticsPage() {
   const { setCurrentView } = useAppStore();
-  const [dashboard, setDashboard] = useState<AnalyticsDashboard | null>(null);
+  const [stats, setStats] = useState<ProposalStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadDashboard();
+    loadStats();
   }, []);
 
-  const loadDashboard = async () => {
+  const loadStats = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiClient.getAnalyticsDashboard();
-      setDashboard(data);
+      const data = await apiClient.getProposalStats();
+      setStats(data);
     } catch (err) {
-      console.error('Failed to load dashboard:', err);
+      console.error('Failed to load stats:', err);
       setError(err instanceof TypeError
         ? 'Server unavailable. Please retry.'
-        : 'Failed to load analytics.');
+        : 'Failed to load stats.');
     } finally {
       setLoading(false);
     }
@@ -59,7 +59,7 @@ export default function AnalyticsPage() {
         >
           &larr; Back
         </button>
-        <h1 className="font-bold text-gray-900">Analytics</h1>
+        <h1 className="font-bold text-gray-900">Stats</h1>
         <div className="w-12" />
       </header>
 
@@ -67,151 +67,93 @@ export default function AnalyticsPage() {
       <div className="flex-1 overflow-auto p-4 space-y-4">
         {loading && (
           <div className="text-center py-8">
-            <div className="animate-pulse-slow text-gray-500">Loading analytics...</div>
+            <div className="animate-pulse-slow text-gray-500">Loading stats...</div>
           </div>
         )}
 
         {error && !loading && (
           <div className="card bg-red-50 text-center py-4">
             <p className="text-sm text-red-700">{error}</p>
-            <button type="button" onClick={loadDashboard} className="btn-outline text-sm mt-2">
+            <button type="button" onClick={loadStats} className="btn-outline text-sm mt-2">
               Retry
             </button>
           </div>
         )}
 
-        {!loading && !error && !dashboard && (
-          <div className="text-center py-8 text-gray-500">
-            <p>Unable to load analytics.</p>
-          </div>
-        )}
-
-        {dashboard && (
+        {stats && !loading && (
           <>
-            {/* Overview stats */}
-            <div className="grid grid-cols-2 gap-3">
-              <StatCard label="Total Applications" value={dashboard.total_applications} />
-              <StatCard
-                label="Response Rate"
-                value={dashboard.response_rate}
-                suffix="%"
-                color={
-                  dashboard.response_rate >= 20
-                    ? 'text-green-600'
-                    : dashboard.response_rate >= 10
-                    ? 'text-yellow-600'
-                    : 'text-red-600'
-                }
-              />
-              <StatCard
-                label="Interview Rate"
-                value={dashboard.interview_rate}
-                suffix="%"
-                color={dashboard.interview_rate >= 10 ? 'text-green-600' : 'text-yellow-600'}
-              />
-              <StatCard
-                label="Hire Rate"
-                value={dashboard.hire_rate}
-                suffix="%"
-                color={dashboard.hire_rate >= 5 ? 'text-green-600' : 'text-gray-600'}
-              />
-            </div>
-
-            {/* Additional metrics */}
-            <div className="grid grid-cols-2 gap-3">
-              {dashboard.avg_match_score && (
-                <StatCard
-                  label="Avg Match Score"
-                  value={dashboard.avg_match_score}
-                  suffix="%"
-                  color={
-                    dashboard.avg_match_score >= 70
-                      ? 'text-green-600'
-                      : dashboard.avg_match_score >= 50
-                      ? 'text-yellow-600'
-                      : 'text-red-600'
-                  }
-                />
-              )}
-              {dashboard.avg_time_to_response_days && (
-                <StatCard
-                  label="Avg Response Time"
-                  value={dashboard.avg_time_to_response_days}
-                  suffix=" days"
-                />
-              )}
-            </div>
-
-            {/* Top skills */}
-            {dashboard.top_skills.length > 0 && (
-              <div className="card">
-                <h3 className="font-medium text-gray-900 mb-3">Top Performing Skills</h3>
-                <div className="space-y-2">
-                  {dashboard.top_skills.map((skill) => (
-                    <div key={skill.skill} className="flex items-center justify-between">
-                      <span className="text-gray-700">{skill.skill}</span>
-                      <div className="text-right">
-                        <span className="text-green-600 font-medium">{skill.success_rate}%</span>
-                        <span className="text-gray-400 text-sm ml-2">
-                          ({skill.applications} apps)
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Weekly trend */}
-            {dashboard.weekly_applications.length > 0 && (
-              <div className="card">
-                <h3 className="font-medium text-gray-900 mb-3">Weekly Activity</h3>
-                <div className="space-y-2">
-                  {dashboard.weekly_applications.map((week) => (
-                    <div key={week.week} className="flex items-center justify-between text-sm">
-                      <span className="text-gray-500">{week.week}</span>
-                      <div>
-                        <span className="text-gray-700">{week.applications} applied</span>
-                        {week.responses > 0 && (
-                          <span className="text-green-600 ml-2">{week.responses} responded</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Insights */}
-            {dashboard.insights.length > 0 && (
-              <div className="card">
-                <h3 className="font-medium text-gray-900 mb-3">Insights</h3>
-                <div className="space-y-3">
-                  {dashboard.insights.map((insight, i) => (
-                    <div
-                      key={i}
-                      className={`p-3 rounded-lg text-sm ${
-                        insight.type === 'positive'
-                          ? 'bg-green-50 text-green-800'
-                          : insight.type === 'improvement'
-                          ? 'bg-yellow-50 text-yellow-800'
-                          : 'bg-blue-50 text-blue-800'
-                      }`}
-                    >
-                      {insight.message}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {dashboard.total_applications === 0 && (
+            {stats.total_proposals === 0 ? (
               <div className="text-center py-8 text-gray-500">
-                <p>No application data yet.</p>
-                <p className="text-sm mt-1">
-                  Start applying to jobs to see your analytics here.
+                <p className="text-lg mb-2">No proposals yet.</p>
+                <p className="text-sm">
+                  Go to{' '}
+                  <button
+                    type="button"
+                    onClick={() => setCurrentView('history')}
+                    className="text-emerald-600 underline"
+                  >
+                    My Pipeline
+                  </button>{' '}
+                  and import your Upwork proposals to see stats here.
                 </p>
               </div>
+            ) : (
+              <>
+                {/* Overview stats */}
+                <div className="grid grid-cols-2 gap-3">
+                  <StatCard label="Total Proposals" value={stats.total_proposals} />
+                  <StatCard
+                    label="Response Rate"
+                    value={Math.round(stats.response_rate)}
+                    suffix="%"
+                    color={
+                      stats.response_rate >= 20
+                        ? 'text-green-600'
+                        : stats.response_rate >= 10
+                        ? 'text-yellow-600'
+                        : 'text-red-600'
+                    }
+                  />
+                  <StatCard
+                    label="Hire Rate"
+                    value={Math.round(stats.hire_rate)}
+                    suffix="%"
+                    color={stats.hire_rate >= 5 ? 'text-green-600' : 'text-gray-600'}
+                  />
+                  <StatCard label="Times Hired" value={stats.hired} color="text-green-600" />
+                </div>
+
+                {/* Breakdown */}
+                <div className="card">
+                  <h3 className="font-medium text-gray-900 mb-3">Proposal Breakdown</h3>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Submitted (awaiting review)</span>
+                      <span className="font-medium">{stats.submitted}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Client responded</span>
+                      <span className="font-medium text-blue-600">{stats.responded}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Hired</span>
+                      <span className="font-medium text-green-600">{stats.hired}</span>
+                    </div>
+                    {stats.total_earnings > 0 && (
+                      <div className="flex justify-between text-sm border-t pt-2 mt-2">
+                        <span className="text-gray-600">Total Earnings</span>
+                        <span className="font-medium text-green-600">
+                          ${stats.total_earnings.toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-xs text-center text-gray-400">
+                  Based on {stats.total_proposals} imported Upwork proposals
+                </p>
+              </>
             )}
           </>
         )}

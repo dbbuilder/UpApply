@@ -13,7 +13,7 @@ from app.core.security import get_current_user
 from app.core.embeddings import generate_embedding, get_openai_client
 from app.models.user import User
 from app.models.proposal import Proposal
-from app.models.user_profile import UserProfile
+from app.models.user import UserProfile
 from app.schemas.proposal import (
     ProposalCreate,
     ProposalUpdate,
