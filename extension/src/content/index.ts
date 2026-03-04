@@ -490,7 +490,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             sendResponse({ success: false, error: String(err), debug: debugHits });
           }
         })();
-        return; // async path — don't fall through to break
+        return true; // keep message channel open for async sendResponse
       }
       break;
     }
