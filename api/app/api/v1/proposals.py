@@ -173,7 +173,7 @@ async def get_proposal_insights(
         profile_summary = f"""
 Freelancer profile:
 - Title: {profile.professional_title or 'not set'}
-- Skills: {', '.join((profile.skills or [])[:15])}
+- Skills: {', '.join(s.get('name', str(s)) if isinstance(s, dict) else str(s) for s in (profile.skills or [])[:15])}
 - Goals: {(profile.career_goals or '')[:200]}
 - Preferred rate: {profile.hourly_rate_min or '?'}–{profile.hourly_rate_max or '?'}/hr
 """.strip()
