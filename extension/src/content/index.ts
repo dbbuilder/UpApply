@@ -632,10 +632,10 @@ function _injectNotifBadge(row: Element, jobUrl: string): HTMLElement {
   badge.dataset.upapplyJob = _normalizeJobUrl(jobUrl);
   badge.style.cssText =
     'display:inline-flex;align-items:center;justify-content:center;' +
-    'min-width:28px;height:18px;border-radius:9px;' +
-    'font-size:10px;font-weight:700;color:#9ca3af;' +
+    'min-width:38px;height:24px;border-radius:12px;' +
+    'font-size:13px;font-weight:700;color:#9ca3af;' +
     'background:#f3f4f6;border:1px solid #e5e7eb;' +
-    'padding:0 5px;margin-left:6px;vertical-align:middle;' +
+    'padding:0 8px;margin-left:8px;vertical-align:middle;' +
     'cursor:default;font-family:-apple-system,sans-serif;white-space:nowrap;';
   badge.textContent = '…';
   badge.title = 'UpApply: scoring…';
