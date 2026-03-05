@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAppStore } from '../store';
 import { apiClient, Memory, MemoryCreate } from '../../lib/api-client';
 
@@ -19,6 +19,14 @@ export default function MemoriesPage() {
   });
   const [newSkill, setNewSkill] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // ChatGPT import
+  const [showImport, setShowImport] = useState(false);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importPreview, setImportPreview] = useState<{ count: number; samples: string[] } | null>(null);
+  const [parsedMemories, setParsedMemories] = useState<MemoryCreate[] | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadMemories();
@@ -95,6 +103,94 @@ export default function MemoriesPage() {
     }
   };
 
+  // ChatGPT import helpers
+  const guessCategory = (text: string): string => {
+    const t = text.toLowerCase();
+    if (/\b(built|developed|created|designed|architected|launched|shipped|deployed)\b/.test(t)) return 'project';
+    if (/\b(hired|client responded|won|landed|closed|got the job)\b/.test(t)) return 'achievement';
+    if (/\b(feedback|client said|they mentioned|review|rating)\b/.test(t)) return 'feedback';
+    if (/\b(learned|lesson|mistake|next time|should have|realized)\b/.test(t)) return 'lesson';
+    if (/\b(expert|proficient|years? experience|skilled in|specialist)\b/.test(t)) return 'skill_demo';
+    return 'project';
+  };
+
+  const makeTitle = (text: string): string => {
+    const m = text.trim().match(/^([^.!?]{10,80}[.!?])/);
+    if (m) return m[1].trim().slice(0, 80);
+    const short = text.trim().slice(0, 60);
+    return text.length > 60 ? short.replace(/\s\S+$/, '') + '…' : short;
+  };
+
+  const parseMemoryFile = (raw: string): MemoryCreate[] => {
+    const data = JSON.parse(raw);
+    let items: unknown[] = [];
+    if (Array.isArray(data)) {
+      items = data;
+    } else if (data && typeof data === 'object') {
+      for (const key of ['memories', 'memory', 'items', 'data']) {
+        if (Array.isArray((data as Record<string, unknown>)[key])) {
+          items = (data as Record<string, unknown>)[key] as unknown[];
+          break;
+        }
+      }
+    }
+    const texts: string[] = [];
+    for (const item of items) {
+      if (typeof item === 'string' && item.trim()) {
+        texts.push(item.trim());
+      } else if (item && typeof item === 'object') {
+        const obj = item as Record<string, unknown>;
+        const text = obj.memory ?? obj.content ?? obj.text ?? obj.value;
+        if (typeof text === 'string' && text.trim()) texts.push(text.trim());
+      }
+    }
+    return texts.map((t) => ({ title: makeTitle(t), content: t, category: guessCategory(t) }));
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportStatus(null);
+    setImportPreview(null);
+    setParsedMemories(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const mems = parseMemoryFile(reader.result as string);
+        if (mems.length === 0) {
+          setImportStatus('No memories found in this file. Make sure it\'s the memory.json from your ChatGPT export.');
+          return;
+        }
+        setParsedMemories(mems);
+        setImportPreview({
+          count: mems.length,
+          samples: mems.slice(0, 3).map((m) => m.content.slice(0, 90) + (m.content.length > 90 ? '…' : '')),
+        });
+      } catch {
+        setImportStatus('Could not parse this file. Make sure you selected memory.json from your ChatGPT export zip.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleImport = async () => {
+    if (!parsedMemories?.length) return;
+    setImporting(true);
+    setImportStatus('Importing…');
+    try {
+      const imported = await apiClient.bulkImportMemories(parsedMemories);
+      setImportStatus(`Imported ${imported.length} memories successfully.`);
+      setParsedMemories(null);
+      setImportPreview(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      await loadMemories();
+    } catch {
+      setImportStatus('Import failed. Please try again.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const displayMemories = searchQuery && searchResults.length > 0 ? searchResults : memories;
 
   return (
@@ -132,6 +228,83 @@ export default function MemoriesPage() {
           >
             {searching ? '...' : 'Search'}
           </button>
+        </div>
+
+        {/* ChatGPT Import */}
+        <div className="border border-dashed border-gray-200 rounded-lg">
+          <button
+            type="button"
+            onClick={() => { setShowImport((v) => !v); setImportStatus(null); setImportPreview(null); setParsedMemories(null); }}
+            className="w-full flex items-center justify-between px-4 py-3 text-sm text-gray-600 hover:text-gray-900"
+          >
+            <span className="font-medium">↑ Import from ChatGPT</span>
+            <span className="text-gray-400 text-xs">{showImport ? '▲' : '▼'}</span>
+          </button>
+
+          {showImport && (
+            <div className="px-4 pb-4 space-y-3 border-t border-gray-100">
+              {/* Instructions */}
+              <div className="bg-blue-50 rounded-lg p-3 space-y-2 text-xs text-blue-800">
+                <p className="font-semibold">How to export your ChatGPT memories:</p>
+                <ol className="space-y-1 list-decimal list-inside">
+                  <li>Go to <span className="font-mono bg-blue-100 px-1 rounded">chatgpt.com</span> → Settings</li>
+                  <li>Click <strong>Data Controls</strong> → <strong>Export data</strong></li>
+                  <li>Confirm the export — you'll get an email with a download link</li>
+                  <li>Download the zip and open it</li>
+                  <li>Find the file called <span className="font-mono bg-blue-100 px-1 rounded">memory.json</span></li>
+                  <li>Upload it below</li>
+                </ol>
+              </div>
+
+              {/* File picker */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Select memory.json
+                </label>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={handleFileSelect}
+                  className="block w-full text-xs text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+                />
+              </div>
+
+              {/* Preview */}
+              {importPreview && (
+                <div className="bg-gray-50 rounded p-3 space-y-1">
+                  <p className="text-xs font-medium text-gray-700">
+                    Found {importPreview.count} memories — preview:
+                  </p>
+                  {importPreview.samples.map((s, i) => (
+                    <p key={i} className="text-xs text-gray-500 truncate">• {s}</p>
+                  ))}
+                  {importPreview.count > 3 && (
+                    <p className="text-xs text-gray-400">…and {importPreview.count - 3} more</p>
+                  )}
+                </div>
+              )}
+
+              {/* Status */}
+              {importStatus && (
+                <p className={`text-xs ${importStatus.includes('successfully') ? 'text-green-600' : 'text-red-500'}`}>
+                  {importStatus}
+                </p>
+              )}
+
+              {/* Import button */}
+              {parsedMemories && (
+                <button
+                  type="button"
+                  onClick={handleImport}
+                  disabled={importing}
+                  className="btn-primary w-full text-sm disabled:opacity-60"
+                >
+                  {importing ? 'Importing…' : `Import ${parsedMemories.length} memories`}
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Add button */}
