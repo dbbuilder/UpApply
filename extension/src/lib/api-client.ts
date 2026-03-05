@@ -306,6 +306,13 @@ class ApiClient {
     });
   }
 
+  async generateScreeningAnswer(question: string, jobTitle?: string, jobDescription?: string, jobSkills?: string[]) {
+    return this.request<{ answer: string }>('/api/v1/screening-answers/generate', {
+      method: 'POST',
+      body: { question, job_title: jobTitle, job_description: jobDescription, job_skills: jobSkills },
+    });
+  }
+
   async bulkCreateScreeningAnswers(answers: ScreeningAnswerCreate[]) {
     return this.request<ScreeningAnswer[]>('/api/v1/screening-answers/bulk', {
       method: 'POST',

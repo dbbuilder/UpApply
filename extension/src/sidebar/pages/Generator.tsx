@@ -52,6 +52,7 @@ export default function GeneratorPage() {
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
   const [suggestedAnswers, setSuggestedAnswers] = useState<Record<string, ScreeningAnswerSearchResult[]>>({});
   const [loadingSuggestions, setLoadingSuggestions] = useState<Record<string, boolean>>({});
+  const [generatingAnswers, setGeneratingAnswers] = useState<Record<string, boolean>>({});
 
   // State for fetching full job with attachments
   const [fetchingFullJob, setFetchingFullJob] = useState(false);
@@ -268,6 +269,35 @@ export default function GeneratorPage() {
 
   const handleUseSuggestedAnswer = (index: number, answer: string) => {
     setQuestionAnswers(prev => ({ ...prev, [`q${index}`]: answer }));
+  };
+
+  const handleGenerateAnswer = async (question: string, index: number) => {
+    const key = `q${index}`;
+    setGeneratingAnswers(prev => ({ ...prev, [key]: true }));
+    try {
+      const result = await apiClient.generateScreeningAnswer(
+        question,
+        currentJob?.title ?? undefined,
+        currentJob?.description ?? undefined,
+        currentJob?.skills ?? undefined,
+      );
+      setQuestionAnswers(prev => ({ ...prev, [key]: result.answer }));
+    } catch {
+      // silently fail — user can still type manually
+    } finally {
+      setGeneratingAnswers(prev => ({ ...prev, [key]: false }));
+    }
+  };
+
+  const handleFillAll = async () => {
+    if (!currentJob?.screeningQuestions) return;
+    for (let i = 0; i < currentJob.screeningQuestions.length; i++) {
+      const q = currentJob.screeningQuestions[i];
+      const answer = questionAnswers[`q${i}`];
+      if (answer) {
+        await handleFillQuestion(q.inputSelector, i, q.question);
+      }
+    }
   };
 
   const handleAddMissingSkill = async (skillName: string) => {
@@ -813,11 +843,22 @@ export default function GeneratorPage() {
             )}
 
             {/* Screening Questions */}
-            {currentJob?.screeningQuestions && currentJob.screeningQuestions.length > 0 && coverLetter && (
+            {currentJob?.screeningQuestions && currentJob.screeningQuestions.length > 0 && (
               <div className="card animate-slide-up">
-                <h4 className="font-medium text-gray-900 mb-3">
-                  Screening Questions ({currentJob.screeningQuestions.length})
-                </h4>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-medium text-gray-900">
+                    Screening Questions ({currentJob.screeningQuestions.length})
+                  </h4>
+                  {currentJob.screeningQuestions.some((_, i) => questionAnswers[`q${i}`]) && (
+                    <button
+                      type="button"
+                      onClick={handleFillAll}
+                      className="btn-primary text-xs py-1 px-3"
+                    >
+                      Fill All ↵
+                    </button>
+                  )}
+                </div>
                 <div className="space-y-4">
                   {currentJob.screeningQuestions.map((q, index) => (
                     <div key={index} className="border-b border-gray-100 pb-3 last:border-0">
@@ -825,7 +866,7 @@ export default function GeneratorPage() {
                       <textarea
                         className="w-full border border-gray-200 rounded-lg p-2 text-sm resize-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
                         rows={3}
-                        placeholder="Enter your answer..."
+                        placeholder="Enter your answer or click AI to generate..."
                         value={questionAnswers[`q${index}`] || ''}
                         onChange={(e) => handleAnswerChange(index, e.target.value)}
                         onFocus={() => handleQuestionFocus(q.question, index)}
@@ -853,14 +894,24 @@ export default function GeneratorPage() {
                         </div>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={() => handleFillQuestion(q.inputSelector, index, q.question)}
-                        className="btn-outline text-sm mt-2"
-                        disabled={!questionAnswers[`q${index}`]}
-                      >
-                        Fill & Save Answer
-                      </button>
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateAnswer(q.question, index)}
+                          disabled={generatingAnswers[`q${index}`]}
+                          className="btn-outline text-xs py-1 px-3 disabled:opacity-60"
+                        >
+                          {generatingAnswers[`q${index}`] ? 'Generating...' : 'AI Answer'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleFillQuestion(q.inputSelector, index, q.question)}
+                          className="btn-outline text-xs py-1 px-3"
+                          disabled={!questionAnswers[`q${index}`]}
+                        >
+                          Fill & Save
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>

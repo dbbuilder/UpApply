@@ -58,7 +58,7 @@ class Settings(BaseSettings):
 
     # AI
     openai_api_key: str = ""
-    default_model: str = "gpt-4o-mini"
+    default_model: str = "gpt-4o"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
 
