@@ -608,18 +608,28 @@ function fillScreeningQuestion(selector: string, answer: string): boolean {
 
 const _scoredNotifUrls = new Set<string>();
 
+/** Strip query params and trailing slashes so the same job with different
+ *  tracking params (?source=notification, ?source=job-alert, etc.) counts
+ *  as the same URL. */
+function _normalizeJobUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.origin + u.pathname.replace(/\/+$/, '');
+  } catch {
+    return url;
+  }
+}
+
 function _scoreToNotifColors(score: number): { bg: string; color: string } {
-  if (score >= 80) return { bg: '#15803d', color: '#ffffff' }; // deep green
-  if (score >= 65) return { bg: '#22c55e', color: '#14532d' }; // light green
-  if (score >= 50) return { bg: '#ca8a04', color: '#ffffff' }; // deep yellow
-  if (score >= 35) return { bg: '#eab308', color: '#713f12' }; // light yellow
-  if (score >= 20) return { bg: '#f97316', color: '#ffffff' }; // orange
-  return { bg: '#dc2626', color: '#ffffff' };                  // deep red
+  if (score >= 90) return { bg: '#15803d', color: '#ffffff' }; // deep green
+  if (score >= 80) return { bg: '#22c55e', color: '#14532d' }; // lighter green
+  if (score >= 70) return { bg: '#ca8a04', color: '#ffffff' }; // yellow
+  return { bg: '#dc2626', color: '#ffffff' };                  // red
 }
 
 function _injectNotifBadge(row: Element, jobUrl: string): HTMLElement {
   const badge = document.createElement('span');
-  badge.dataset.upapplyJob = jobUrl;
+  badge.dataset.upapplyJob = _normalizeJobUrl(jobUrl);
   badge.style.cssText =
     'display:inline-flex;align-items:center;justify-content:center;' +
     'min-width:28px;height:18px;border-radius:9px;' +
@@ -676,9 +686,12 @@ async function _processNotifQueue(): Promise<void> {
 
 function _processNotificationRows(): void {
   document.querySelectorAll<Element>('.notification-row').forEach((row) => {
+    // Skip rows that already have a badge (prevents double-injection when
+    // MutationObserver fires on our own DOM changes)
+    if (row.querySelector('[data-upapply-job]')) return;
     const link = row.querySelector<HTMLAnchorElement>('a[href*="/jobs/~"]');
     if (!link) return;
-    const jobUrl = link.href;
+    const jobUrl = _normalizeJobUrl(link.href);
     if (_scoredNotifUrls.has(jobUrl)) return;
     _scoredNotifUrls.add(jobUrl);
     const title = link.textContent?.trim() || '';
