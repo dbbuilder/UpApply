@@ -442,6 +442,57 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
       })();
       return true;
+
+    case 'SCORE_NOTIFICATION_JOB':
+      // Open job URL in background tab, extract description, score via API, return score
+      (async () => {
+        try {
+          const { jobUrl, title } = message as { jobUrl: string; title: string };
+
+          const stored = await chrome.storage.local.get('authToken');
+          const token = stored.authToken as string | undefined;
+          if (!token) { sendResponse({ success: false, error: 'Not logged in' }); return; }
+
+          // Open job page in background tab and extract description
+          const tab = await chrome.tabs.create({ url: jobUrl, active: false });
+          if (!tab.id) { sendResponse({ success: false, error: 'Tab creation failed' }); return; }
+
+          let description = '';
+          try {
+            await waitForTabLoad(tab.id);
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            const manifest = chrome.runtime.getManifest();
+            const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+            if (contentScriptPath) {
+              try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [contentScriptPath] }); } catch { /* already loaded */ }
+            }
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const resp = await new Promise<{ success: boolean; data?: { fullDescription?: string | null } }>((resolve) => {
+              chrome.tabs.sendMessage(tab.id!, { type: 'EXTRACT_JOB_POSTING_DATA' }, (r) => {
+                if (chrome.runtime.lastError) resolve({ success: false });
+                else resolve(r || { success: false });
+              });
+            });
+            description = resp.data?.fullDescription || '';
+          } finally {
+            try { await chrome.tabs.remove(tab.id); } catch { /* ignore */ }
+          }
+
+          const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
+          const analyzeResp = await fetch(`${apiBase}/api/v1/jobs/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ title: title || 'Job', description: description || title }),
+          });
+
+          if (!analyzeResp.ok) { sendResponse({ success: false, error: `API ${analyzeResp.status}` }); return; }
+          const data = await analyzeResp.json() as { match_score: number };
+          sendResponse({ success: true, score: data.match_score });
+        } catch (err) {
+          sendResponse({ success: false, error: String(err) });
+        }
+      })();
+      return true;
   }
 
   return false;

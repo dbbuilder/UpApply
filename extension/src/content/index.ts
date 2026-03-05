@@ -602,6 +602,101 @@ function fillScreeningQuestion(selector: string, answer: string): boolean {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Notification page job scorer
+// ---------------------------------------------------------------------------
+
+const _scoredNotifUrls = new Set<string>();
+
+function _scoreToNotifColors(score: number): { bg: string; color: string } {
+  if (score >= 80) return { bg: '#15803d', color: '#ffffff' }; // deep green
+  if (score >= 65) return { bg: '#22c55e', color: '#14532d' }; // light green
+  if (score >= 50) return { bg: '#ca8a04', color: '#ffffff' }; // deep yellow
+  if (score >= 35) return { bg: '#eab308', color: '#713f12' }; // light yellow
+  if (score >= 20) return { bg: '#f97316', color: '#ffffff' }; // orange
+  return { bg: '#dc2626', color: '#ffffff' };                  // deep red
+}
+
+function _injectNotifBadge(row: Element, jobUrl: string): HTMLElement {
+  const badge = document.createElement('span');
+  badge.dataset.upapplyJob = jobUrl;
+  badge.style.cssText =
+    'display:inline-flex;align-items:center;justify-content:center;' +
+    'min-width:28px;height:18px;border-radius:9px;' +
+    'font-size:10px;font-weight:700;color:#9ca3af;' +
+    'background:#f3f4f6;border:1px solid #e5e7eb;' +
+    'padding:0 5px;margin-left:6px;vertical-align:middle;' +
+    'cursor:default;font-family:-apple-system,sans-serif;white-space:nowrap;';
+  badge.textContent = '…';
+  badge.title = 'UpApply: scoring…';
+  const link = row.querySelector<HTMLAnchorElement>('a[href*="/jobs/~"]');
+  if (link) link.after(badge);
+  return badge;
+}
+
+interface _NotifQueueItem {
+  badge: HTMLElement;
+  jobUrl: string;
+  title: string;
+}
+const _notifQueue: _NotifQueueItem[] = [];
+let _notifProcessing = false;
+
+async function _processNotifQueue(): Promise<void> {
+  if (_notifProcessing) return;
+  _notifProcessing = true;
+  while (_notifQueue.length > 0) {
+    const item = _notifQueue.shift()!;
+    await new Promise<void>((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: 'SCORE_NOTIFICATION_JOB', jobUrl: item.jobUrl, title: item.title },
+        (resp: { success: boolean; score?: number } | undefined) => {
+          if (resp?.success && resp.score != null) {
+            const score = Math.round(resp.score);
+            const { bg, color } = _scoreToNotifColors(score);
+            item.badge.style.background = bg;
+            item.badge.style.color = color;
+            item.badge.style.border = 'none';
+            item.badge.textContent = String(score);
+            item.badge.title = `UpApply match: ${score}/100`;
+          } else {
+            item.badge.textContent = '?';
+            item.badge.title = 'UpApply: could not score';
+          }
+          resolve();
+        }
+      );
+    });
+    if (_notifQueue.length > 0) {
+      await new Promise(r => setTimeout(r, 800)); // rate-limit: one tab at a time
+    }
+  }
+  _notifProcessing = false;
+}
+
+function _processNotificationRows(): void {
+  document.querySelectorAll<Element>('.notification-row').forEach((row) => {
+    const link = row.querySelector<HTMLAnchorElement>('a[href*="/jobs/~"]');
+    if (!link) return;
+    const jobUrl = link.href;
+    if (_scoredNotifUrls.has(jobUrl)) return;
+    _scoredNotifUrls.add(jobUrl);
+    const title = link.textContent?.trim() || '';
+    const badge = _injectNotifBadge(row, jobUrl);
+    _notifQueue.push({ badge, jobUrl, title });
+  });
+  _processNotifQueue();
+}
+
+// Watch for the notifications dropdown to open (Vue SPA — it's not in the DOM until opened)
+new MutationObserver(() => {
+  if (document.querySelector('ul[data-cy="notifications-list"]')) {
+    _processNotificationRows();
+  }
+}).observe(document.body, { childList: true, subtree: true });
+
+// ---------------------------------------------------------------------------
+
 interface ScrapedSavedSearch {
   query: string;
   url_params: string;
