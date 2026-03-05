@@ -57,45 +57,56 @@ def clean_cover_letter(content: str) -> str:
 
 def build_system_prompt(profile: UserProfile) -> str:
     """Build system prompt from user profile."""
-    prompt_parts = [
-        f"You are writing a cover letter for {profile.full_name or 'a freelancer'}, "
-        f"a {profile.professional_title or 'professional'}."
+    name = profile.full_name or "the freelancer"
+    title = profile.professional_title or "senior technical professional"
+
+    parts = [
+        f"You are ghostwriting an Upwork proposal for {name}, a {title}. "
+        f"Write entirely in their voice — they are not a job applicant, they are a senior technical peer "
+        f"evaluating whether this engagement is worth their time."
     ]
 
+    if profile.bio:
+        parts.append(f"\n\nBACKGROUND: {profile.bio[:400]}")
+
     if profile.career_goals:
-        prompt_parts.append(f"\nTHEIR GOALS: {profile.career_goals}")
-
-    if profile.ideal_project_description:
-        prompt_parts.append(f"\nIDEAL PROJECT: {profile.ideal_project_description}")
-
-    if profile.unique_strengths:
-        prompt_parts.append(f"\nUNIQUE STRENGTHS: {', '.join(profile.unique_strengths)}")
-
-    tone = profile.tone_preference or "professional"
-    prompt_parts.append(f"\nTONE: {tone}")
+        parts.append(f"\n\nWHAT THEY CARE ABOUT: {profile.career_goals}")
 
     if profile.communication_style:
-        prompt_parts.append(f"\nSTYLE NOTES: {profile.communication_style}")
+        parts.append(f"\n\nSTYLE NOTES: {profile.communication_style}")
 
-    prompt_parts.append("""
+    if profile.unique_strengths:
+        parts.append(f"\n\nCORE STRENGTHS: {', '.join(profile.unique_strengths)}")
 
-GUIDELINES:
-- Lead with understanding their specific problem
-- Highlight skills they WANT to use based on the job match
-- Reference specific relevant experiences from provided memories
-- Match the specified tone preference
-- Keep under 300 words
-- End with clear call to action
-- NO generic phrases like "I am excited to apply" or "I look forward to hearing from you"
-- NO placeholders like [Your Name], [Company], [Hiring Manager], etc.
-- NO "Dear..." salutation line - start directly with the content
-- NO "Subject:" line
-- NO signature block at the end (no "Sincerely," or name)
-- Be specific about how past experience applies to THIS job
-- Focus on value you can provide, not just qualifications
-- Start the letter immediately with a compelling opening sentence""")
+    parts.append(f"""
 
-    return "".join(prompt_parts)
+VOICE:
+- Peer-to-peer with founders and CTOs — never subordinate, never eager-to-please
+- Opens with pattern recognition: one sentence showing you have seen this exact situation before
+- Tells one specific concrete story from past work — real project name, real outcome
+- Names specific failure modes and risk classes the client should worry about
+- Weaves skills into narrative — never lists them as bullets
+- Confident and direct, not arrogant or academic
+- Ends as an equal: "if we work together, you can expect..." not "I look forward to hearing from you"
+
+BANNED PHRASES (these signal generic AI writing — using any of these is a failure):
+"I am well-equipped", "unique blend of skills", "align perfectly with your needs",
+"I am excited to apply", "I look forward to hearing from you", "my skills directly translate",
+"proven track record", "I am passionate about", "leverage my expertise",
+"I believe I would be a great fit", "I am confident that", "strong background in",
+"extensive experience in", "I would love the opportunity", "I am a perfect fit"
+
+STRUCTURE — write these as flowing prose, do not label the sections:
+1. Pattern recognition hook — one sentence identifying the core situation (e.g., "founder-built system hitting operational risk", "vibe-coded platform that needs guardrails")
+2. One concrete past story — what you actually did in a near-identical situation: the specific problem, your specific action, the outcome. Use a real named project from their portfolio.
+3. Failure modes you eliminate — name the specific risks this client faces and how you address them
+4. 1-2 portfolio anchors — drop real product names with a sentence of context to establish range
+5. Peer-level close — what working together will feel like, not a request for a callback
+
+LENGTH: 300-450 words. No salutation. No signature. No placeholders.
+No "Dear...", no "Subject:", no "Sincerely,", no name at the end.""")
+
+    return "".join(parts)
 
 
 def format_memories_for_prompt(memories: List[Dict]) -> str:
@@ -107,8 +118,7 @@ def format_memories_for_prompt(memories: List[Dict]) -> str:
     for i, mem in enumerate(memories, 1):
         entry = f"{i}. {mem['title']}"
         if mem.get('content'):
-            # Truncate if too long
-            content = mem['content'][:300] + "..." if len(mem['content']) > 300 else mem['content']
+            content = mem['content'][:600] + "..." if len(mem['content']) > 600 else mem['content']
             entry += f"\n   {content}"
         if mem.get('outcome'):
             entry += f"\n   Outcome: {mem['outcome']}"
@@ -186,44 +196,56 @@ def build_user_prompt(
 ) -> str:
     """Build user prompt with job and match details."""
     parts = [
-        f"JOB: {job_title}",
-        f"\nDESCRIPTION:\n{job_description[:2000]}",  # Limit description length
+        "Write a proposal for this Upwork job in the voice described above.\n",
+        f"JOB TITLE: {job_title}",
+        f"\n\nJOB DESCRIPTION:\n{job_description[:2500]}",
     ]
 
     if job_skills:
-        parts.append(f"\nREQUIRED SKILLS: {', '.join(job_skills)}")
+        parts.append(f"\n\nSKILLS THEY NEED: {', '.join(job_skills)}")
 
     if budget:
         parts.append(f"\nBUDGET: {budget}")
 
-    parts.append(f"\n\nRELEVANT EXPERIENCE FROM MY PORTFOLIO:\n{format_memories_for_prompt(relevant_memories)}")
+    # Memories — expand truncation limit so there's real content to draw on
+    if relevant_memories:
+        parts.append(f"\n\nPORTFOLIO / RELEVANT EXPERIENCE (draw from these for the concrete story):\n{format_memories_for_prompt(relevant_memories)}")
 
-    parts.append(f"\n\nSKILL ALIGNMENT:\n{format_skill_matches(skill_matches, missing_skills)}")
+    # Skill alignment as background context only — not to be listed
+    skill_notes = format_skill_matches(skill_matches, missing_skills)
+    if skill_notes and skill_notes != "No specific skill requirements identified.":
+        parts.append(f"\n\nSKILL ALIGNMENT (background context — do NOT list these, weave into narrative):\n{skill_notes}")
 
-    # Add past successful proposals as writing style examples
+    # Past successful proposals as voice calibration
     if past_proposals:
         past_proposals_text = format_past_proposals(past_proposals)
         if past_proposals_text:
-            parts.append(f"\n\nPAST COVER LETTERS FOR SIMILAR JOBS (use as style reference, especially successful ones):\n{past_proposals_text}")
+            parts.append(
+                f"\n\nPAST WINNING PROPOSALS (calibrate voice and structure from these — "
+                f"especially the ones marked SUCCESSFUL):\n{past_proposals_text}"
+            )
 
-    # Add skills to highlight if they match job requirements
+    # Skills to highlight
     if profile.skills_to_highlight:
-        matching_highlights = []
         job_skills_lower = [s.lower() for s in job_skills]
-        for skill in profile.skills_to_highlight:
-            if skill.lower() in job_skills_lower or any(
-                skill.lower() in js for js in job_skills_lower
-            ):
-                matching_highlights.append(skill)
+        matching_highlights = [
+            s for s in profile.skills_to_highlight
+            if s.lower() in job_skills_lower or any(s.lower() in js for js in job_skills_lower)
+        ]
         if matching_highlights:
-            parts.append(f"\n\nUSER'S PREFERRED FOCUS (emphasize these if relevant):\n{', '.join(matching_highlights)}")
+            parts.append(f"\n\nEMPHASIZE THESE if they appear in the narrative: {', '.join(matching_highlights)}")
 
     if inclusions:
         formatted_inclusions = format_inclusions(inclusions)
         if formatted_inclusions:
-            parts.append(f"\n\nUSER INCLUSIONS:\n{formatted_inclusions}")
+            parts.append(f"\n\nREQUIRED INCLUSIONS:\n{formatted_inclusions}")
 
-    parts.append("\n\nGenerate a personalized, compelling cover letter for this job. Learn from the past cover letter examples if provided, especially the successful ones.")
+    parts.append(
+        "\n\nNow write the proposal. Start with the pattern recognition hook — "
+        "identify what situation this client is in and show you've been here before. "
+        "Pick the most relevant portfolio story and tell it specifically. "
+        "Name the failure modes. Anchor with portfolio products. Close as a peer."
+    )
 
     return "".join(parts)
 
@@ -331,8 +353,8 @@ async def generate_cover_letter(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        max_tokens=1000,
-        temperature=0.7,
+        max_tokens=1200,
+        temperature=0.75,
     )
 
     raw_content = response.choices[0].message.content.strip()
