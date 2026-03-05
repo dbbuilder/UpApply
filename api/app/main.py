@@ -3,7 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 
 import sentry_sdk
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
@@ -60,6 +60,28 @@ app.add_middleware(
 # Include API routes
 app.include_router(api_v1_router, prefix="/api/v1")
 
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all handler so unhandled exceptions still get CORS headers.
+
+    Starlette's ServerErrorMiddleware sits *outside* CORSMiddleware and sends
+    500 responses without the Access-Control-Allow-Origin header, which causes
+    the browser to report a CORS error instead of the real error.  Registering
+    an explicit handler here keeps the response inside FastAPI's
+    ExceptionMiddleware, which is inside CORSMiddleware.
+    """
+    if isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+        )
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 
 @app.get("/health")
