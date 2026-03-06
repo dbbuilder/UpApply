@@ -750,82 +750,141 @@ function _hideProgressBar(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Fetch job page data via same-origin fetch (no background tab, no bot detection)
+// Fetch job data via Upwork's internal GraphQL API
+// Content script runs on upwork.com so cookies are sent automatically.
+// This avoids opening background tabs and bypasses bot-detection entirely.
 // ---------------------------------------------------------------------------
 
+function _getUpworkCookie(name: string): string | null {
+  const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${encodeURIComponent(name)}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+interface JobFetchResult {
+  description: string;
+  pageText: string;
+  budgetAmount: string | null;
+  budgetType: 'hourly' | 'fixed' | null;
+}
+
 /**
- * Fetch the Upwork job page HTML and extract description + page text.
- * Works because the content script runs on upwork.com (same-origin, cookies
- * are included automatically — no tab opening, no bot-check triggers).
+ * Primary path: call Upwork's internal GraphQL API with the job UID.
+ * Uses the session cookies already present in the browser.
  */
-async function _fetchJobPageData(url: string): Promise<{ description: string; pageText: string }> {
+async function _fetchJobViaGraphQL(jobUid: string): Promise<JobFetchResult | null> {
+  // Upwork stores the OAuth bearer token in a JS-readable cookie
+  const authToken = _getUpworkCookie('oauth2_global_js_token');
+  // CSRF double-submit cookie (Angular/Vue SPA pattern)
+  const xsrfToken = _getUpworkCookie('XSRF-TOKEN') || _getUpworkCookie('x-odesk-csrf-token');
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
+  };
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  if (xsrfToken) headers['X-XSRF-TOKEN'] = xsrfToken;
+
+  // Minimal query — only the fields we need
+  const query = `query jobPosting($jobUid:String!){
+    jobPosting(jobUid:$jobUid){
+      id title description contractorTier jobType
+      hourlyBudgetMin hourlyBudgetMax
+      amount{ amount currencyCode }
+    }
+  }`;
+
+  const resp = await fetch('/api/graphql/v1', {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify({ operationName: 'jobPosting', query, variables: { jobUid } }),
+  });
+
+  console.log('[UpApply] GraphQL status:', resp.status, 'for', jobUid);
+  if (!resp.ok) return null;
+
+  const json = await resp.json() as { data?: { jobPosting?: Record<string, unknown> }; errors?: unknown[] };
+  console.log('[UpApply] GraphQL response:', JSON.stringify(json).slice(0, 400));
+
+  const job = json?.data?.jobPosting;
+  if (!job) return null;
+
+  // Budget
+  let budgetAmount: string | null = null;
+  let budgetType: 'hourly' | 'fixed' | null = null;
+  const hMin = job.hourlyBudgetMin as number | null;
+  const hMax = job.hourlyBudgetMax as number | null;
+  const fixedAmt = (job.amount as Record<string, unknown> | null)?.amount as number | null;
+
+  if (hMin != null || hMax != null) {
+    budgetType = 'hourly';
+    const min = hMin != null ? `$${Math.round(hMin)}` : null;
+    const max = hMax != null ? `$${Math.round(hMax)}` : null;
+    budgetAmount = [min, max].filter(Boolean).join('-');
+  } else if (fixedAmt != null) {
+    budgetType = 'fixed';
+    budgetAmount = `$${Math.round(fixedAmt).toLocaleString()}`;
+  }
+
+  const description = (job.description as string) || '';
+  return { description, pageText: description, budgetAmount, budgetType };
+}
+
+/**
+ * Fallback: fetch job page HTML and try to extract content.
+ * Upwork job pages are CSR (client-side rendered), so this usually returns
+ * a minimal shell — but we try anyway and log what we get.
+ */
+async function _fetchJobViaHTML(url: string): Promise<JobFetchResult> {
   try {
     const resp = await fetch(url, { credentials: 'include' });
-    if (!resp.ok) return { description: '', pageText: '' };
-    const html = await resp.text();
+    const html = resp.ok ? await resp.text() : '';
+    console.log('[UpApply] HTML fallback:', { status: resp.status, finalUrl: resp.url, htmlLen: html.length, sample: html.slice(0, 150) });
+
+    if (!html) return { description: '', pageText: '', budgetAmount: null, budgetType: null };
 
     const doc = new DOMParser().parseFromString(html, 'text/html');
-
-    // 1. Try known DOM selectors on the SSR'd HTML
-    let description = '';
-    const descSels = [
-      '[data-test="Description"]',
-      '[data-cy="description"]',
-      '.job-description',
-      'section.description',
-      '[data-v-app] .description',  // Vue SSR
-    ];
-    for (const sel of descSels) {
-      const txt = doc.querySelector(sel)?.textContent?.trim() ?? '';
-      if (txt.length > 80) { description = txt; break; }
-    }
-
-    // 2. Try embedded script data: Apollo cache or Next.js __NEXT_DATA__
-    if (!description) {
-      for (const script of Array.from(doc.querySelectorAll('script:not([src])'))) {
-        const src = script.textContent ?? '';
-
-        // Apollo Client: window.__APOLLO_STATE__ = { "JobPosting:~xxx": { description: { value: "..." } } }
-        const apolloM = src.match(/APOLLO_STATE[^=]*=\s*(\{[\s\S]{20,200000}\})\s*;?\s*(?:<\/script>|$)/);
-        if (apolloM) {
-          try {
-            const state = JSON.parse(apolloM[1]) as Record<string, unknown>;
-            for (const v of Object.values(state)) {
-              const obj = v as Record<string, unknown>;
-              const raw = (obj?.description as Record<string, unknown>)?.value ?? obj?.description;
-              if (typeof raw === 'string' && raw.length > 80) { description = raw; break; }
-            }
-          } catch { /* ignore parse errors */ }
-        }
-
-        // Next.js: <script id="__NEXT_DATA__">{...}</script>
-        if (!description && script.id === '__NEXT_DATA__') {
-          try {
-            const findStr = (o: unknown, depth = 0): string | null => {
-              if (depth > 8 || !o || typeof o !== 'object') return null;
-              for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
-                if ((k === 'description' || k === 'jobDescription') && typeof v === 'string' && v.length > 80) return v;
-                const found = findStr(v, depth + 1);
-                if (found) return found;
-              }
-              return null;
-            };
-            description = findStr(JSON.parse(src)) ?? '';
-          } catch { /* ignore */ }
-        }
-
-        if (description) break;
-      }
-    }
-
-    // Always return full page text so background can run budget regex on it
     const pageText = doc.body?.textContent ?? '';
-    console.log('[UpApply] fetchJobPageData:', { url, descLen: description.length, pageTextLen: pageText.length });
-    return { description, pageText };
+
+    // Try Apollo state embedded in a <script> tag
+    let description = '';
+    for (const script of Array.from(doc.querySelectorAll('script:not([src])'))) {
+      const src = script.textContent ?? '';
+      const apolloM = src.match(/APOLLO_STATE[^=]*=\s*(\{[\s\S]{20,200000}\})/);
+      if (apolloM) {
+        try {
+          const state = JSON.parse(apolloM[1]) as Record<string, unknown>;
+          for (const v of Object.values(state)) {
+            const obj = v as Record<string, unknown>;
+            const raw = (obj?.description as Record<string, unknown>)?.value ?? obj?.description;
+            if (typeof raw === 'string' && raw.length > 80) { description = raw; break; }
+          }
+        } catch { /* ignore */ }
+      }
+      if (description) break;
+    }
+
+    console.log('[UpApply] HTML fallback result:', { descLen: description.length, pageTextLen: pageText.length });
+    return { description, pageText, budgetAmount: null, budgetType: null };
   } catch (err) {
-    console.log('[UpApply] fetchJobPageData error:', err);
-    return { description: '', pageText: '' };
+    console.log('[UpApply] HTML fallback error:', err);
+    return { description: '', pageText: '', budgetAmount: null, budgetType: null };
   }
+}
+
+/** Fetch job data: GraphQL first, HTML fallback. */
+async function _fetchJobData(jobUrl: string): Promise<JobFetchResult> {
+  const uidMatch = jobUrl.match(/(~[0-9a-f]+)/i);
+  if (uidMatch) {
+    const result = await _fetchJobViaGraphQL(uidMatch[1]).catch(() => null);
+    if (result && result.description.length > 0) {
+      console.log('[UpApply] GraphQL success:', { descLen: result.description.length, budget: result.budgetAmount });
+      return result;
+    }
+  }
+  // GraphQL failed or returned empty — fall back to HTML
+  return _fetchJobViaHTML(jobUrl);
 }
 
 // ---------------------------------------------------------------------------
@@ -861,14 +920,16 @@ async function _processNotifQueue(): Promise<void> {
     if (cacheCheck?.cached) {
       resp = cacheCheck;
     } else {
-      // Fetch job page data via same-origin fetch — no tab, no bot detection
-      const jobData = await _fetchJobPageData(item.jobUrl);
+      // Fetch job data via GraphQL (primary) or HTML fallback — no tab, no bot detection
+      const jobData = await _fetchJobData(item.jobUrl);
       resp = await _swMessage({
         type: 'SCORE_JOB_WITH_DATA',
         jobUrl: item.jobUrl,
         title: item.title,
         description: jobData.description,
         pageText: jobData.pageText,
+        budgetAmount: jobData.budgetAmount,
+        budgetType: jobData.budgetType,
       }) as ScoreResp | undefined;
     }
 

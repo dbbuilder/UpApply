@@ -473,8 +473,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'SCORE_JOB_WITH_DATA':
       (async () => {
         try {
-          const { jobUrl, title, description, pageText } = message as {
+          const { jobUrl, title, description, pageText, budgetAmount: preBudgetAmount, budgetType: preBudgetType } = message as {
             jobUrl: string; title: string; description: string; pageText: string;
+            budgetAmount?: string | null; budgetType?: string | null;
           };
 
           // Cache check
@@ -492,11 +493,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const token = stored.authToken as string | undefined;
           if (!token) { sendResponse({ success: false, error: 'Not logged in' }); return; }
 
-          // Extract budget from page text (content script already fetched it)
-          const extracted = extractBudgetFromPageText(pageText || description);
-          console.log('[UpApply] SCORE_JOB_WITH_DATA budget:', extracted, 'pageTextLen:', (pageText || '').length);
-          const budgetAmount = extracted?.amount ?? null;
-          const budgetType   = extracted?.type   ?? null;
+          // Use budget from GraphQL if available, otherwise extract from page text
+          let budgetAmount = preBudgetAmount ?? null;
+          let budgetType   = preBudgetType   ?? null;
+          if (!budgetAmount) {
+            const extracted = extractBudgetFromPageText(pageText || description);
+            console.log('[UpApply] SCORE_JOB_WITH_DATA budget fallback:', extracted, 'pageTextLen:', (pageText || '').length);
+            budgetAmount = extracted?.amount ?? null;
+            budgetType   = extracted?.type   ?? null;
+          }
+          console.log('[UpApply] SCORE_JOB_WITH_DATA final budget:', { budgetAmount, budgetType, source: preBudgetAmount ? 'graphql' : 'regex' });
 
           // Score via API
           const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
