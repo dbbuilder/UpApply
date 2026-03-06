@@ -981,29 +981,51 @@ function _processNotificationRows(): void {
   _processNotifQueue();
 }
 
-// MutationObserver covers two cases:
+function _processSavedJobCards(): void {
+  document.querySelectorAll<Element>('article[data-test="JobTile"]').forEach((article) => {
+    if (article.querySelector('[data-upapply-job]')) return;
+    const link = article.querySelector<HTMLAnchorElement>('a[href*="/jobs/~"]');
+    if (!link) return;
+    const jobUrl = _normalizeJobUrl(link.href);
+    if (_scoredNotifUrls.has(jobUrl)) return;
+    _scoredNotifUrls.add(jobUrl);
+    const title = link.textContent?.trim() || '';
+    const badge = _injectNotifBadge(article, jobUrl);
+    _notifQueue.push({ badge, row: article, jobUrl, title });
+    _notifTotal++;
+  });
+  _processNotifQueue();
+}
+
+// MutationObserver covers three cases:
 //   1. Bell dropdown: Upwork injects ul[data-cy="notifications-list"] into DOM when opened
-//   2. Full notifications page (/ab/notifications/): rows are already in the DOM and the
-//      observer fires as Upwork's Vue renders them in
+//   2. Full notifications page (/ab/notifications/): rows rendered by Vue
+//   3. Saved jobs page (/nx/search/jobs/saved/): article[data-test="JobTile"] tiles
 let _notifObserverFired = false;
 new MutationObserver(() => {
   const isNotifPage = window.location.pathname.includes('/notifications');
+  const isSavedPage = window.location.pathname.includes('/nx/search/jobs');
   const hasDropdown = !!document.querySelector('ul[data-cy="notifications-list"]');
   const hasRows     = !!document.querySelector('.notification-row a[href*="/jobs/~"]');
+  const hasTiles    = !!document.querySelector('article[data-test="JobTile"]');
 
   if (hasDropdown || (isNotifPage && hasRows)) {
     _processNotificationRows();
-    // On the full page, stop watching once we've done a first pass —
-    // subsequent calls come from new rows added by infinite scroll
     if (isNotifPage && hasRows && !_notifObserverFired) {
       _notifObserverFired = true;
     }
+  }
+  if (isSavedPage && hasTiles) {
+    _processSavedJobCards();
   }
 }).observe(document.body, { childList: true, subtree: true });
 
 // Also try immediately on the full notifications page (rows may already be in DOM)
 if (window.location.pathname.includes('/notifications')) {
   setTimeout(_processNotificationRows, 1500);
+}
+if (window.location.pathname.includes('/nx/search/jobs')) {
+  setTimeout(_processSavedJobCards, 1500);
 }
 
 // ---------------------------------------------------------------------------
