@@ -750,6 +750,85 @@ function _hideProgressBar(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Fetch job page data via same-origin fetch (no background tab, no bot detection)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch the Upwork job page HTML and extract description + page text.
+ * Works because the content script runs on upwork.com (same-origin, cookies
+ * are included automatically — no tab opening, no bot-check triggers).
+ */
+async function _fetchJobPageData(url: string): Promise<{ description: string; pageText: string }> {
+  try {
+    const resp = await fetch(url, { credentials: 'include' });
+    if (!resp.ok) return { description: '', pageText: '' };
+    const html = await resp.text();
+
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+    // 1. Try known DOM selectors on the SSR'd HTML
+    let description = '';
+    const descSels = [
+      '[data-test="Description"]',
+      '[data-cy="description"]',
+      '.job-description',
+      'section.description',
+      '[data-v-app] .description',  // Vue SSR
+    ];
+    for (const sel of descSels) {
+      const txt = doc.querySelector(sel)?.textContent?.trim() ?? '';
+      if (txt.length > 80) { description = txt; break; }
+    }
+
+    // 2. Try embedded script data: Apollo cache or Next.js __NEXT_DATA__
+    if (!description) {
+      for (const script of Array.from(doc.querySelectorAll('script:not([src])'))) {
+        const src = script.textContent ?? '';
+
+        // Apollo Client: window.__APOLLO_STATE__ = { "JobPosting:~xxx": { description: { value: "..." } } }
+        const apolloM = src.match(/APOLLO_STATE[^=]*=\s*(\{[\s\S]{20,200000}\})\s*;?\s*(?:<\/script>|$)/);
+        if (apolloM) {
+          try {
+            const state = JSON.parse(apolloM[1]) as Record<string, unknown>;
+            for (const v of Object.values(state)) {
+              const obj = v as Record<string, unknown>;
+              const raw = (obj?.description as Record<string, unknown>)?.value ?? obj?.description;
+              if (typeof raw === 'string' && raw.length > 80) { description = raw; break; }
+            }
+          } catch { /* ignore parse errors */ }
+        }
+
+        // Next.js: <script id="__NEXT_DATA__">{...}</script>
+        if (!description && script.id === '__NEXT_DATA__') {
+          try {
+            const findStr = (o: unknown, depth = 0): string | null => {
+              if (depth > 8 || !o || typeof o !== 'object') return null;
+              for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
+                if ((k === 'description' || k === 'jobDescription') && typeof v === 'string' && v.length > 80) return v;
+                const found = findStr(v, depth + 1);
+                if (found) return found;
+              }
+              return null;
+            };
+            description = findStr(JSON.parse(src)) ?? '';
+          } catch { /* ignore */ }
+        }
+
+        if (description) break;
+      }
+    }
+
+    // Always return full page text so background can run budget regex on it
+    const pageText = doc.body?.textContent ?? '';
+    console.log('[UpApply] fetchJobPageData:', { url, descLen: description.length, pageTextLen: pageText.length });
+    return { description, pageText };
+  } catch (err) {
+    console.log('[UpApply] fetchJobPageData error:', err);
+    return { description: '', pageText: '' };
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 /** Wake the service worker then send a message, returning undefined on failure. */
 function _swMessage(msg: object): Promise<Record<string, unknown> | undefined> {
@@ -774,9 +853,24 @@ async function _processNotifQueue(): Promise<void> {
   while (_notifQueue.length > 0) {
     const item = _notifQueue.shift()!;
     type ScoreResp = { success: boolean; score?: number; chips?: string[]; cached?: boolean };
-    const resp = await _swMessage(
-      { type: 'SCORE_NOTIFICATION_JOB', jobUrl: item.jobUrl, title: item.title }
-    ) as ScoreResp | undefined;
+
+    // Check cache first before doing any fetch
+    const cacheCheck = await _swMessage({ type: 'CHECK_NOTIF_CACHE', jobUrl: item.jobUrl }) as ScoreResp | undefined;
+
+    let resp: ScoreResp | undefined;
+    if (cacheCheck?.cached) {
+      resp = cacheCheck;
+    } else {
+      // Fetch job page data via same-origin fetch — no tab, no bot detection
+      const jobData = await _fetchJobPageData(item.jobUrl);
+      resp = await _swMessage({
+        type: 'SCORE_JOB_WITH_DATA',
+        jobUrl: item.jobUrl,
+        title: item.title,
+        description: jobData.description,
+        pageText: jobData.pageText,
+      }) as ScoreResp | undefined;
+    }
 
     if (resp?.success && resp.score != null) {
       const score = Math.round(resp.score);
@@ -796,9 +890,9 @@ async function _processNotifQueue(): Promise<void> {
     _notifDone++;
     _updateProgressBar(_notifDone, _notifTotal);
 
-    // Slow down between live (non-cached) scrapes to avoid Upwork rate-limiting
+    // Small delay between fetches — same-origin so much lighter than tab opening
     if (_notifQueue.length > 0 && !resp?.cached) {
-      await new Promise(r => setTimeout(r, 2500));
+      await new Promise(r => setTimeout(r, 600));
     }
   }
 

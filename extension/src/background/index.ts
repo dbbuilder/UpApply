@@ -447,17 +447,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })();
       return true;
 
-    case 'SCORE_NOTIFICATION_JOB':
-      // Open job URL in background tab, extract description, score via API, return score.
-      // Results are cached in chrome.storage for 24 h to avoid re-scraping the same URL.
+    // ------------------------------------------------------------------
+    // CHECK_NOTIF_CACHE — fast cache-only lookup, no scoring
+    // ------------------------------------------------------------------
+    case 'CHECK_NOTIF_CACHE':
+      (async () => {
+        const { jobUrl } = message as { jobUrl: string };
+        const CACHE_VERSION = 'v4';
+        const cacheKey = `sc_${CACHE_VERSION}_${jobUrl}`;
+        const CACHE_TTL = 24 * 60 * 60 * 1000;
+        const cacheStore = await chrome.storage.local.get(cacheKey);
+        const cached = cacheStore[cacheKey] as { score: number; chips: string[]; ts: number } | undefined;
+        if (cached && Date.now() - cached.ts < CACHE_TTL) {
+          sendResponse({ success: true, score: cached.score, chips: cached.chips, cached: true });
+        } else {
+          sendResponse({ success: false, cached: false });
+        }
+      })();
+      return true;
+
+    // ------------------------------------------------------------------
+    // SCORE_JOB_WITH_DATA — content script already fetched page data;
+    // background just scores via API + caches. No tab opening needed.
+    // ------------------------------------------------------------------
+    case 'SCORE_JOB_WITH_DATA':
       (async () => {
         try {
-          const { jobUrl, title } = message as { jobUrl: string; title: string };
+          const { jobUrl, title, description, pageText } = message as {
+            jobUrl: string; title: string; description: string; pageText: string;
+          };
 
-          // --- Cache check ---
-          const CACHE_VERSION = 'v3'; // bump to invalidate old cached chips
+          // Cache check
+          const CACHE_VERSION = 'v4';
           const cacheKey = `sc_${CACHE_VERSION}_${jobUrl}`;
-          const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 h
+          const CACHE_TTL = 24 * 60 * 60 * 1000;
           const cacheStore = await chrome.storage.local.get(cacheKey);
           const cached = cacheStore[cacheKey] as { score: number; chips: string[]; ts: number } | undefined;
           if (cached && Date.now() - cached.ts < CACHE_TTL) {
@@ -469,75 +492,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const token = stored.authToken as string | undefined;
           if (!token) { sendResponse({ success: false, error: 'Not logged in' }); return; }
 
-          // Open job page in background tab and extract description
-          const tab = await chrome.tabs.create({ url: jobUrl, active: false });
-          if (!tab.id) { sendResponse({ success: false, error: 'Tab creation failed' }); return; }
+          // Extract budget from page text (content script already fetched it)
+          const extracted = extractBudgetFromPageText(pageText || description);
+          console.log('[UpApply] SCORE_JOB_WITH_DATA budget:', extracted, 'pageTextLen:', (pageText || '').length);
+          const budgetAmount = extracted?.amount ?? null;
+          const budgetType   = extracted?.type   ?? null;
 
-          let description = '';
-          let budgetAmount: string | null = null;
-          let budgetType: string | null = null;
-          try {
-            await waitForTabLoad(tab.id);
-            await new Promise(resolve => setTimeout(resolve, 3000)); // extra time for Vue hydration + anti-bot
-            const manifest = chrome.runtime.getManifest();
-            const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
-            if (contentScriptPath) {
-              try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [contentScriptPath] }); } catch { /* already loaded */ }
-            }
-            await new Promise(resolve => setTimeout(resolve, 500));
-            const resp = await new Promise<{ success: boolean; data?: { fullDescription?: string | null; budgetAmount?: string | null; budgetType?: string | null } }>((resolve) => {
-              chrome.tabs.sendMessage(tab.id!, { type: 'EXTRACT_JOB_POSTING_DATA' }, (r) => {
-                if (chrome.runtime.lastError) resolve({ success: false });
-                else resolve(r || { success: false });
-              });
-            });
-            description = resp.data?.fullDescription || '';
-            budgetAmount = resp.data?.budgetAmount ?? null;
-            budgetType = resp.data?.budgetType ?? null;
-
-            // Fallback: if DOM selectors missed the budget, scan the full rendered
-            // page text for dollar amounts before we close the tab.
-            if (!budgetAmount) {
-              try {
-                const pageTextResult = await chrome.scripting.executeScript({
-                  target: { tabId: tab.id! },
-                  func: () => (document.body as HTMLElement).innerText,
-                });
-                const pageText = (pageTextResult[0]?.result as string) || '';
-                console.log('[UpApply] pageText sample (first 400 chars):', pageText.slice(0, 400));
-                const extracted = extractBudgetFromPageText(pageText);
-                console.log('[UpApply] extractBudgetFromPageText result:', extracted);
-                if (extracted) {
-                  budgetAmount = extracted.amount;
-                  budgetType   = extracted.type;
-                }
-              } catch { /* scripting permission denied on some pages */ }
-            }
-          } finally {
-            try { await chrome.tabs.remove(tab.id); } catch { /* ignore */ }
-          }
-
+          // Score via API
           const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
           const analyzeResp = await fetch(`${apiBase}/api/v1/jobs/analyze`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ title: title || 'Job', description: description || title }),
           });
-
           if (!analyzeResp.ok) { sendResponse({ success: false, error: `API ${analyzeResp.status}` }); return; }
           const data = await analyzeResp.json() as { match_score: number };
 
           const chips = detectNotifChips(title, description, budgetAmount, budgetType);
 
-          // Cache result
           await chrome.storage.local.set({ [cacheKey]: { score: data.match_score, chips, ts: Date.now() } });
-
           sendResponse({ success: true, score: data.match_score, chips });
         } catch (err) {
           sendResponse({ success: false, error: String(err) });
         }
       })();
       return true;
+
+    // Kept for backward compatibility — no longer opens background tabs
+    case 'SCORE_NOTIFICATION_JOB':
+      sendResponse({ success: false, error: 'Use SCORE_JOB_WITH_DATA instead' });
+      return false;
   }
 
   return false;
