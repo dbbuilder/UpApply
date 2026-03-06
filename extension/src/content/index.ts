@@ -716,7 +716,7 @@ function _getOrCreateProgressBar(): HTMLElement {
   bar = document.createElement('div');
   bar.id = 'ua-notif-progress';
   bar.style.cssText =
-    'position:fixed;top:60px;right:16px;z-index:2147483647;' +
+    'position:fixed;bottom:80px;right:16px;z-index:2147483647;' +
     'background:#1d4ed8;color:#fff;' +
     'font-size:11px;font-weight:600;font-family:-apple-system,sans-serif;' +
     'padding:5px 10px;border-radius:20px;' +
@@ -1085,7 +1085,7 @@ function _injectScoreButton(): void {
   // Injected into document.body as a fixed overlay — never touches the
   // Vue-managed dropdown DOM, which would break Upwork's event handlers.
   btn.style.cssText =
-    'position:fixed;top:60px;right:16px;z-index:2147483647;' +
+    'position:fixed;bottom:80px;right:16px;z-index:2147483647;' +
     'display:flex;align-items:center;gap:6px;' +
     'padding:6px 14px;border-radius:20px;cursor:pointer;' +
     'background:#1d4ed8;color:#fff;' +
@@ -1108,9 +1108,10 @@ function _injectScoreButton(): void {
 //   1. Bell dropdown: inject score button (user-triggered scoring)
 //   2. Full notifications page (/ab/notifications/): auto-score rows
 //   3. Saved jobs page (/nx/search/jobs/saved/): auto-score tiles
-let _notifObserverFired = false;
 let _lastObservedPath = window.location.pathname;
-new MutationObserver(() => {
+let _observerDebounce: ReturnType<typeof setTimeout> | undefined;
+
+function _handleMutations(): void {
   // Upwork is a SPA — detect pushState navigation and reset stale scoring state
   // so _notifProcessing=true from a previous page never blocks a fresh run.
   const currentPath = window.location.pathname;
@@ -1125,28 +1126,33 @@ new MutationObserver(() => {
   const hasRows     = !!document.querySelector('.notification-row a[href*="/jobs/~"]');
   const hasTiles    = !!document.querySelector('article[data-test="JobTile"]');
 
-  if (hasDropdown) {
+  // Show score button whenever notification rows exist — dropdown OR full page.
+  // Never auto-score; user must always click the button to start.
+  const hasNotifContent = hasDropdown || (isNotifPage && hasRows);
+  if (hasNotifContent) {
     _injectScoreButton();
   } else {
-    // Dropdown closed — remove button and reset so it re-injects on next open
-    document.getElementById('ua-score-btn')?.remove();
-    _scoreButtonInjected = false;
-  }
-
-  if (isNotifPage && hasRows) {
-    _processNotificationRows();
-    if (!_notifObserverFired) _notifObserverFired = true;
+    if (_scoreButtonInjected) {
+      document.getElementById('ua-score-btn')?.remove();
+      _scoreButtonInjected = false;
+    }
   }
 
   if (isSavedPage && hasTiles) {
     _processSavedJobCards();
   }
+}
+
+new MutationObserver(() => {
+  // Debounce: Upwork's SPA triggers bursts of mutations during navigation.
+  // Running 5 querySelector calls on every mutation causes main-thread jank
+  // that blocks header clicks. 200ms keeps responsiveness while still
+  // catching dropdown open/close reliably.
+  clearTimeout(_observerDebounce);
+  _observerDebounce = setTimeout(_handleMutations, 200);
 }).observe(document.body, { childList: true, subtree: true });
 
-// Also try immediately on full page loads (rows may already be in DOM)
-if (window.location.pathname.includes('/notifications')) {
-  setTimeout(_processNotificationRows, 1500);
-}
+// Saved jobs page: auto-score tiles on initial load
 if (window.location.pathname.includes('/nx/search/jobs')) {
   setTimeout(_processSavedJobCards, 1500);
 }
