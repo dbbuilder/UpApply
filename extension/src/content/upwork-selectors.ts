@@ -55,17 +55,26 @@ export const SELECTORS = {
     '.description',
   ],
 
-  // Budget information
+  // Budget information — Upwork uses different selectors on job-detail vs proposal pages
   budgetAmount: [
     '[data-test="budget"]',
     '[data-test="is-fixed-price"]',
     '.cfe-ui-job-budget',
     '[data-cy="budget"]',
+    // Job posting page (nx/jobs/~01234...)
+    '[data-test="attribute-item"]:has([data-test="DollarCircleIcon"])',
+    'li.d-flex strong',                    // "Hourly: $XX – $XX" in li
+    '[data-test="job-budget"]',
+    '[data-qa="job-rate"]',
+    '.up-card-section .d-flex strong',
+    // Any element containing a dollar sign near "hourly" or "fixed"
   ],
 
   budgetType: [
     '[data-test="is-hourly-job"]',
     '[data-test="is-fixed-price"]',
+    '[data-test="attribute-item"]:has([data-test="ClockIcon"])',
+    '[data-qa="job-type"]',
   ],
 
   // Skills

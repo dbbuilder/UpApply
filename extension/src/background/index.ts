@@ -451,7 +451,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const { jobUrl, title } = message as { jobUrl: string; title: string };
 
           // --- Cache check ---
-          const CACHE_VERSION = 'v2'; // bump to invalidate old cached chips
+          const CACHE_VERSION = 'v3'; // bump to invalidate old cached chips
           const cacheKey = `sc_${CACHE_VERSION}_${jobUrl}`;
           const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 h
           const cacheStore = await chrome.storage.local.get(cacheKey);
@@ -722,24 +722,32 @@ console.log('UpApply Background: Service worker started');
 function extractBudgetFromPageText(
   text: string,
 ): { amount: string; type: 'hourly' | 'fixed' } | null {
-  // Hourly rate: "$75/hr", "$50-$100/hr", "$50 - $100/hour"
-  const hrMatch = text.match(
+  // Upwork labeled hourly: "Hourly: $50.00 – $75.00" or "Hourly\n$50.00"
+  const labeledHourly = text.match(
+    /hourly[:\s\n]+(\$[\d,]+(?:\.\d+)?(?:\s*[-–]\s*\$[\d,]+(?:\.\d+)?)?)/i,
+  );
+  if (labeledHourly) {
+    return { amount: labeledHourly[1].replace(/\s+/g, ''), type: 'hourly' };
+  }
+
+  // Inline /hr suffix: "$75/hr", "$50 - $100 / hour"
+  const inlineHourly = text.match(
     /\$[\d,]+(?:\.\d+)?(?:\s*[-–]\s*\$[\d,]+(?:\.\d+)?)?\s*\/\s*h(?:r|our)/i,
   );
-  if (hrMatch) {
-    return { amount: hrMatch[0].replace(/\s+/g, ''), type: 'hourly' };
+  if (inlineHourly) {
+    return { amount: inlineHourly[0].replace(/\s+/g, ''), type: 'hourly' };
   }
 
-  // Fixed budget lines: "Budget: $500", "Fixed Price: $1,500"
-  const budgetLabelMatch = text.match(
-    /(?:budget|fixed[\s-]price|project budget)[:\s]+(\$[\d,]+(?:\.\d+)?(?:\s*[-–]\s*\$[\d,]+(?:\.\d+)?)?)/i,
+  // Upwork labeled fixed: "Fixed-price\n$500", "Est. budget: $1,000", "Budget: $500"
+  const labeledFixed = text.match(
+    /(?:fixed[- ]price|est\.?\s*budget|budget|project budget)[:\s\n]+(\$[\d,]+(?:\.\d+)?(?:\s*[-–]\s*\$[\d,]+(?:\.\d+)?)?)/i,
   );
-  if (budgetLabelMatch) {
-    return { amount: budgetLabelMatch[1].replace(/\s+/g, ''), type: 'fixed' };
+  if (labeledFixed) {
+    return { amount: labeledFixed[1].replace(/\s+/g, ''), type: 'fixed' };
   }
 
-  // Standalone dollar amounts >= $100 (avoid small tips/bonuses)
-  const amtMatch = text.match(/\$([1-9][\d,]{2,})(?:\.\d+)?(?!\s*\/h)/);
+  // Standalone dollar amounts >= $100 (last resort)
+  const amtMatch = text.match(/\$([1-9][\d,]{2,})(?:\.\d+)?/);
   if (amtMatch) {
     const num = parseInt(amtMatch[1].replace(/,/g, ''), 10);
     if (num >= 100) {
@@ -796,24 +804,22 @@ function detectNotifChips(
   // "Role" — position/employment signals (lower priority than Long-term)
   if (!chips.includes('Long-term') && /\b(role|position|ongoing|retainer|staff)\b/.test(lower)) chips.push('Role');
 
-  // Budget chip — prefer extracted values from DOM, fall back to regex on text
+  // Budget chip — prefer extracted values from DOM/pageText, fall back to description scan
   if (budgetAmount) {
     const clean = budgetAmount.trim();
     if (budgetType === 'hourly') {
       chips.push(clean.includes('/hr') || clean.includes('/hour') ? clean : `${clean}/hr`);
-    } else if (budgetType === 'fixed') {
-      chips.push(clean);
     } else {
       chips.push(clean);
     }
   } else {
-    // Fallback: scan description text for dollar amounts
-    const hrMatch = text.match(/\$[\d,]+(?:\.\d+)?(?:\s*[-–]\s*\$[\d,]+(?:\.\d+)?)?\s*\/\s*h(?:r|our)/i);
-    if (hrMatch) {
-      chips.push(hrMatch[0].replace(/\s+/g, ''));
-    } else {
-      const fixedMatch = text.match(/\$[\d,]{2,}(?:\.\d+)?(?:\s*[-–]\s*\$[\d,]+(?:\.\d+)?)?(?!\s*\/)/);
-      if (fixedMatch) chips.push(fixedMatch[0].replace(/\s+/g, ''));
+    // Last resort: scan description text (client sometimes mentions rate inline)
+    const extracted = extractBudgetFromPageText(text);
+    if (extracted) {
+      const label = extracted.type === 'hourly'
+        ? (extracted.amount.includes('/hr') ? extracted.amount : `${extracted.amount}/hr`)
+        : extracted.amount;
+      chips.push(label);
     }
   }
 
