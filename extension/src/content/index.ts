@@ -904,17 +904,22 @@ async function _fetchJobData(jobUrl: string): Promise<JobFetchResult> {
 
 /** Wake the service worker then send a message, returning undefined on failure or timeout. */
 function _swMessage(msg: object): Promise<Record<string, unknown> | undefined> {
+  const msgType = (msg as Record<string, unknown>).type as string;
+  const t0 = Date.now();
   const send = new Promise<Record<string, unknown> | undefined>((resolve) => {
-    // First ping wakes the service worker if it has gone dormant
     chrome.runtime.sendMessage({ type: 'PING' }, () => {
-      void chrome.runtime.lastError; // suppress "no receiver" console error
+      void chrome.runtime.lastError;
       chrome.runtime.sendMessage(msg, (resp) => {
-        void chrome.runtime.lastError; // suppress if SW still asleep
+        void chrome.runtime.lastError;
+        console.log(`[UpApply] SW ${msgType} resolved in ${Date.now() - t0}ms`, resp ? 'ok' : 'undefined');
         resolve(resp as Record<string, unknown> | undefined);
       });
     });
   });
-  const timeout = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 5_000));
+  const timeout = new Promise<undefined>((resolve) => setTimeout(() => {
+    console.warn(`[UpApply] SW ${msgType} TIMED OUT after 5000ms`);
+    resolve(undefined);
+  }, 5_000));
   return Promise.race([send, timeout]);
 }
 
@@ -922,14 +927,21 @@ type ScoreResp = { success: boolean; score?: number; chips?: string[]; cached?: 
 
 /** Score a single item and update its badge. Never throws. */
 async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
+  const uid = item.jobUrl.match(/(~[0-9a-f]+)/i)?.[1] ?? item.jobUrl.slice(-12);
+  console.log(`[UpApply] score START  ${uid} "${item.title.slice(0, 40)}"`);
   try {
+    console.log(`[UpApply] score CACHE-CHECK ${uid}`);
     const cacheCheck = await _swMessage({ type: 'CHECK_NOTIF_CACHE', jobUrl: item.jobUrl }) as ScoreResp | undefined;
 
     let resp: ScoreResp | undefined;
     if (cacheCheck?.cached) {
+      console.log(`[UpApply] score CACHED ${uid} score=${cacheCheck.score}`);
       resp = cacheCheck;
     } else {
+      console.log(`[UpApply] score FETCH  ${uid}`);
       const jobData = await _fetchJobData(item.jobUrl);
+      console.log(`[UpApply] score FETCH  ${uid} done — descLen=${jobData.description.length} budget=${jobData.budgetAmount}`);
+      console.log(`[UpApply] score SCORE  ${uid}`);
       resp = await _swMessage({
         type: 'SCORE_JOB_WITH_DATA',
         jobUrl: item.jobUrl,
@@ -939,6 +951,7 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
         budgetAmount: jobData.budgetAmount,
         budgetType: jobData.budgetType,
       }) as ScoreResp | undefined;
+      console.log(`[UpApply] score SCORE  ${uid} done — score=${resp?.score} success=${resp?.success}`);
     }
 
     if (resp?.success && resp.score != null) {
@@ -955,7 +968,9 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
       item.badge.style.background = '#6b7280';
       item.badge.title = 'UpApply: scoring unavailable';
     }
-  } catch {
+    console.log(`[UpApply] score DONE   ${uid}`);
+  } catch (err) {
+    console.error(`[UpApply] score ERROR  ${uid}`, err);
     item.badge.textContent = '?';
     item.badge.style.background = '#6b7280';
     item.badge.title = 'UpApply: scoring error';
@@ -963,30 +978,36 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
 }
 
 async function _processNotifQueue(): Promise<void> {
-  if (_notifProcessing) return;
+  if (_notifProcessing) {
+    console.warn('[UpApply] _processNotifQueue called while already processing — skipped');
+    return;
+  }
   _notifProcessing = true;
   _notifDone = 0;
   _updateProgressBar(0, _notifTotal);
 
-  // Drain the queue atomically so workers share a single array
   const items = _notifQueue.splice(0);
+  console.log(`[UpApply] queue START total=${items.length}`);
 
-  // Each worker pulls items until the shared array is empty
-  async function worker(): Promise<void> {
+  async function worker(id: number): Promise<void> {
+    console.log(`[UpApply] worker-${id} START`);
     while (items.length > 0) {
       const item = items.shift();
       if (!item) break;
       await _scoreOneNotif(item);
       _notifDone++;
       _updateProgressBar(_notifDone, _notifTotal);
+      console.log(`[UpApply] worker-${id} progress ${_notifDone}/${_notifTotal} remaining=${items.length}`);
     }
+    console.log(`[UpApply] worker-${id} DONE`);
   }
 
   try {
-    // 3 concurrent workers — ~3× throughput, still respectful of rate limits
     const concurrency = Math.min(3, items.length);
-    await Promise.allSettled(Array.from({ length: concurrency }, worker));
+    console.log(`[UpApply] queue launching ${concurrency} workers`);
+    await Promise.allSettled(Array.from({ length: concurrency }, (_, i) => worker(i)));
   } finally {
+    console.log(`[UpApply] queue FINISHED done=${_notifDone}/${_notifTotal}`);
     _notifProcessing = false;
     _hideProgressBar();
   }
