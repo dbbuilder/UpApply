@@ -997,10 +997,42 @@ function _processSavedJobCards(): void {
   _processNotifQueue();
 }
 
+// ---------------------------------------------------------------------------
+// "Score with UpApply" button injected into the bell dropdown
+// ---------------------------------------------------------------------------
+
+let _scoreButtonInjected = false;
+
+function _injectScoreButton(): void {
+  if (_scoreButtonInjected) return;
+  const list = document.querySelector('ul[data-cy="notifications-list"]');
+  if (!list) return;
+  _scoreButtonInjected = true;
+
+  const btn = document.createElement('div');
+  btn.id = 'ua-score-btn';
+  btn.style.cssText =
+    'display:flex;align-items:center;justify-content:center;gap:6px;' +
+    'margin:8px 12px;padding:7px 14px;border-radius:6px;cursor:pointer;' +
+    'background:#1d4ed8;color:#fff;' +
+    'font-size:13px;font-weight:600;font-family:-apple-system,sans-serif;' +
+    'box-shadow:0 1px 4px rgba(0,0,0,0.15);transition:background 0.15s;user-select:none;';
+  btn.textContent = '⚡ Score jobs with UpApply';
+  btn.title = 'Score all job notifications with UpApply AI';
+  btn.addEventListener('mouseenter', () => { btn.style.background = '#1e40af'; });
+  btn.addEventListener('mouseleave', () => { btn.style.background = '#1d4ed8'; });
+  btn.addEventListener('click', () => {
+    btn.remove();
+    _processNotificationRows();
+  });
+
+  list.parentElement?.insertBefore(btn, list);
+}
+
 // MutationObserver covers three cases:
-//   1. Bell dropdown: Upwork injects ul[data-cy="notifications-list"] into DOM when opened
-//   2. Full notifications page (/ab/notifications/): rows rendered by Vue
-//   3. Saved jobs page (/nx/search/jobs/saved/): article[data-test="JobTile"] tiles
+//   1. Bell dropdown: inject score button (user-triggered scoring)
+//   2. Full notifications page (/ab/notifications/): auto-score rows
+//   3. Saved jobs page (/nx/search/jobs/saved/): auto-score tiles
 let _notifObserverFired = false;
 new MutationObserver(() => {
   const isNotifPage = window.location.pathname.includes('/notifications');
@@ -1009,18 +1041,24 @@ new MutationObserver(() => {
   const hasRows     = !!document.querySelector('.notification-row a[href*="/jobs/~"]');
   const hasTiles    = !!document.querySelector('article[data-test="JobTile"]');
 
-  if (hasDropdown || (isNotifPage && hasRows)) {
-    _processNotificationRows();
-    if (isNotifPage && hasRows && !_notifObserverFired) {
-      _notifObserverFired = true;
-    }
+  if (hasDropdown) {
+    _injectScoreButton();
+  } else {
+    // Dropdown closed — reset so button re-injects on next open
+    _scoreButtonInjected = false;
   }
+
+  if (isNotifPage && hasRows) {
+    _processNotificationRows();
+    if (!_notifObserverFired) _notifObserverFired = true;
+  }
+
   if (isSavedPage && hasTiles) {
     _processSavedJobCards();
   }
 }).observe(document.body, { childList: true, subtree: true });
 
-// Also try immediately on the full notifications page (rows may already be in DOM)
+// Also try immediately on full page loads (rows may already be in DOM)
 if (window.location.pathname.includes('/notifications')) {
   setTimeout(_processNotificationRows, 1500);
 }
