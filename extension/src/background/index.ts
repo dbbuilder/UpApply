@@ -444,10 +444,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'SCORE_NOTIFICATION_JOB':
-      // Open job URL in background tab, extract description, score via API, return score
+      // Open job URL in background tab, extract description, score via API, return score.
+      // Results are cached in chrome.storage for 24 h to avoid re-scraping the same URL.
       (async () => {
         try {
           const { jobUrl, title } = message as { jobUrl: string; title: string };
+
+          // --- Cache check ---
+          const cacheKey = `sc_${jobUrl}`;
+          const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 h
+          const cacheStore = await chrome.storage.local.get(cacheKey);
+          const cached = cacheStore[cacheKey] as { score: number; chips: string[]; ts: number } | undefined;
+          if (cached && Date.now() - cached.ts < CACHE_TTL) {
+            sendResponse({ success: true, score: cached.score, chips: cached.chips, cached: true });
+            return;
+          }
 
           const stored = await chrome.storage.local.get('authToken');
           const token = stored.authToken as string | undefined;
@@ -493,6 +504,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const data = await analyzeResp.json() as { match_score: number };
 
           const chips = detectNotifChips(title, description, budgetAmount, budgetType);
+
+          // Cache result
+          await chrome.storage.local.set({ [cacheKey]: { score: data.match_score, chips, ts: Date.now() } });
+
           sendResponse({ success: true, score: data.match_score, chips });
         } catch (err) {
           sendResponse({ success: false, error: String(err) });

@@ -652,6 +652,8 @@ interface _NotifQueueItem {
 }
 const _notifQueue: _NotifQueueItem[] = [];
 let _notifProcessing = false;
+let _notifTotal = 0;   // total jobs queued in this scoring run
+let _notifDone  = 0;   // jobs completed (success or failure)
 
 // Chip colour map — specific keywords get accent colours, budget is neutral
 const _CHIP_COLORS: Record<string, { bg: string; color: string }> = {
@@ -682,15 +684,76 @@ function _injectChips(row: Element, chips: string[]): void {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Progress bar injected near the notification bell
+// ---------------------------------------------------------------------------
+
+function _getOrCreateProgressBar(): HTMLElement {
+  let bar = document.getElementById('ua-notif-progress');
+  if (bar) return bar;
+
+  bar = document.createElement('div');
+  bar.id = 'ua-notif-progress';
+  bar.style.cssText =
+    'position:fixed;top:60px;right:16px;z-index:2147483647;' +
+    'background:#1d4ed8;color:#fff;' +
+    'font-size:11px;font-weight:600;font-family:-apple-system,sans-serif;' +
+    'padding:5px 10px;border-radius:20px;' +
+    'box-shadow:0 2px 8px rgba(0,0,0,0.25);' +
+    'display:flex;align-items:center;gap:6px;white-space:nowrap;' +
+    'transition:opacity 0.3s;';
+
+  const spinner = document.createElement('span');
+  spinner.id = 'ua-notif-spinner';
+  spinner.style.cssText =
+    'width:10px;height:10px;border-radius:50%;border:2px solid rgba(255,255,255,0.4);' +
+    'border-top-color:#fff;animation:ua-spin 0.7s linear infinite;';
+  bar.appendChild(spinner);
+
+  const label = document.createElement('span');
+  label.id = 'ua-notif-label';
+  bar.appendChild(label);
+
+  // Keyframes (inject once)
+  if (!document.getElementById('ua-notif-styles')) {
+    const style = document.createElement('style');
+    style.id = 'ua-notif-styles';
+    style.textContent = '@keyframes ua-spin{to{transform:rotate(360deg)}}';
+    document.head.appendChild(style);
+  }
+
+  document.body.appendChild(bar);
+  return bar;
+}
+
+function _updateProgressBar(done: number, total: number): void {
+  const bar = _getOrCreateProgressBar();
+  const label = bar.querySelector<HTMLElement>('#ua-notif-label')!;
+  label.textContent = `UpApply scoring ${done}/${total}…`;
+  bar.style.opacity = '1';
+}
+
+function _hideProgressBar(): void {
+  const bar = document.getElementById('ua-notif-progress');
+  if (!bar) return;
+  bar.style.opacity = '0';
+  setTimeout(() => bar.remove(), 400);
+}
+
+// ---------------------------------------------------------------------------
+
 async function _processNotifQueue(): Promise<void> {
   if (_notifProcessing) return;
   _notifProcessing = true;
+  _notifDone = 0;
+  _updateProgressBar(0, _notifTotal);
+
   while (_notifQueue.length > 0) {
     const item = _notifQueue.shift()!;
     await new Promise<void>((resolve) => {
       chrome.runtime.sendMessage(
         { type: 'SCORE_NOTIFICATION_JOB', jobUrl: item.jobUrl, title: item.title },
-        (resp: { success: boolean; score?: number; chips?: string[] } | undefined) => {
+        (resp: { success: boolean; score?: number; chips?: string[]; cached?: boolean } | undefined) => {
           if (resp?.success && resp.score != null) {
             const score = Math.round(resp.score);
             const { bg, color } = _scoreToNotifColors(score);
@@ -698,24 +761,31 @@ async function _processNotifQueue(): Promise<void> {
             item.badge.style.color = color;
             item.badge.style.border = 'none';
             item.badge.textContent = String(score);
-            item.badge.title = `UpApply match: ${score}/100`;
+            item.badge.title = `UpApply match: ${score}/100${resp.cached ? ' (cached)' : ''}`;
             if (resp.chips?.length) _injectChips(item.row, resp.chips);
           } else {
             item.badge.textContent = '?';
             item.badge.title = 'UpApply: could not score';
           }
+          _notifDone++;
+          _updateProgressBar(_notifDone, _notifTotal);
           resolve();
         }
       );
     });
+    // Cached hits don't need the rate-limit delay
     if (_notifQueue.length > 0) {
-      await new Promise(r => setTimeout(r, 800)); // rate-limit: one tab at a time
+      await new Promise(r => setTimeout(r, 800));
     }
   }
+
   _notifProcessing = false;
+  _hideProgressBar();
 }
 
 function _processNotificationRows(): void {
+  // Works for both the bell dropdown AND the full /ab/notifications/ page.
+  // Both use .notification-row elements containing a[href*="/jobs/~"] links.
   document.querySelectorAll<Element>('.notification-row').forEach((row) => {
     // Skip rows that already have a badge (prevents double-injection when
     // MutationObserver fires on our own DOM changes)
@@ -728,16 +798,35 @@ function _processNotificationRows(): void {
     const title = link.textContent?.trim() || '';
     const badge = _injectNotifBadge(row, jobUrl);
     _notifQueue.push({ badge, row, jobUrl, title });
+    _notifTotal++;
   });
   _processNotifQueue();
 }
 
-// Watch for the notifications dropdown to open (Vue SPA — it's not in the DOM until opened)
+// MutationObserver covers two cases:
+//   1. Bell dropdown: Upwork injects ul[data-cy="notifications-list"] into DOM when opened
+//   2. Full notifications page (/ab/notifications/): rows are already in the DOM and the
+//      observer fires as Upwork's Vue renders them in
+let _notifObserverFired = false;
 new MutationObserver(() => {
-  if (document.querySelector('ul[data-cy="notifications-list"]')) {
+  const isNotifPage = window.location.pathname.includes('/notifications');
+  const hasDropdown = !!document.querySelector('ul[data-cy="notifications-list"]');
+  const hasRows     = !!document.querySelector('.notification-row a[href*="/jobs/~"]');
+
+  if (hasDropdown || (isNotifPage && hasRows)) {
     _processNotificationRows();
+    // On the full page, stop watching once we've done a first pass —
+    // subsequent calls come from new rows added by infinite scroll
+    if (isNotifPage && hasRows && !_notifObserverFired) {
+      _notifObserverFired = true;
+    }
   }
 }).observe(document.body, { childList: true, subtree: true });
+
+// Also try immediately on the full notifications page (rows may already be in DOM)
+if (window.location.pathname.includes('/notifications')) {
+  setTimeout(_processNotificationRows, 1500);
+}
 
 // ---------------------------------------------------------------------------
 
