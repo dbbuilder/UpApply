@@ -655,6 +655,18 @@ let _notifProcessing = false;
 let _notifTotal = 0;   // total jobs queued in this scoring run
 let _notifDone  = 0;   // jobs completed (success or failure)
 
+/** Reset all scoring state — called on SPA navigation so stale flags never block a fresh run. */
+function _resetNotifState(): void {
+  _notifQueue.length = 0;
+  _notifProcessing = false;
+  _notifTotal = 0;
+  _notifDone = 0;
+  _scoredNotifUrls.clear();
+  _scoreButtonInjected = false;
+  document.getElementById('ua-score-btn')?.remove();
+  document.getElementById('ua-notif-progress')?.remove();
+}
+
 // Chip colour map — specific keywords get accent colours, budget is neutral
 const _CHIP_COLORS: Record<string, { bg: string; color: string }> = {
   'MVP':       { bg: '#7c3aed', color: '#fff' },  // purple
@@ -902,7 +914,7 @@ function _swMessage(msg: object): Promise<Record<string, unknown> | undefined> {
       });
     });
   });
-  const timeout = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 10_000));
+  const timeout = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 5_000));
   return Promise.race([send, timeout]);
 }
 
@@ -1058,9 +1070,18 @@ function _injectScoreButton(): void {
 //   2. Full notifications page (/ab/notifications/): auto-score rows
 //   3. Saved jobs page (/nx/search/jobs/saved/): auto-score tiles
 let _notifObserverFired = false;
+let _lastObservedPath = window.location.pathname;
 new MutationObserver(() => {
-  const isNotifPage = window.location.pathname.includes('/notifications');
-  const isSavedPage = window.location.pathname.includes('/nx/search/jobs');
+  // Upwork is a SPA — detect pushState navigation and reset stale scoring state
+  // so _notifProcessing=true from a previous page never blocks a fresh run.
+  const currentPath = window.location.pathname;
+  if (currentPath !== _lastObservedPath) {
+    _lastObservedPath = currentPath;
+    _resetNotifState();
+  }
+
+  const isNotifPage = currentPath.includes('/notifications');
+  const isSavedPage = currentPath.includes('/nx/search/jobs');
   const hasDropdown = !!document.querySelector('ul[data-cy="notifications-list"]');
   const hasRows     = !!document.querySelector('.notification-row a[href*="/jobs/~"]');
   const hasTiles    = !!document.querySelector('article[data-test="JobTile"]');
