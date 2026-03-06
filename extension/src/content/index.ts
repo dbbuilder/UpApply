@@ -844,49 +844,14 @@ async function _fetchJobViaGraphQL(jobUid: string): Promise<JobFetchResult | nul
   return { description, pageText: description, budgetAmount, budgetType };
 }
 
-/**
- * Fallback: fetch job page HTML and try to extract content.
- * Upwork job pages are CSR (client-side rendered), so this usually returns
- * a minimal shell — but we try anyway and log what we get.
- */
-async function _fetchJobViaHTML(url: string): Promise<JobFetchResult> {
-  try {
-    const resp = await fetch(url, { credentials: 'include', signal: AbortSignal.timeout(8000) });
-    const html = resp.ok ? await resp.text() : '';
-    console.log('[UpApply] HTML fallback:', { status: resp.status, finalUrl: resp.url, htmlLen: html.length, sample: html.slice(0, 150) });
+// _fetchJobViaHTML removed: Upwork is CSR so the HTML shell is nearly empty,
+// and DOMParser.parseFromString on a ~1MB page runs synchronously on the
+// main thread. With 3 concurrent workers this caused "Page Unresponsive".
+// GraphQL is the only fetch path; title is used as fallback if it returns empty.
 
-    if (!html) return { description: '', pageText: '', budgetAmount: null, budgetType: null };
-
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    const pageText = doc.body?.textContent ?? '';
-
-    // Try Apollo state embedded in a <script> tag
-    let description = '';
-    for (const script of Array.from(doc.querySelectorAll('script:not([src])'))) {
-      const src = script.textContent ?? '';
-      const apolloM = src.match(/APOLLO_STATE[^=]*=\s*(\{[\s\S]{20,200000}\})/);
-      if (apolloM) {
-        try {
-          const state = JSON.parse(apolloM[1]) as Record<string, unknown>;
-          for (const v of Object.values(state)) {
-            const obj = v as Record<string, unknown>;
-            const raw = (obj?.description as Record<string, unknown>)?.value ?? obj?.description;
-            if (typeof raw === 'string' && raw.length > 80) { description = raw; break; }
-          }
-        } catch { /* ignore */ }
-      }
-      if (description) break;
-    }
-
-    console.log('[UpApply] HTML fallback result:', { descLen: description.length, pageTextLen: pageText.length });
-    return { description, pageText, budgetAmount: null, budgetType: null };
-  } catch (err) {
-    console.log('[UpApply] HTML fallback error:', err);
-    return { description: '', pageText: '', budgetAmount: null, budgetType: null };
-  }
-}
-
-/** Fetch job data: GraphQL first, HTML fallback. */
+/** Fetch job data via GraphQL only. HTML fallback removed — Upwork is CSR so
+ *  the HTML shell is nearly empty and DOMParser on a ~1MB page runs synchronously
+ *  on the main thread, causing "Page Unresponsive" when multiple workers hit it. */
 async function _fetchJobData(jobUrl: string): Promise<JobFetchResult> {
   const uidMatch = jobUrl.match(/(~[0-9a-f]+)/i);
   if (uidMatch) {
@@ -896,8 +861,7 @@ async function _fetchJobData(jobUrl: string): Promise<JobFetchResult> {
       return result;
     }
   }
-  // GraphQL failed or returned empty — fall back to HTML
-  return _fetchJobViaHTML(jobUrl);
+  return { description: '', pageText: '', budgetAmount: null, budgetType: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -958,13 +922,15 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
     } else {
       console.log(`[UpApply] score FETCH  ${uid}`);
       const jobData = await _fetchJobData(item.jobUrl);
-      console.log(`[UpApply] score FETCH  ${uid} done — descLen=${jobData.description.length} budget=${jobData.budgetAmount}`);
+      // If GraphQL returned empty (expired job), fall back to title-only scoring
+      const description = jobData.description || item.title;
+      console.log(`[UpApply] score FETCH  ${uid} done — descLen=${description.length} budget=${jobData.budgetAmount} source=${jobData.description ? 'graphql' : 'title-fallback'}`);
       console.log(`[UpApply] score SCORE  ${uid}`);
       resp = await _swMessage({
         type: 'SCORE_JOB_WITH_DATA',
         jobUrl: item.jobUrl,
         title: item.title,
-        description: jobData.description,
+        description,
         pageText: jobData.pageText,
         budgetAmount: jobData.budgetAmount,
         budgetType: jobData.budgetType,
