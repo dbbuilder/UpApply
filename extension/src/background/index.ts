@@ -756,6 +756,12 @@ function extractBudgetFromPageText(
 // Notification chip detection
 // ---------------------------------------------------------------------------
 
+/** For a "$min–$max" range string, return only the upper bound. Single values pass through unchanged. */
+function _topOfRange(amount: string): string {
+  const m = amount.match(/\$[\d,]+(?:\.\d+)?\s*[-–]\s*(\$[\d,]+(?:\.\d+)?)/);
+  return m ? m[1] : amount;
+}
+
 function detectNotifChips(
   title: string,
   description: string,
@@ -799,8 +805,9 @@ function detectNotifChips(
   if (!chips.includes('Long-term') && /\b(role|position|ongoing|retainer|staff)\b/.test(lower)) chips.push('Role');
 
   // Budget chip — prefer extracted values from DOM/pageText, fall back to description scan
+  // Use only the top of a range (e.g. "$50-$100" → "$100")
   if (budgetAmount) {
-    const clean = budgetAmount.trim();
+    const clean = _topOfRange(budgetAmount.trim());
     if (budgetType === 'hourly') {
       chips.push(clean.includes('/hr') || clean.includes('/hour') ? clean : `${clean}/hr`);
     } else {
@@ -810,9 +817,10 @@ function detectNotifChips(
     // Last resort: scan description text (client sometimes mentions rate inline)
     const extracted = extractBudgetFromPageText(text);
     if (extracted) {
+      const top = _topOfRange(extracted.amount);
       const label = extracted.type === 'hourly'
-        ? (extracted.amount.includes('/hr') ? extracted.amount : `${extracted.amount}/hr`)
-        : extracted.amount;
+        ? (top.includes('/hr') ? top : `${top}/hr`)
+        : top;
       chips.push(label);
     }
   }
