@@ -1005,19 +1005,24 @@ let _scoreButtonInjected = false;
 
 function _injectScoreButton(): void {
   if (_scoreButtonInjected) return;
-  const list = document.querySelector('ul[data-cy="notifications-list"]');
-  if (!list) return;
+  if (!document.querySelector('ul[data-cy="notifications-list"]')) return;
   _scoreButtonInjected = true;
+
+  document.getElementById('ua-score-btn')?.remove();
 
   const btn = document.createElement('div');
   btn.id = 'ua-score-btn';
+  // Injected into document.body as a fixed overlay — never touches the
+  // Vue-managed dropdown DOM, which would break Upwork's event handlers.
   btn.style.cssText =
-    'display:flex;align-items:center;justify-content:center;gap:6px;' +
-    'margin:8px 12px;padding:7px 14px;border-radius:6px;cursor:pointer;' +
+    'position:fixed;top:60px;right:16px;z-index:2147483647;' +
+    'display:flex;align-items:center;gap:6px;' +
+    'padding:6px 14px;border-radius:20px;cursor:pointer;' +
     'background:#1d4ed8;color:#fff;' +
-    'font-size:13px;font-weight:600;font-family:-apple-system,sans-serif;' +
-    'box-shadow:0 1px 4px rgba(0,0,0,0.15);transition:background 0.15s;user-select:none;';
-  btn.textContent = '⚡ Score jobs with UpApply';
+    'font-size:12px;font-weight:600;font-family:-apple-system,sans-serif;' +
+    'box-shadow:0 2px 8px rgba(0,0,0,0.25);white-space:nowrap;' +
+    'user-select:none;transition:background 0.15s;';
+  btn.textContent = '⚡ Score jobs';
   btn.title = 'Score all job notifications with UpApply AI';
   btn.addEventListener('mouseenter', () => { btn.style.background = '#1e40af'; });
   btn.addEventListener('mouseleave', () => { btn.style.background = '#1d4ed8'; });
@@ -1026,7 +1031,7 @@ function _injectScoreButton(): void {
     _processNotificationRows();
   });
 
-  list.parentElement?.insertBefore(btn, list);
+  document.body.appendChild(btn);
 }
 
 // MutationObserver covers three cases:
@@ -1044,7 +1049,8 @@ new MutationObserver(() => {
   if (hasDropdown) {
     _injectScoreButton();
   } else {
-    // Dropdown closed — reset so button re-injects on next open
+    // Dropdown closed — remove button and reset so it re-injects on next open
+    document.getElementById('ua-score-btn')?.remove();
     _scoreButtonInjected = false;
   }
 
