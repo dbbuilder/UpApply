@@ -657,11 +657,20 @@ let _notifDone  = 0;   // jobs completed (success or failure)
 
 // Chip colour map — specific keywords get accent colours, budget is neutral
 const _CHIP_COLORS: Record<string, { bg: string; color: string }> = {
-  'MVP':   { bg: '#7c3aed', color: '#fff' },
-  'SaaS':  { bg: '#0891b2', color: '#fff' },
-  'Azure': { bg: '#0078d4', color: '#fff' },
-  'SQL':   { bg: '#b45309', color: '#fff' },
-  'Role':  { bg: '#374151', color: '#fff' },
+  'MVP':       { bg: '#7c3aed', color: '#fff' },  // purple
+  'SaaS':      { bg: '#0891b2', color: '#fff' },  // teal
+  'Azure':     { bg: '#0078d4', color: '#fff' },  // Microsoft blue
+  'SQL':       { bg: '#b45309', color: '#fff' },  // amber
+  'Role':      { bg: '#374151', color: '#fff' },  // dark gray
+  'AI':        { bg: '#4f46e5', color: '#fff' },  // indigo
+  'Python':    { bg: '#2563eb', color: '#fff' },  // blue
+  'React':     { bg: '#0e7490', color: '#fff' },  // cyan-700
+  'API':       { bg: '#475569', color: '#fff' },  // slate
+  'CTO':       { bg: '#6d28d9', color: '#fff' },  // violet (high-value)
+  'Cloud':     { bg: '#0284c7', color: '#fff' },  // sky
+  'Auto':      { bg: '#c2410c', color: '#fff' },  // orange (automation)
+  'Urgent':    { bg: '#dc2626', color: '#fff' },  // red
+  'Long-term': { bg: '#059669', color: '#fff' },  // emerald
 };
 
 function _injectChips(row: Element, chips: string[]): void {

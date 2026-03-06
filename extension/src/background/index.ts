@@ -451,7 +451,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const { jobUrl, title } = message as { jobUrl: string; title: string };
 
           // --- Cache check ---
-          const cacheKey = `sc_${jobUrl}`;
+          const CACHE_VERSION = 'v2'; // bump to invalidate old cached chips
+          const cacheKey = `sc_${CACHE_VERSION}_${jobUrl}`;
           const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 h
           const cacheStore = await chrome.storage.local.get(cacheKey);
           const cached = cacheStore[cacheKey] as { score: number; chips: string[]; ts: number } | undefined;
@@ -499,7 +500,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   func: () => (document.body as HTMLElement).innerText,
                 });
                 const pageText = (pageTextResult[0]?.result as string) || '';
+                console.log('[UpApply] pageText sample (first 400 chars):', pageText.slice(0, 400));
                 const extracted = extractBudgetFromPageText(pageText);
+                console.log('[UpApply] extractBudgetFromPageText result:', extracted);
                 if (extracted) {
                   budgetAmount = extracted.amount;
                   budgetType   = extracted.type;
@@ -762,13 +765,36 @@ function detectNotifChips(
   const chips: string[] = [];
 
   // Domain/tech keywords
-  if (/\bmvp\b|minimum viable product/i.test(text))                          chips.push('MVP');
-  if (/\bsaas\b|software.as.a.service/i.test(text))                          chips.push('SaaS');
-  if (/\bazure\b/i.test(text))                                                chips.push('Azure');
-  if (/\bsql\b|postgresql|mysql|sql\s*server|sqlite|nosql|mongodb/i.test(text)) chips.push('SQL');
+  if (/\bmvp\b|minimum viable product/i.test(text))                              chips.push('MVP');
+  if (/\bsaas\b|software.as.a.service/i.test(text))                              chips.push('SaaS');
+  if (/\bazure\b/i.test(text))                                                    chips.push('Azure');
+  if (/\bsql\b|postgresql|mysql|sql\s*server|sqlite|nosql|mongodb/i.test(text))  chips.push('SQL');
 
-  // "Role" — long-term position signals
-  if (/\b(role|position|full[- ]?time|part[- ]?time|ongoing|retainer|staff)\b/.test(lower)) chips.push('Role');
+  // AI / LLM
+  if (/\b(ai|llm|gpt|openai|claude|anthropic|rag|vector|chatbot|langchain|embedding|fine.?tun)/i.test(text)) chips.push('AI');
+
+  // Programming languages / frameworks Chris works with
+  if (/\bpython\b/i.test(text))                                                   chips.push('Python');
+  if (/\breact\b/i.test(text))                                                    chips.push('React');
+  if (/\b(api|rest|fastapi|graphql|webhook|endpoint)\b/i.test(text))             chips.push('API');
+
+  // High-value role signals
+  if (/\b(fractional\s+cto|cto|technical\s+(co-?founder|advisor|lead)|vp\s+of\s+eng)/i.test(text)) chips.push('CTO');
+
+  // Cloud / infra
+  if (/\b(aws|gcp|google cloud|cloud|terraform|kubernetes|k8s|docker|devops|infra)/i.test(text)) chips.push('Cloud');
+
+  // Automation niche
+  if (/\b(n8n|zapier|make\.com|make\b|integromat|automation|workflow\s+automat)/i.test(text)) chips.push('Auto');
+
+  // Urgency signals
+  if (/\b(asap|urgent|immediately|right away|start today|start now|quick turnaround)/i.test(lower)) chips.push('Urgent');
+
+  // Long-term / high LTV
+  if (/\b(long.?term|ongoing|retainer|6\s*month|12\s*month|part.?time|full.?time|staff aug)/i.test(lower)) chips.push('Long-term');
+
+  // "Role" — position/employment signals (lower priority than Long-term)
+  if (!chips.includes('Long-term') && /\b(role|position|ongoing|retainer|staff)\b/.test(lower)) chips.push('Role');
 
   // Budget chip — prefer extracted values from DOM, fall back to regex on text
   if (budgetAmount) {
