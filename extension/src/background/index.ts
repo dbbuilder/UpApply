@@ -7,6 +7,24 @@ import type { JobData } from '../types';
 // Store current job data for sidebar access
 let currentJobData: JobData | null = null;
 
+// ---------------------------------------------------------------------------
+// SW keepalive — MV3 service workers are terminated after ~30s of inactivity.
+// During active scoring we touch chrome.storage every 20s to reset the timer.
+// ---------------------------------------------------------------------------
+let _keepAliveTimer: ReturnType<typeof setInterval> | undefined;
+let _activeScoringCount = 0;
+
+function _startKeepAlive(): void {
+  if (_keepAliveTimer) return;
+  _keepAliveTimer = setInterval(() => {
+    chrome.storage.local.get('__ping', () => void chrome.runtime.lastError);
+  }, 20_000);
+}
+
+function _stopKeepAlive(): void {
+  if (_keepAliveTimer) { clearInterval(_keepAliveTimer); _keepAliveTimer = undefined; }
+}
+
 // Listen for messages from content script and sidebar
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('UpApply Background: Received message', message.type);
@@ -472,6 +490,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // ------------------------------------------------------------------
     case 'SCORE_JOB_WITH_DATA':
       (async () => {
+        _activeScoringCount++;
+        if (_activeScoringCount === 1) _startKeepAlive();
         try {
           const { jobUrl, title, description, pageText, budgetAmount: preBudgetAmount, budgetType: preBudgetType } = message as {
             jobUrl: string; title: string; description: string; pageText: string;
@@ -504,12 +524,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           console.log('[UpApply] SCORE_JOB_WITH_DATA final budget:', { budgetAmount, budgetType, source: preBudgetAmount ? 'graphql' : 'regex' });
 
-          // Score via API
+          // Score via API — 25s timeout prevents SW termination from a slow/cold-start Render instance
           const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
           const analyzeResp = await fetch(`${apiBase}/api/v1/jobs/analyze`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ title: title || 'Job', description: description || title }),
+            signal: AbortSignal.timeout(25_000),
           });
           if (!analyzeResp.ok) { sendResponse({ success: false, error: `API ${analyzeResp.status}` }); return; }
           const data = await analyzeResp.json() as { match_score: number };
@@ -519,7 +540,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await chrome.storage.local.set({ [cacheKey]: { score: data.match_score, chips, ts: Date.now() } });
           sendResponse({ success: true, score: data.match_score, chips });
         } catch (err) {
+          console.error('[UpApply] SCORE_JOB_WITH_DATA error:', err);
           sendResponse({ success: false, error: String(err) });
+        } finally {
+          _activeScoringCount--;
+          if (_activeScoringCount === 0) _stopKeepAlive();
         }
       })();
       return true;

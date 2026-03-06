@@ -907,14 +907,32 @@ function _swMessage(msg: object): Promise<Record<string, unknown> | undefined> {
   const msgType = (msg as Record<string, unknown>).type as string;
   const t0 = Date.now();
   const send = new Promise<Record<string, unknown> | undefined>((resolve) => {
-    chrome.runtime.sendMessage({ type: 'PING' }, () => {
-      void chrome.runtime.lastError;
-      chrome.runtime.sendMessage(msg, (resp) => {
-        void chrome.runtime.lastError;
-        console.log(`[UpApply] SW ${msgType} resolved in ${Date.now() - t0}ms`, resp ? 'ok' : 'undefined');
-        resolve(resp as Record<string, unknown> | undefined);
+    try {
+      chrome.runtime.sendMessage({ type: 'PING' }, () => {
+        if (chrome.runtime.lastError) {
+          console.warn(`[UpApply] SW PING failed (${Date.now() - t0}ms): ${chrome.runtime.lastError.message}`);
+          resolve(undefined);
+          return;
+        }
+        try {
+          chrome.runtime.sendMessage(msg, (resp) => {
+            if (chrome.runtime.lastError) {
+              console.warn(`[UpApply] SW ${msgType} failed (${Date.now() - t0}ms): ${chrome.runtime.lastError.message}`);
+              resolve(undefined);
+              return;
+            }
+            console.log(`[UpApply] SW ${msgType} resolved in ${Date.now() - t0}ms`, resp ? 'ok' : 'undefined');
+            resolve(resp as Record<string, unknown> | undefined);
+          });
+        } catch (err) {
+          console.warn(`[UpApply] SW ${msgType} sendMessage threw:`, err);
+          resolve(undefined);
+        }
       });
-    });
+    } catch (err) {
+      console.warn(`[UpApply] SW PING sendMessage threw:`, err);
+      resolve(undefined);
+    }
   });
   const timeout = new Promise<undefined>((resolve) => setTimeout(() => {
     console.warn(`[UpApply] SW ${msgType} TIMED OUT after 5000ms`);
