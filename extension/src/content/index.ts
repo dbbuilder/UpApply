@@ -799,6 +799,7 @@ async function _fetchJobViaGraphQL(jobUid: string): Promise<JobFetchResult | nul
     headers,
     credentials: 'include',
     body: JSON.stringify({ operationName: 'jobPosting', query, variables: { jobUid } }),
+    signal: AbortSignal.timeout(8000),
   });
 
   console.log('[UpApply] GraphQL status:', resp.status, 'for', jobUid);
@@ -838,7 +839,7 @@ async function _fetchJobViaGraphQL(jobUid: string): Promise<JobFetchResult | nul
  */
 async function _fetchJobViaHTML(url: string): Promise<JobFetchResult> {
   try {
-    const resp = await fetch(url, { credentials: 'include' });
+    const resp = await fetch(url, { credentials: 'include', signal: AbortSignal.timeout(8000) });
     const html = resp.ok ? await resp.text() : '';
     console.log('[UpApply] HTML fallback:', { status: resp.status, finalUrl: resp.url, htmlLen: html.length, sample: html.slice(0, 150) });
 
@@ -889,9 +890,9 @@ async function _fetchJobData(jobUrl: string): Promise<JobFetchResult> {
 
 // ---------------------------------------------------------------------------
 
-/** Wake the service worker then send a message, returning undefined on failure. */
+/** Wake the service worker then send a message, returning undefined on failure or timeout. */
 function _swMessage(msg: object): Promise<Record<string, unknown> | undefined> {
-  return new Promise((resolve) => {
+  const send = new Promise<Record<string, unknown> | undefined>((resolve) => {
     // First ping wakes the service worker if it has gone dormant
     chrome.runtime.sendMessage({ type: 'PING' }, () => {
       void chrome.runtime.lastError; // suppress "no receiver" console error
@@ -901,26 +902,21 @@ function _swMessage(msg: object): Promise<Record<string, unknown> | undefined> {
       });
     });
   });
+  const timeout = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 10_000));
+  return Promise.race([send, timeout]);
 }
 
-async function _processNotifQueue(): Promise<void> {
-  if (_notifProcessing) return;
-  _notifProcessing = true;
-  _notifDone = 0;
-  _updateProgressBar(0, _notifTotal);
+type ScoreResp = { success: boolean; score?: number; chips?: string[]; cached?: boolean };
 
-  while (_notifQueue.length > 0) {
-    const item = _notifQueue.shift()!;
-    type ScoreResp = { success: boolean; score?: number; chips?: string[]; cached?: boolean };
-
-    // Check cache first before doing any fetch
+/** Score a single item and update its badge. Never throws. */
+async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
+  try {
     const cacheCheck = await _swMessage({ type: 'CHECK_NOTIF_CACHE', jobUrl: item.jobUrl }) as ScoreResp | undefined;
 
     let resp: ScoreResp | undefined;
     if (cacheCheck?.cached) {
       resp = cacheCheck;
     } else {
-      // Fetch job data via GraphQL (primary) or HTML fallback — no tab, no bot detection
       const jobData = await _fetchJobData(item.jobUrl);
       resp = await _swMessage({
         type: 'SCORE_JOB_WITH_DATA',
@@ -947,18 +943,41 @@ async function _processNotifQueue(): Promise<void> {
       item.badge.style.background = '#6b7280';
       item.badge.title = 'UpApply: scoring unavailable';
     }
+  } catch {
+    item.badge.textContent = '?';
+    item.badge.style.background = '#6b7280';
+    item.badge.title = 'UpApply: scoring error';
+  }
+}
 
-    _notifDone++;
-    _updateProgressBar(_notifDone, _notifTotal);
+async function _processNotifQueue(): Promise<void> {
+  if (_notifProcessing) return;
+  _notifProcessing = true;
+  _notifDone = 0;
+  _updateProgressBar(0, _notifTotal);
 
-    // Small delay between fetches — same-origin so much lighter than tab opening
-    if (_notifQueue.length > 0 && !resp?.cached) {
-      await new Promise(r => setTimeout(r, 600));
+  // Drain the queue atomically so workers share a single array
+  const items = _notifQueue.splice(0);
+
+  // Each worker pulls items until the shared array is empty
+  async function worker(): Promise<void> {
+    while (items.length > 0) {
+      const item = items.shift();
+      if (!item) break;
+      await _scoreOneNotif(item);
+      _notifDone++;
+      _updateProgressBar(_notifDone, _notifTotal);
     }
   }
 
-  _notifProcessing = false;
-  _hideProgressBar();
+  try {
+    // 3 concurrent workers — ~3× throughput, still respectful of rate limits
+    const concurrency = Math.min(3, items.length);
+    await Promise.allSettled(Array.from({ length: concurrency }, worker));
+  } finally {
+    _notifProcessing = false;
+    _hideProgressBar();
+  }
 }
 
 function _processNotificationRows(): void {
