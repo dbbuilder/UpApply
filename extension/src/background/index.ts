@@ -473,7 +473,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           let budgetType: string | null = null;
           try {
             await waitForTabLoad(tab.id);
-            await new Promise(resolve => setTimeout(resolve, 1500));
+            await new Promise(resolve => setTimeout(resolve, 2000)); // extra time for Vue hydration
             const manifest = chrome.runtime.getManifest();
             const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
             if (contentScriptPath) {
@@ -489,6 +489,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             description = resp.data?.fullDescription || '';
             budgetAmount = resp.data?.budgetAmount ?? null;
             budgetType = resp.data?.budgetType ?? null;
+
+            // Fallback: if DOM selectors missed the budget, scan the full rendered
+            // page text for dollar amounts before we close the tab.
+            if (!budgetAmount) {
+              try {
+                const pageTextResult = await chrome.scripting.executeScript({
+                  target: { tabId: tab.id! },
+                  func: () => (document.body as HTMLElement).innerText,
+                });
+                const pageText = (pageTextResult[0]?.result as string) || '';
+                const extracted = extractBudgetFromPageText(pageText);
+                if (extracted) {
+                  budgetAmount = extracted.amount;
+                  budgetType   = extracted.type;
+                }
+              } catch { /* scripting permission denied on some pages */ }
+            }
           } finally {
             try { await chrome.tabs.remove(tab.id); } catch { /* ignore */ }
           }
@@ -694,6 +711,41 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 console.log('UpApply Background: Service worker started');
+
+// ---------------------------------------------------------------------------
+// Budget extraction from full page text (fallback when DOM selectors miss)
+// ---------------------------------------------------------------------------
+
+function extractBudgetFromPageText(
+  text: string,
+): { amount: string; type: 'hourly' | 'fixed' } | null {
+  // Hourly rate: "$75/hr", "$50-$100/hr", "$50 - $100/hour"
+  const hrMatch = text.match(
+    /\$[\d,]+(?:\.\d+)?(?:\s*[-–]\s*\$[\d,]+(?:\.\d+)?)?\s*\/\s*h(?:r|our)/i,
+  );
+  if (hrMatch) {
+    return { amount: hrMatch[0].replace(/\s+/g, ''), type: 'hourly' };
+  }
+
+  // Fixed budget lines: "Budget: $500", "Fixed Price: $1,500"
+  const budgetLabelMatch = text.match(
+    /(?:budget|fixed[\s-]price|project budget)[:\s]+(\$[\d,]+(?:\.\d+)?(?:\s*[-–]\s*\$[\d,]+(?:\.\d+)?)?)/i,
+  );
+  if (budgetLabelMatch) {
+    return { amount: budgetLabelMatch[1].replace(/\s+/g, ''), type: 'fixed' };
+  }
+
+  // Standalone dollar amounts >= $100 (avoid small tips/bonuses)
+  const amtMatch = text.match(/\$([1-9][\d,]{2,})(?:\.\d+)?(?!\s*\/h)/);
+  if (amtMatch) {
+    const num = parseInt(amtMatch[1].replace(/,/g, ''), 10);
+    if (num >= 100) {
+      return { amount: amtMatch[0].replace(/\s+/g, ''), type: 'fixed' };
+    }
+  }
+
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Notification chip detection
