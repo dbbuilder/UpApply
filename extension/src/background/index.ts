@@ -12,6 +12,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('UpApply Background: Received message', message.type);
 
   switch (message.type) {
+    case 'PING':
+      sendResponse({ pong: true });
+      return false;
+
     case 'CONTENT_SCRIPT_READY':
       console.log('Content script ready on', message.url);
       break;
@@ -474,7 +478,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           let budgetType: string | null = null;
           try {
             await waitForTabLoad(tab.id);
-            await new Promise(resolve => setTimeout(resolve, 2000)); // extra time for Vue hydration
+            await new Promise(resolve => setTimeout(resolve, 3000)); // extra time for Vue hydration + anti-bot
             const manifest = chrome.runtime.getManifest();
             const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
             if (contentScriptPath) {

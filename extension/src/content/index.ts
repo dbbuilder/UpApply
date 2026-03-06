@@ -751,6 +751,20 @@ function _hideProgressBar(): void {
 
 // ---------------------------------------------------------------------------
 
+/** Wake the service worker then send a message, returning undefined on failure. */
+function _swMessage(msg: object): Promise<Record<string, unknown> | undefined> {
+  return new Promise((resolve) => {
+    // First ping wakes the service worker if it has gone dormant
+    chrome.runtime.sendMessage({ type: 'PING' }, () => {
+      void chrome.runtime.lastError; // suppress "no receiver" console error
+      chrome.runtime.sendMessage(msg, (resp) => {
+        void chrome.runtime.lastError; // suppress if SW still asleep
+        resolve(resp as Record<string, unknown> | undefined);
+      });
+    });
+  });
+}
+
 async function _processNotifQueue(): Promise<void> {
   if (_notifProcessing) return;
   _notifProcessing = true;
@@ -759,32 +773,32 @@ async function _processNotifQueue(): Promise<void> {
 
   while (_notifQueue.length > 0) {
     const item = _notifQueue.shift()!;
-    await new Promise<void>((resolve) => {
-      chrome.runtime.sendMessage(
-        { type: 'SCORE_NOTIFICATION_JOB', jobUrl: item.jobUrl, title: item.title },
-        (resp: { success: boolean; score?: number; chips?: string[]; cached?: boolean } | undefined) => {
-          if (resp?.success && resp.score != null) {
-            const score = Math.round(resp.score);
-            const { bg, color } = _scoreToNotifColors(score);
-            item.badge.style.background = bg;
-            item.badge.style.color = color;
-            item.badge.style.border = 'none';
-            item.badge.textContent = String(score);
-            item.badge.title = `UpApply match: ${score}/100${resp.cached ? ' (cached)' : ''}`;
-            if (resp.chips?.length) _injectChips(item.row, resp.chips);
-          } else {
-            item.badge.textContent = '?';
-            item.badge.title = 'UpApply: could not score';
-          }
-          _notifDone++;
-          _updateProgressBar(_notifDone, _notifTotal);
-          resolve();
-        }
-      );
-    });
-    // Cached hits don't need the rate-limit delay
-    if (_notifQueue.length > 0) {
-      await new Promise(r => setTimeout(r, 800));
+    type ScoreResp = { success: boolean; score?: number; chips?: string[]; cached?: boolean };
+    const resp = await _swMessage(
+      { type: 'SCORE_NOTIFICATION_JOB', jobUrl: item.jobUrl, title: item.title }
+    ) as ScoreResp | undefined;
+
+    if (resp?.success && resp.score != null) {
+      const score = Math.round(resp.score);
+      const { bg, color } = _scoreToNotifColors(score);
+      item.badge.style.background = bg;
+      item.badge.style.color = color;
+      item.badge.style.border = 'none';
+      item.badge.textContent = String(score);
+      item.badge.title = `UpApply match: ${score}/100${resp.cached ? ' (cached)' : ''}`;
+      if (resp.chips?.length) _injectChips(item.row, resp.chips);
+    } else {
+      item.badge.textContent = '?';
+      item.badge.style.background = '#6b7280';
+      item.badge.title = 'UpApply: scoring unavailable';
+    }
+
+    _notifDone++;
+    _updateProgressBar(_notifDone, _notifTotal);
+
+    // Slow down between live (non-cached) scrapes to avoid Upwork rate-limiting
+    if (_notifQueue.length > 0 && !resp?.cached) {
+      await new Promise(r => setTimeout(r, 2500));
     }
   }
 
