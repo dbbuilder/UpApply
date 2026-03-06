@@ -458,6 +458,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (!tab.id) { sendResponse({ success: false, error: 'Tab creation failed' }); return; }
 
           let description = '';
+          let budgetAmount: string | null = null;
+          let budgetType: string | null = null;
           try {
             await waitForTabLoad(tab.id);
             await new Promise(resolve => setTimeout(resolve, 1500));
@@ -467,13 +469,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [contentScriptPath] }); } catch { /* already loaded */ }
             }
             await new Promise(resolve => setTimeout(resolve, 500));
-            const resp = await new Promise<{ success: boolean; data?: { fullDescription?: string | null } }>((resolve) => {
+            const resp = await new Promise<{ success: boolean; data?: { fullDescription?: string | null; budgetAmount?: string | null; budgetType?: string | null } }>((resolve) => {
               chrome.tabs.sendMessage(tab.id!, { type: 'EXTRACT_JOB_POSTING_DATA' }, (r) => {
                 if (chrome.runtime.lastError) resolve({ success: false });
                 else resolve(r || { success: false });
               });
             });
             description = resp.data?.fullDescription || '';
+            budgetAmount = resp.data?.budgetAmount ?? null;
+            budgetType = resp.data?.budgetType ?? null;
           } finally {
             try { await chrome.tabs.remove(tab.id); } catch { /* ignore */ }
           }
@@ -487,7 +491,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
           if (!analyzeResp.ok) { sendResponse({ success: false, error: `API ${analyzeResp.status}` }); return; }
           const data = await analyzeResp.json() as { match_score: number };
-          sendResponse({ success: true, score: data.match_score });
+
+          const chips = detectNotifChips(title, description, budgetAmount, budgetType);
+          sendResponse({ success: true, score: data.match_score, chips });
         } catch (err) {
           sendResponse({ success: false, error: String(err) });
         }
@@ -673,3 +679,50 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 console.log('UpApply Background: Service worker started');
+
+// ---------------------------------------------------------------------------
+// Notification chip detection
+// ---------------------------------------------------------------------------
+
+function detectNotifChips(
+  title: string,
+  description: string,
+  budgetAmount: string | null,
+  budgetType: string | null,
+): string[] {
+  const text = `${title} ${description}`;
+  const lower = text.toLowerCase();
+  const chips: string[] = [];
+
+  // Domain/tech keywords
+  if (/\bmvp\b|minimum viable product/i.test(text))                          chips.push('MVP');
+  if (/\bsaas\b|software.as.a.service/i.test(text))                          chips.push('SaaS');
+  if (/\bazure\b/i.test(text))                                                chips.push('Azure');
+  if (/\bsql\b|postgresql|mysql|sql\s*server|sqlite|nosql|mongodb/i.test(text)) chips.push('SQL');
+
+  // "Role" — long-term position signals
+  if (/\b(role|position|full[- ]?time|part[- ]?time|ongoing|retainer|staff)\b/.test(lower)) chips.push('Role');
+
+  // Budget chip — prefer extracted values from DOM, fall back to regex on text
+  if (budgetAmount) {
+    const clean = budgetAmount.trim();
+    if (budgetType === 'hourly') {
+      chips.push(clean.includes('/hr') || clean.includes('/hour') ? clean : `${clean}/hr`);
+    } else if (budgetType === 'fixed') {
+      chips.push(clean);
+    } else {
+      chips.push(clean);
+    }
+  } else {
+    // Fallback: scan description text for dollar amounts
+    const hrMatch = text.match(/\$[\d,]+(?:\.\d+)?(?:\s*[-–]\s*\$[\d,]+(?:\.\d+)?)?\s*\/\s*h(?:r|our)/i);
+    if (hrMatch) {
+      chips.push(hrMatch[0].replace(/\s+/g, ''));
+    } else {
+      const fixedMatch = text.match(/\$[\d,]{2,}(?:\.\d+)?(?:\s*[-–]\s*\$[\d,]+(?:\.\d+)?)?(?!\s*\/)/);
+      if (fixedMatch) chips.push(fixedMatch[0].replace(/\s+/g, ''));
+    }
+  }
+
+  return chips;
+}

@@ -646,11 +646,41 @@ function _injectNotifBadge(row: Element, jobUrl: string): HTMLElement {
 
 interface _NotifQueueItem {
   badge: HTMLElement;
+  row: Element;
   jobUrl: string;
   title: string;
 }
 const _notifQueue: _NotifQueueItem[] = [];
 let _notifProcessing = false;
+
+// Chip colour map — specific keywords get accent colours, budget is neutral
+const _CHIP_COLORS: Record<string, { bg: string; color: string }> = {
+  'MVP':   { bg: '#7c3aed', color: '#fff' },
+  'SaaS':  { bg: '#0891b2', color: '#fff' },
+  'Azure': { bg: '#0078d4', color: '#fff' },
+  'SQL':   { bg: '#b45309', color: '#fff' },
+  'Role':  { bg: '#374151', color: '#fff' },
+};
+
+function _injectChips(row: Element, chips: string[]): void {
+  chips.forEach((label) => {
+    const chip = document.createElement('span');
+    const colors = _CHIP_COLORS[label] ?? { bg: '#166534', color: '#fff' }; // budget → green
+    chip.style.cssText =
+      'display:inline-flex;align-items:center;justify-content:center;' +
+      `background:${colors.bg};color:${colors.color};` +
+      'height:20px;border-radius:10px;' +
+      'font-size:11px;font-weight:600;' +
+      'padding:0 7px;margin-left:5px;vertical-align:middle;' +
+      'font-family:-apple-system,sans-serif;white-space:nowrap;letter-spacing:0.01em;';
+    chip.textContent = label;
+    // Insert after the last upapply element in this row
+    const all = [...row.querySelectorAll<HTMLElement>('[data-upapply-job],[data-upapply-chip]')];
+    const lastBadge = all[all.length - 1];
+    if (lastBadge) lastBadge.after(chip);
+    chip.dataset.upapplyChip = label;
+  });
+}
 
 async function _processNotifQueue(): Promise<void> {
   if (_notifProcessing) return;
@@ -660,7 +690,7 @@ async function _processNotifQueue(): Promise<void> {
     await new Promise<void>((resolve) => {
       chrome.runtime.sendMessage(
         { type: 'SCORE_NOTIFICATION_JOB', jobUrl: item.jobUrl, title: item.title },
-        (resp: { success: boolean; score?: number } | undefined) => {
+        (resp: { success: boolean; score?: number; chips?: string[] } | undefined) => {
           if (resp?.success && resp.score != null) {
             const score = Math.round(resp.score);
             const { bg, color } = _scoreToNotifColors(score);
@@ -669,6 +699,7 @@ async function _processNotifQueue(): Promise<void> {
             item.badge.style.border = 'none';
             item.badge.textContent = String(score);
             item.badge.title = `UpApply match: ${score}/100`;
+            if (resp.chips?.length) _injectChips(item.row, resp.chips);
           } else {
             item.badge.textContent = '?';
             item.badge.title = 'UpApply: could not score';
@@ -696,7 +727,7 @@ function _processNotificationRows(): void {
     _scoredNotifUrls.add(jobUrl);
     const title = link.textContent?.trim() || '';
     const badge = _injectNotifBadge(row, jobUrl);
-    _notifQueue.push({ badge, jobUrl, title });
+    _notifQueue.push({ badge, row, jobUrl, title });
   });
   _processNotifQueue();
 }
