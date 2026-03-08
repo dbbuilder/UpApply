@@ -11,6 +11,7 @@ import {
 } from './upwork-selectors';
 import type { ScreeningQuestion, JobData, ScrapedProposal, AttachmentInfo, JobPostingData } from '../types';
 import { initDraftSaver } from './draft-saver';
+import { detectNotifChips } from '../lib/notif-chips';
 
 /**
  * Extract screening questions from the page.
@@ -664,6 +665,7 @@ function _resetNotifState(): void {
   _scoredNotifUrls.clear();
   _scoreButtonInjected = false;
   _savedBtnInjected = false;
+  _clearAuthTokenCache();
   document.getElementById('ua-score-btn')?.remove();
   document.getElementById('ua-saved-score-btn')?.remove();
   document.getElementById('ua-notif-progress')?.remove();
@@ -867,93 +869,78 @@ async function _fetchJobData(jobUrl: string): Promise<JobFetchResult> {
 }
 
 // ---------------------------------------------------------------------------
+// Auth token — read once from chrome.storage.local, cached in memory.
+// Content script calls the API directly; no service worker round trip needed.
+// ---------------------------------------------------------------------------
 
-/** Wake the service worker then send a message, returning undefined on failure or timeout. */
-function _swMessage(msg: object): Promise<Record<string, unknown> | undefined> {
-  const msgType = (msg as Record<string, unknown>).type as string;
-  const t0 = Date.now();
-  const send = new Promise<Record<string, unknown> | undefined>((resolve) => {
-    try {
-      chrome.runtime.sendMessage({ type: 'PING' }, () => {
-        if (chrome.runtime.lastError) {
-          console.warn(`[UpApply] SW PING failed (${Date.now() - t0}ms): ${chrome.runtime.lastError.message}`);
-          resolve(undefined);
-          return;
-        }
-        try {
-          chrome.runtime.sendMessage(msg, (resp) => {
-            if (chrome.runtime.lastError) {
-              console.warn(`[UpApply] SW ${msgType} failed (${Date.now() - t0}ms): ${chrome.runtime.lastError.message}`);
-              resolve(undefined);
-              return;
-            }
-            console.log(`[UpApply] SW ${msgType} resolved in ${Date.now() - t0}ms`, resp ? 'ok' : 'undefined');
-            resolve(resp as Record<string, unknown> | undefined);
-          });
-        } catch (err) {
-          console.warn(`[UpApply] SW ${msgType} sendMessage threw:`, err);
-          resolve(undefined);
-        }
-      });
-    } catch (err) {
-      console.warn(`[UpApply] SW PING sendMessage threw:`, err);
-      resolve(undefined);
-    }
-  });
-  const timeout = new Promise<undefined>((resolve) => setTimeout(() => {
-    console.warn(`[UpApply] SW ${msgType} TIMED OUT after 5000ms`);
-    resolve(undefined);
-  }, 5_000));
-  return Promise.race([send, timeout]);
+let _contentAuthToken: string | null | undefined = undefined;
+
+async function _getAuthToken(): Promise<string | null> {
+  if (_contentAuthToken !== undefined) return _contentAuthToken;
+  const stored = await chrome.storage.local.get('authToken');
+  _contentAuthToken = (stored['authToken'] as string) || null;
+  return _contentAuthToken;
 }
 
-type ScoreResp = { success: boolean; score?: number; chips?: string[]; cached?: boolean };
+/** Called on SPA navigation to force re-read of token on next scoring run. */
+function _clearAuthTokenCache(): void {
+  _contentAuthToken = undefined;
+}
 
 /** Score a single item and update its badge. Never throws. */
 async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
   const uid = item.jobUrl.match(/(~[0-9a-f]+)/i)?.[1] ?? item.jobUrl.slice(-12);
   console.log(`[UpApply] score START  ${uid} "${item.title.slice(0, 40)}"`);
   try {
-    console.log(`[UpApply] score CACHE-CHECK ${uid}`);
-    const cacheCheck = await _swMessage({ type: 'CHECK_NOTIF_CACHE', jobUrl: item.jobUrl }) as ScoreResp | undefined;
-
-    let resp: ScoreResp | undefined;
-    if (cacheCheck?.cached) {
-      console.log(`[UpApply] score CACHED ${uid} score=${cacheCheck.score}`);
-      resp = cacheCheck;
-    } else {
-      console.log(`[UpApply] score FETCH  ${uid}`);
-      const jobData = await _fetchJobData(item.jobUrl);
-      // If GraphQL returned empty (expired job), fall back to title-only scoring
-      const description = jobData.description || item.title;
-      console.log(`[UpApply] score FETCH  ${uid} done — descLen=${description.length} budget=${jobData.budgetAmount} source=${jobData.description ? 'graphql' : 'title-fallback'}`);
-      console.log(`[UpApply] score SCORE  ${uid}`);
-      resp = await _swMessage({
-        type: 'SCORE_JOB_WITH_DATA',
-        jobUrl: item.jobUrl,
-        title: item.title,
-        description,
-        pageText: jobData.pageText,
-        budgetAmount: jobData.budgetAmount,
-        budgetType: jobData.budgetType,
-      }) as ScoreResp | undefined;
-      console.log(`[UpApply] score SCORE  ${uid} done — score=${resp?.score} success=${resp?.success}`);
+    // 1. Persistent cache check (chrome.storage.local, no SW round trip)
+    const CACHE_KEY = `sc_v4_${item.jobUrl}`;
+    const CACHE_TTL = 24 * 60 * 60 * 1000;
+    const cacheStore = await chrome.storage.local.get(CACHE_KEY);
+    const cached = cacheStore[CACHE_KEY] as { score: number; chips: string[]; ts: number } | undefined;
+    if (cached && Date.now() - cached.ts < CACHE_TTL) {
+      console.log(`[UpApply] score CACHED ${uid} score=${cached.score}`);
+      _applyBadgeResult(item, cached.score, cached.chips, true);
+      return;
     }
 
-    if (resp?.success && resp.score != null) {
-      const score = Math.round(resp.score);
-      const { bg, color } = _scoreToNotifColors(score);
-      item.badge.style.background = bg;
-      item.badge.style.color = color;
-      item.badge.style.border = 'none';
-      item.badge.textContent = String(score);
-      item.badge.title = `UpApply match: ${score}/100${resp.cached ? ' (cached)' : ''}`;
-      if (resp.chips?.length) _injectChips(item.row, resp.chips);
-    } else {
+    // 2. Auth token (read once per scoring session, cached in memory)
+    const token = await _getAuthToken();
+    if (!token) {
       item.badge.textContent = '?';
       item.badge.style.background = '#6b7280';
-      item.badge.title = 'UpApply: scoring unavailable';
+      item.badge.title = 'UpApply: not logged in';
+      return;
     }
+
+    // 3. Fetch job description via Upwork GraphQL (content script context, 8s timeout)
+    console.log(`[UpApply] score FETCH  ${uid}`);
+    const jobData = await _fetchJobData(item.jobUrl);
+    const description = jobData.description || item.title;
+    console.log(`[UpApply] score FETCH  ${uid} done — descLen=${description.length} budget=${jobData.budgetAmount} source=${jobData.description ? 'graphql' : 'title-fallback'}`);
+
+    // 4. Score via API directly (no SW message channel — eliminates zombie channel accumulation)
+    console.log(`[UpApply] score SCORE  ${uid}`);
+    const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL']
+      || 'https://upapply-api.onrender.com';
+    const apiResp = await fetch(`${apiBase}/api/v1/jobs/analyze`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ title: item.title || 'Job', description: description || item.title }),
+      signal: AbortSignal.timeout(25_000),
+    });
+
+    if (!apiResp.ok) throw new Error(`API ${apiResp.status}`);
+    const data = await apiResp.json() as { match_score: number };
+    console.log(`[UpApply] score SCORE  ${uid} done — score=${data.match_score}`);
+
+    // 5. Compute chips and cache result
+    const chips = detectNotifChips(item.title, description, jobData.budgetAmount, jobData.budgetType);
+    await chrome.storage.local.set({ [CACHE_KEY]: { score: data.match_score, chips, ts: Date.now() } });
+
+    _applyBadgeResult(item, data.match_score, chips, false);
     console.log(`[UpApply] score DONE   ${uid}`);
   } catch (err) {
     console.error(`[UpApply] score ERROR  ${uid}`, err);
@@ -961,6 +948,17 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
     item.badge.style.background = '#6b7280';
     item.badge.title = 'UpApply: scoring error';
   }
+}
+
+function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[], fromCache: boolean): void {
+  const rounded = Math.round(score);
+  const { bg, color } = _scoreToNotifColors(rounded);
+  item.badge.style.background = bg;
+  item.badge.style.color = color;
+  item.badge.style.border = 'none';
+  item.badge.textContent = String(rounded);
+  item.badge.title = `UpApply match: ${rounded}/100${fromCache ? ' (cached)' : ''}`;
+  if (chips.length) _injectChips(item.row, chips);
 }
 
 async function _processNotifQueue(): Promise<void> {
@@ -981,8 +979,9 @@ async function _processNotifQueue(): Promise<void> {
       // One item at a time prevents concurrent DOM updates from stacking
       // Vue re-renders, which is what causes "Page Unresponsive".
       await new Promise<void>(resolve => setTimeout(resolve, 50));
-      // Hard 20s ceiling per item — guarantees queue always makes progress even
-      // if internal timeouts (5s SW race, 8s fetch abort) somehow fail to fire.
+      // Hard 35s ceiling per item (8s GraphQL + 25s API + 2s buffer).
+      // Guarantees queue always makes progress even if AbortSignal.timeout
+      // somehow fails to fire in an unusual browser/network state.
       await Promise.race([
         _scoreOneNotif(item),
         new Promise<void>(resolve => setTimeout(() => {
@@ -991,7 +990,7 @@ async function _processNotifQueue(): Promise<void> {
           item.badge.style.background = '#6b7280';
           item.badge.title = 'UpApply: timed out';
           resolve();
-        }, 20_000)),
+        }, 35_000)),
       ]);
       _notifDone++;
       _updateProgressBar(_notifDone, _notifTotal);

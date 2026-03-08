@@ -3,6 +3,7 @@
  * Handles communication between content scripts and sidebar.
  */
 import type { JobData } from '../types';
+import { extractBudgetFromPageText, detectNotifChips, topOfRange as _topOfRange } from '../lib/notif-chips';
 
 // Store current job data for sidebar access
 let currentJobData: JobData | null = null;
@@ -735,120 +736,4 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 console.log('UpApply Background: Service worker started');
 
 // ---------------------------------------------------------------------------
-// Budget extraction from full page text (fallback when DOM selectors miss)
-// ---------------------------------------------------------------------------
-
-function extractBudgetFromPageText(
-  text: string,
-): { amount: string; type: 'hourly' | 'fixed' } | null {
-  // Upwork labeled hourly: "Hourly: $50.00 – $75.00" or "Hourly\n$50.00"
-  const labeledHourly = text.match(
-    /hourly[:\s\n]+(\$[\d,]+(?:\.\d+)?(?:\s*[-–]\s*\$[\d,]+(?:\.\d+)?)?)/i,
-  );
-  if (labeledHourly) {
-    return { amount: labeledHourly[1].replace(/\s+/g, ''), type: 'hourly' };
-  }
-
-  // Inline /hr suffix: "$75/hr", "$50 - $100 / hour"
-  const inlineHourly = text.match(
-    /\$[\d,]+(?:\.\d+)?(?:\s*[-–]\s*\$[\d,]+(?:\.\d+)?)?\s*\/\s*h(?:r|our)/i,
-  );
-  if (inlineHourly) {
-    return { amount: inlineHourly[0].replace(/\s+/g, ''), type: 'hourly' };
-  }
-
-  // Upwork labeled fixed: "Fixed-price\n$500", "Est. budget: $1,000", "Budget: $500"
-  const labeledFixed = text.match(
-    /(?:fixed[- ]price|est\.?\s*budget|budget|project budget)[:\s\n]+(\$[\d,]+(?:\.\d+)?(?:\s*[-–]\s*\$[\d,]+(?:\.\d+)?)?)/i,
-  );
-  if (labeledFixed) {
-    return { amount: labeledFixed[1].replace(/\s+/g, ''), type: 'fixed' };
-  }
-
-  // Standalone dollar amounts >= $100 (last resort)
-  const amtMatch = text.match(/\$([1-9][\d,]{2,})(?:\.\d+)?/);
-  if (amtMatch) {
-    const num = parseInt(amtMatch[1].replace(/,/g, ''), 10);
-    if (num >= 100) {
-      return { amount: amtMatch[0].replace(/\s+/g, ''), type: 'fixed' };
-    }
-  }
-
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// Notification chip detection
-// ---------------------------------------------------------------------------
-
-/** For a "$min–$max" range string, return only the upper bound. Single values pass through unchanged. */
-function _topOfRange(amount: string): string {
-  const m = amount.match(/\$[\d,]+(?:\.\d+)?\s*[-–]\s*(\$[\d,]+(?:\.\d+)?)/);
-  return m ? m[1] : amount;
-}
-
-function detectNotifChips(
-  title: string,
-  description: string,
-  budgetAmount: string | null,
-  budgetType: string | null,
-): string[] {
-  const text = `${title} ${description}`;
-  const lower = text.toLowerCase();
-  const chips: string[] = [];
-
-  // Domain/tech keywords
-  if (/\bmvp\b|minimum viable product/i.test(text))                              chips.push('MVP');
-  if (/\bsaas\b|software.as.a.service/i.test(text))                              chips.push('SaaS');
-  if (/\bazure\b/i.test(text))                                                    chips.push('Azure');
-  if (/\bsql\b|postgresql|mysql|sql\s*server|sqlite|nosql|mongodb/i.test(text))  chips.push('SQL');
-
-  // AI / LLM
-  if (/\b(ai|llm|gpt|openai|claude|anthropic|rag|vector|chatbot|langchain|embedding|fine.?tun)/i.test(text)) chips.push('AI');
-
-  // Programming languages / frameworks Chris works with
-  if (/\bpython\b/i.test(text))                                                   chips.push('Python');
-  if (/\breact\b/i.test(text))                                                    chips.push('React');
-  if (/\b(api|rest|fastapi|graphql|webhook|endpoint)\b/i.test(text))             chips.push('API');
-
-  // High-value role signals
-  if (/\b(fractional\s+cto|cto|technical\s+(co-?founder|advisor|lead)|vp\s+of\s+eng)/i.test(text)) chips.push('CTO');
-
-  // Cloud / infra
-  if (/\b(aws|gcp|google cloud|cloud|terraform|kubernetes|k8s|docker|devops|infra)/i.test(text)) chips.push('Cloud');
-
-  // Automation niche
-  if (/\b(n8n|zapier|make\.com|make\b|integromat|automation|workflow\s+automat)/i.test(text)) chips.push('Auto');
-
-  // Urgency signals
-  if (/\b(asap|urgent|immediately|right away|start today|start now|quick turnaround)/i.test(lower)) chips.push('Urgent');
-
-  // Long-term / high LTV
-  if (/\b(long.?term|ongoing|retainer|6\s*month|12\s*month|part.?time|full.?time|staff aug)/i.test(lower)) chips.push('Long-term');
-
-  // "Role" — position/employment signals (lower priority than Long-term)
-  if (!chips.includes('Long-term') && /\b(role|position|ongoing|retainer|staff)\b/.test(lower)) chips.push('Role');
-
-  // Budget chip — prefer extracted values from DOM/pageText, fall back to description scan
-  // Use only the top of a range (e.g. "$50-$100" → "$100")
-  if (budgetAmount) {
-    const clean = _topOfRange(budgetAmount.trim());
-    if (budgetType === 'hourly') {
-      chips.push(clean.includes('/hr') || clean.includes('/hour') ? clean : `${clean}/hr`);
-    } else {
-      chips.push(clean);
-    }
-  } else {
-    // Last resort: scan description text (client sometimes mentions rate inline)
-    const extracted = extractBudgetFromPageText(text);
-    if (extracted) {
-      const top = _topOfRange(extracted.amount);
-      const label = extracted.type === 'hourly'
-        ? (top.includes('/hr') ? top : `${top}/hr`)
-        : top;
-      chips.push(label);
-    }
-  }
-
-  return chips;
-}
+// extractBudgetFromPageText, detectNotifChips, topOfRange imported from ../lib/notif-chips
