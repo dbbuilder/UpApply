@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { apiClient, ProposalStats, AnalyticsDashboard } from '../../lib/api-client';
 import HistoryPage from './History';
+import WorkTab from './WorkTab';
 
-type TrackTab = 'pipeline' | 'history' | 'trends';
+type TrackTab = 'pipeline' | 'work' | 'history' | 'trends';
 
 // ── Pipeline tab ─────────────────────────────────────────────────────────────
 
@@ -240,6 +241,7 @@ export default function TrackPage() {
         <div className="flex gap-1 pb-2">
           {([
             { id: 'pipeline' as const, label: 'Pipeline' },
+            { id: 'work' as const, label: 'Work' },
             { id: 'history' as const, label: 'History' },
             { id: 'trends' as const, label: 'Trends' },
           ]).map(tab => (
@@ -260,6 +262,7 @@ export default function TrackPage() {
       </div>
       <div className="flex-1 overflow-auto">
         {activeTab === 'pipeline' && <PipelineTab />}
+        {activeTab === 'work' && <WorkTab />}
         {activeTab === 'history' && (
           <div className="[&>div>header]:hidden h-full">
             <HistoryPage />

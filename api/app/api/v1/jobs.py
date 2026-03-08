@@ -214,6 +214,42 @@ async def list_jobs(
     return jobs
 
 
+@router.get("/active-contracts", response_model=List[JobResponse])
+async def get_active_contracts(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return imported contracts that are still active or paused on Upwork.
+
+    Contract status is stored in Application.outcome_notes as
+    'Imported from contract history. Status: active|paused|ended'.
+    """
+    from sqlalchemy import text as sa_text
+    sql = sa_text("""
+        SELECT DISTINCT j.*
+        FROM jobs j
+        JOIN applications a ON a.job_id = j.id AND a.user_id = j.user_id
+        WHERE j.user_id = :user_id
+          AND j.source = 'contract_import'
+          AND (
+              a.outcome_notes ILIKE '%Status: active%'
+           OR a.outcome_notes ILIKE '%Status: paused%'
+          )
+        ORDER BY j.created_at DESC
+        LIMIT 50
+    """)
+    result = await db.execute(sql, {"user_id": current_user.id})
+    rows = result.fetchall()
+
+    # Map raw rows to Job ORM objects
+    job_ids = [row[0] for row in rows]
+    if not job_ids:
+        return []
+    job_q = select(Job).where(Job.id.in_(job_ids)).order_by(Job.created_at.desc())
+    jobs_result = await db.execute(job_q)
+    return jobs_result.scalars().all()
+
+
 @router.post("/import-bulk", response_model=List[JobResponse])
 async def import_bulk_jobs(
     request: JobBulkImportRequest,

@@ -491,6 +491,45 @@ class ApiClient {
       body: data,
     });
   }
+
+  // Active Contracts (imported contracts still open on Upwork)
+  async getActiveContracts() {
+    return this.request<Job[]>('/api/v1/jobs/active-contracts');
+  }
+
+  // Work Logs
+  async createWorkLog(data: WorkLogCreate) {
+    return this.request<WorkLog>('/api/v1/work-logs', {
+      method: 'POST',
+      body: data,
+    });
+  }
+
+  async listWorkLogs(params?: { job_id?: string; limit?: number }) {
+    const qs = new URLSearchParams();
+    if (params?.job_id) qs.set('job_id', params.job_id);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    const q = qs.toString();
+    return this.request<WorkLogListResponse>(`/api/v1/work-logs${q ? `?${q}` : ''}`);
+  }
+
+  async updateWorkLog(id: string, data: WorkLogUpdate) {
+    return this.request<WorkLog>(`/api/v1/work-logs/${id}`, {
+      method: 'PATCH',
+      body: data,
+    });
+  }
+
+  async deleteWorkLog(id: string) {
+    return this.request<void>(`/api/v1/work-logs/${id}`, { method: 'DELETE' });
+  }
+
+  async extractWorkImage(imageBase64: string, filename?: string) {
+    return this.request<{ extracted_text: string; summary: string }>('/api/v1/work-logs/extract-image', {
+      method: 'POST',
+      body: { image_base64: imageBase64, filename },
+    });
+  }
 }
 
 export class ApiError extends Error {
@@ -969,6 +1008,52 @@ export interface JobReviewListResponse {
 export interface JobReviewRateRequest {
   user_rating: number;
   user_comment?: string;
+}
+
+// Work Log Types
+export interface WorkLogCreate {
+  job_id?: string;
+  contract_title: string;
+  upwork_contract_id?: string;
+  task_description: string;
+  started_at?: string;   // ISO datetime
+  ended_at?: string;
+  duration_minutes?: number;
+  attachment_filename?: string;
+  attachment_text?: string;
+  notes?: string;
+}
+
+export interface WorkLogUpdate {
+  task_description?: string;
+  started_at?: string;
+  ended_at?: string;
+  duration_minutes?: number;
+  attachment_filename?: string;
+  attachment_text?: string;
+  notes?: string;
+}
+
+export interface WorkLog {
+  id: string;
+  user_id: string;
+  job_id?: string;
+  contract_title: string;
+  upwork_contract_id?: string;
+  task_description: string;
+  started_at?: string;
+  ended_at?: string;
+  duration_minutes?: number;
+  attachment_filename?: string;
+  attachment_text?: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface WorkLogListResponse {
+  logs: WorkLog[];
+  total: number;
+  total_minutes: number;
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);
