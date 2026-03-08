@@ -1147,14 +1147,16 @@ function _handleMutations(): void {
     _contractImportBtnInjected = false;
   }
 
-  // Workroom proposal button: show on /nx/wm/workroom/*/overview when proposal text found
-  const workroomMatch = currentPath.match(/\/nx\/wm\/workroom\/(\d+)\/overview/);
-  if (workroomMatch && !_workroomProposalBtnInjected) {
-    const proposalText = _scrapeWorkroomProposal();
+  // Proposal save button: show on /nx/proposals/{id} pages when cover letter text is found.
+  // User navigates to a hired proposal and clicks to save it as a winning example.
+  const isProposalDetailPage = /\/nx\/proposals\/\d+/.test(currentPath)
+    || /\/ab\/proposals\/\d+/.test(currentPath);
+  if (isProposalDetailPage && !_workroomProposalBtnInjected) {
+    const proposalText = _scrapeProposalPageText();
     if (proposalText) {
-      _injectWorkroomProposalButton(workroomMatch[1], proposalText);
+      _injectProposalSaveButton(proposalText);
     }
-  } else if (_workroomProposalBtnInjected && !workroomMatch) {
+  } else if (_workroomProposalBtnInjected && !isProposalDetailPage) {
     document.getElementById('ua-workroom-proposal-btn')?.remove();
     _workroomProposalBtnInjected = false;
   }
@@ -1253,52 +1255,47 @@ function _injectContractImportButton(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Workroom proposal scraper — /nx/wm/workroom/{id}/overview
+// Proposal page scraper — /nx/proposals/{id}
 // Captures the winning cover letter/proposal text and saves it as a Proposal
 // record (was_hired=true) so cover letter generation can learn from it.
+//
+// DOM structure (confirmed from proposaldetails.html):
+//   div[data-cy="cover-letter-section"]        ← container card
+//     section.air3-card-section
+//       p.break.text-pre-line                  ← the proposal text
+//       [data-test="questions-answers"]         ← Q&A responses (append if present)
 // ---------------------------------------------------------------------------
 
-/** Try to extract proposal/cover-letter text from a workroom overview page. */
-function _scrapeWorkroomProposal(): string | null {
-  // Try known data-test selectors first
-  const selectors = [
-    '[data-test="cover-letter"]',
-    '[data-test="freelancer-cover-letter"]',
-    '[data-test="cover-letter-section"]',
-    '[data-qa="cover-letter"]',
-    '.cover-letter-text',
-    '.cover-letter',
-  ];
-  for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    if (el) {
-      const text = el.textContent?.trim();
-      if (text && text.length > 50) return text;
-    }
+/** Extract cover letter text from an Upwork proposal detail page. */
+function _scrapeProposalPageText(): string | null {
+  // Primary: confirmed selector from DOM analysis
+  const section = document.querySelector('[data-cy="cover-letter-section"]');
+  if (section) {
+    // Collect the cover letter paragraph(s)
+    const parts: string[] = [];
+    section.querySelectorAll('p.break.text-pre-line').forEach(p => {
+      const t = p.textContent?.trim();
+      if (t) parts.push(t);
+    });
+    // Also grab Q&A answers if present — they add context for scoring calibration
+    section.querySelectorAll('[data-test="questions-answers"] span.air3-truncation').forEach(span => {
+      const t = span.textContent?.trim();
+      if (t) parts.push(t);
+    });
+    if (parts.length && parts.join('').length > 50) return parts.join('\n\n');
   }
 
-  // Fallback: look for a heading that says "Cover Letter" and grab the sibling text
-  const headings = Array.from(document.querySelectorAll('h2, h3, h4, p, span, div'));
-  for (const h of headings) {
-    const htxt = h.textContent?.trim().toLowerCase() || '';
-    if (htxt === 'cover letter' || htxt === 'proposal') {
-      // Try next sibling, parent's next sibling, etc.
-      const candidates: Array<Element | null> = [
-        h.nextElementSibling,
-        h.parentElement?.nextElementSibling ?? null,
-      ];
-      for (const c of candidates) {
-        if (!c) continue;
-        const text = c.textContent?.trim();
-        if (text && text.length > 80) return text;
-      }
-    }
+  // Fallback: .cover-letter-section (older Upwork markup)
+  const fallback = document.querySelector('.cover-letter-section p.break, .cover-letter p');
+  if (fallback) {
+    const t = fallback.textContent?.trim();
+    if (t && t.length > 50) return t;
   }
 
   return null;
 }
 
-function _injectWorkroomProposalButton(contractId: string, proposalText: string): void {
+function _injectProposalSaveButton(proposalText: string): void {
   if (_workroomProposalBtnInjected) return;
   _workroomProposalBtnInjected = true;
   document.getElementById('ua-workroom-proposal-btn')?.remove();
@@ -1313,8 +1310,8 @@ function _injectWorkroomProposalButton(contractId: string, proposalText: string)
     'font-size:12px;font-weight:600;font-family:-apple-system,sans-serif;' +
     'box-shadow:0 2px 8px rgba(0,0,0,0.25);white-space:nowrap;' +
     'user-select:none;transition:background 0.15s;';
-  btn.textContent = '💾 Save winning proposal';
-  btn.title = 'Save this proposal text to improve future cover letters';
+  btn.textContent = '💾 Save as winning proposal';
+  btn.title = 'Mark this as a hired proposal to improve future cover letters';
   btn.addEventListener('mouseenter', () => { btn.style.background = '#15803d'; });
   btn.addEventListener('mouseleave', () => { btn.style.background = '#16a34a'; });
   btn.addEventListener('click', async () => {
@@ -1324,15 +1321,17 @@ function _injectWorkroomProposalButton(contractId: string, proposalText: string)
       const token = await _getAuthToken();
       if (!token) { btn.textContent = '✗ Not logged in'; setTimeout(() => btn.remove(), 3000); return; }
       const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
-      const workroomUrl = `https://www.upwork.com/nx/wm/workroom/${contractId}/overview`;
-      const titleEl = document.querySelector<HTMLElement>('h1, [data-test="contract-title"]');
+      // Job title: prefer the proposal job title heading, fall back to page title
+      const titleEl = document.querySelector<HTMLElement>(
+        '.qa-contract-title, h1.contract-title, [data-test="job-title"], h1'
+      );
       const jobTitle = titleEl?.textContent?.trim() || document.title;
       const resp = await fetch(`${apiBase}/api/v1/proposals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
           cover_letter_text: proposalText,
-          upwork_job_url: workroomUrl,
+          upwork_job_url: window.location.href,
           job_title: jobTitle,
           was_hired: true,
           status: 'hired',
