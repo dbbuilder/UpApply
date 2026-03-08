@@ -21,9 +21,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.upwork.com/jobs/*",
-        "https://www.upwork.com/nx/proposals/*",
-        "https://www.upwork.com/freelance-jobs/*"
+        "https://www.upwork.com/*"
       ],
       "js": ["src/content/index.ts"],
       "css": ["content.css"]
