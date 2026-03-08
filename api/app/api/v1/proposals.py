@@ -56,6 +56,7 @@ async def create_proposal(
         bid_amount=data.bid_amount,
         bid_type=data.bid_type,
         status=data.status,
+        was_hired=data.was_hired,
         submitted_at=data.submitted_at,
         source=data.source,
         embedding=embedding,

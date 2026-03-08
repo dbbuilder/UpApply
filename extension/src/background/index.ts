@@ -554,6 +554,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'SCORE_NOTIFICATION_JOB':
       sendResponse({ success: false, error: 'Use SCORE_JOB_WITH_DATA instead' });
       return false;
+
+    case 'IMPORT_CONTRACTS':
+      (async () => {
+        try {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          const tabId = tabs[0]?.id;
+          if (!tabId) { sendResponse({ success: false, error: 'No active tab' }); return; }
+
+          // Ask content script to scrape the contracts page
+          const scrapeResult = await new Promise<{ success: boolean; data?: unknown; error?: string }>(resolve => {
+            chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_CONTRACTS' }, (resp) => {
+              if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
+              else resolve(resp || { success: false, error: 'No response' });
+            });
+          });
+
+          if (!scrapeResult?.success || !Array.isArray(scrapeResult.data)) {
+            sendResponse({ success: false, error: scrapeResult?.error || 'Scrape failed' });
+            return;
+          }
+
+          const stored = await chrome.storage.local.get('authToken');
+          const token = stored.authToken as string | undefined;
+          if (!token) { sendResponse({ success: false, error: 'Not logged in' }); return; }
+
+          const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
+          const resp = await fetch(`${apiBase}/api/v1/jobs/import-contracts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ contracts: scrapeResult.data }),
+            signal: AbortSignal.timeout(30_000),
+          });
+
+          if (!resp.ok) { sendResponse({ success: false, error: `API ${resp.status}` }); return; }
+          const data = await resp.json();
+          sendResponse({ success: true, ...data });
+        } catch (err) {
+          sendResponse({ success: false, error: String(err) });
+        }
+      })();
+      return true;
   }
 
   return false;

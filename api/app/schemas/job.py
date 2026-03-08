@@ -222,3 +222,30 @@ class JobBulkImportRequest(BaseModel):
     source: str  # "saved" | "search"
     search_query: Optional[str] = None  # populated for source="search"
     search_query_id: Optional[str] = None  # FK to search_queries.id
+
+
+class ContractImportItem(BaseModel):
+    """A single contract from the Upwork contracts page."""
+
+    contract_id: str
+    title: str
+    contract_type: str  # "hourly" | "fixed" | "unknown"
+    rate: Optional[str] = None
+    status: str  # "active" | "paused" | "ended"
+    client_name: Optional[str] = None
+    date_range: Optional[str] = None
+    cover_letter_text: Optional[str] = None  # Winning proposal text, if scraped
+
+
+class ContractImportRequest(BaseModel):
+    """Import multiple contracts from Upwork contract history."""
+
+    contracts: List[ContractImportItem]
+
+
+class ContractImportResponse(BaseModel):
+    """Response for contract import operation."""
+
+    imported: int
+    updated: int
+    total: int

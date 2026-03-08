@@ -655,6 +655,8 @@ const _notifQueue: _NotifQueueItem[] = [];
 let _notifProcessing = false;
 let _notifTotal = 0;   // total jobs queued in this scoring run
 let _notifDone  = 0;   // jobs completed (success or failure)
+let _contractImportBtnInjected = false;
+let _workroomProposalBtnInjected = false;
 
 /** Reset all scoring state — called on SPA navigation so stale flags never block a fresh run. */
 function _resetNotifState(): void {
@@ -665,9 +667,13 @@ function _resetNotifState(): void {
   _scoredNotifUrls.clear();
   _scoreButtonInjected = false;
   _savedBtnInjected = false;
+  _contractImportBtnInjected = false;
+  _workroomProposalBtnInjected = false;
   _clearAuthTokenCache();
   document.getElementById('ua-score-btn')?.remove();
   document.getElementById('ua-saved-score-btn')?.remove();
+  document.getElementById('ua-contract-import-btn')?.remove();
+  document.getElementById('ua-workroom-proposal-btn')?.remove();
   document.getElementById('ua-notif-progress')?.remove();
 }
 
@@ -1130,6 +1136,28 @@ function _handleMutations(): void {
     document.getElementById('ua-saved-score-btn')?.remove();
     _savedBtnInjected = false;
   }
+
+  // Contract import button: show on /nx/contracts when contract sections are present
+  const isContractsPage = currentPath === '/nx/contracts';
+  const hasContracts = !!document.querySelector('section[data-test^="contract-"]');
+  if (isContractsPage && hasContracts && !_contractImportBtnInjected) {
+    _injectContractImportButton();
+  } else if (_contractImportBtnInjected && (!isContractsPage || !hasContracts)) {
+    document.getElementById('ua-contract-import-btn')?.remove();
+    _contractImportBtnInjected = false;
+  }
+
+  // Workroom proposal button: show on /nx/wm/workroom/*/overview when proposal text found
+  const workroomMatch = currentPath.match(/\/nx\/wm\/workroom\/(\d+)\/overview/);
+  if (workroomMatch && !_workroomProposalBtnInjected) {
+    const proposalText = _scrapeWorkroomProposal();
+    if (proposalText) {
+      _injectWorkroomProposalButton(workroomMatch[1], proposalText);
+    }
+  } else if (_workroomProposalBtnInjected && !workroomMatch) {
+    document.getElementById('ua-workroom-proposal-btn')?.remove();
+    _workroomProposalBtnInjected = false;
+  }
 }
 
 new MutationObserver(() => {
@@ -1142,6 +1170,189 @@ new MutationObserver(() => {
 }).observe(document.body, { childList: true, subtree: true });
 
 // No auto-scoring on any page — all scoring is user-initiated via buttons
+
+// ---------------------------------------------------------------------------
+// Contract history importer — /nx/contracts page
+// ---------------------------------------------------------------------------
+
+interface ScrapedContract {
+  contract_id: string;
+  title: string;
+  contract_type: string;
+  rate: string | null;
+  status: string;
+  client_name: string | null;
+  date_range: string | null;
+}
+
+function _scrapeContracts(): ScrapedContract[] {
+  const results: ScrapedContract[] = [];
+  document.querySelectorAll<HTMLElement>('section[data-test^="contract-"]').forEach(section => {
+    const testVal = section.getAttribute('data-test') || '';
+    const idMatch = testVal.match(/^contract-(\d+)$/);
+    if (!idMatch) return;
+    const id = idMatch[1];
+
+    const titleEl = section.querySelector<HTMLElement>(`[data-test="contract-${id}-title"]`);
+    const title = titleEl?.getAttribute('title') || titleEl?.textContent?.trim() || '';
+    if (!title) return;
+
+    const hourlyEl = section.querySelector(`[data-test="contract-${id}-hourly-terms"]`);
+    const fixedEl  = section.querySelector(`[data-test="contract-${id}-fixed-price-terms"]`);
+    const contract_type = hourlyEl ? 'hourly' : fixedEl ? 'fixed' : 'unknown';
+    const rate = (hourlyEl || fixedEl)?.textContent?.trim() || null;
+
+    const status = section.querySelector(`[data-test="contract-${id}-active-info"]`) ? 'active'
+      : section.querySelector(`[data-test="contract-${id}-paused-info"]`) ? 'paused'
+      : 'ended';
+
+    const clientEl = section.querySelector<HTMLElement>(`[data-test="contract-${id}-contract-party-info-section"] p`);
+    const client_name = clientEl?.textContent?.replace(/^Hired by\s+/i, '').trim() || null;
+
+    const datesEl = section.querySelector(`[data-test="contract-${id}-dates"]`);
+    const date_range = datesEl?.textContent?.trim() || null;
+
+    results.push({ contract_id: id, title, contract_type, rate, status, client_name, date_range });
+  });
+  return results;
+}
+
+function _injectContractImportButton(): void {
+  if (_contractImportBtnInjected) return;
+  _contractImportBtnInjected = true;
+  document.getElementById('ua-contract-import-btn')?.remove();
+
+  const btn = document.createElement('div');
+  btn.id = 'ua-contract-import-btn';
+  btn.style.cssText =
+    'position:fixed;bottom:140px;right:16px;z-index:2147483647;' +
+    'display:flex;align-items:center;gap:6px;' +
+    'padding:6px 14px;border-radius:20px;cursor:pointer;' +
+    'background:#1d4ed8;color:#fff;' +
+    'font-size:12px;font-weight:600;font-family:-apple-system,sans-serif;' +
+    'box-shadow:0 2px 8px rgba(0,0,0,0.25);white-space:nowrap;' +
+    'user-select:none;transition:background 0.15s;';
+  btn.textContent = '📥 Import wins';
+  btn.title = 'Import contract history as won jobs';
+  btn.addEventListener('mouseenter', () => { btn.style.background = '#1e40af'; });
+  btn.addEventListener('mouseleave', () => { btn.style.background = '#1d4ed8'; });
+  btn.addEventListener('click', () => {
+    _contractImportBtnInjected = false;
+    btn.textContent = 'Importing…';
+    btn.style.cursor = 'default';
+    chrome.runtime.sendMessage({ type: 'IMPORT_CONTRACTS' }, (resp: { success: boolean; imported?: number; updated?: number; error?: string } | undefined) => {
+      if (resp?.success) {
+        btn.textContent = `✓ ${(resp.imported ?? 0) + (resp.updated ?? 0)} wins imported`;
+      } else {
+        btn.textContent = `✗ ${resp?.error || 'Import failed'}`;
+      }
+      setTimeout(() => { btn.remove(); }, 3000);
+    });
+  });
+  document.body.appendChild(btn);
+}
+
+// ---------------------------------------------------------------------------
+// Workroom proposal scraper — /nx/wm/workroom/{id}/overview
+// Captures the winning cover letter/proposal text and saves it as a Proposal
+// record (was_hired=true) so cover letter generation can learn from it.
+// ---------------------------------------------------------------------------
+
+/** Try to extract proposal/cover-letter text from a workroom overview page. */
+function _scrapeWorkroomProposal(): string | null {
+  // Try known data-test selectors first
+  const selectors = [
+    '[data-test="cover-letter"]',
+    '[data-test="freelancer-cover-letter"]',
+    '[data-test="cover-letter-section"]',
+    '[data-qa="cover-letter"]',
+    '.cover-letter-text',
+    '.cover-letter',
+  ];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el) {
+      const text = el.textContent?.trim();
+      if (text && text.length > 50) return text;
+    }
+  }
+
+  // Fallback: look for a heading that says "Cover Letter" and grab the sibling text
+  const headings = Array.from(document.querySelectorAll('h2, h3, h4, p, span, div'));
+  for (const h of headings) {
+    const htxt = h.textContent?.trim().toLowerCase() || '';
+    if (htxt === 'cover letter' || htxt === 'proposal') {
+      // Try next sibling, parent's next sibling, etc.
+      const candidates: Array<Element | null> = [
+        h.nextElementSibling,
+        h.parentElement?.nextElementSibling ?? null,
+      ];
+      for (const c of candidates) {
+        if (!c) continue;
+        const text = c.textContent?.trim();
+        if (text && text.length > 80) return text;
+      }
+    }
+  }
+
+  return null;
+}
+
+function _injectWorkroomProposalButton(contractId: string, proposalText: string): void {
+  if (_workroomProposalBtnInjected) return;
+  _workroomProposalBtnInjected = true;
+  document.getElementById('ua-workroom-proposal-btn')?.remove();
+
+  const btn = document.createElement('div');
+  btn.id = 'ua-workroom-proposal-btn';
+  btn.style.cssText =
+    'position:fixed;bottom:140px;right:16px;z-index:2147483647;' +
+    'display:flex;align-items:center;gap:6px;' +
+    'padding:6px 14px;border-radius:20px;cursor:pointer;' +
+    'background:#16a34a;color:#fff;' +
+    'font-size:12px;font-weight:600;font-family:-apple-system,sans-serif;' +
+    'box-shadow:0 2px 8px rgba(0,0,0,0.25);white-space:nowrap;' +
+    'user-select:none;transition:background 0.15s;';
+  btn.textContent = '💾 Save winning proposal';
+  btn.title = 'Save this proposal text to improve future cover letters';
+  btn.addEventListener('mouseenter', () => { btn.style.background = '#15803d'; });
+  btn.addEventListener('mouseleave', () => { btn.style.background = '#16a34a'; });
+  btn.addEventListener('click', async () => {
+    btn.textContent = 'Saving…';
+    btn.style.cursor = 'default';
+    try {
+      const token = await _getAuthToken();
+      if (!token) { btn.textContent = '✗ Not logged in'; setTimeout(() => btn.remove(), 3000); return; }
+      const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
+      const workroomUrl = `https://www.upwork.com/nx/wm/workroom/${contractId}/overview`;
+      const titleEl = document.querySelector<HTMLElement>('h1, [data-test="contract-title"]');
+      const jobTitle = titleEl?.textContent?.trim() || document.title;
+      const resp = await fetch(`${apiBase}/api/v1/proposals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          cover_letter_text: proposalText,
+          upwork_job_url: workroomUrl,
+          job_title: jobTitle,
+          was_hired: true,
+          status: 'hired',
+          source: 'contract_import',
+        }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (resp.ok) {
+        btn.style.background = '#15803d';
+        btn.textContent = '✓ Proposal saved';
+      } else {
+        btn.textContent = `✗ Error ${resp.status}`;
+      }
+    } catch (err) {
+      btn.textContent = `✗ ${String(err).substring(0, 30)}`;
+    }
+    setTimeout(() => { btn.remove(); _workroomProposalBtnInjected = false; }, 4000);
+  });
+  document.body.appendChild(btn);
+}
 
 // ---------------------------------------------------------------------------
 
@@ -1297,6 +1508,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       try {
         const results = extractSavedSearches();
         sendResponse({ success: true, data: results, url: window.location.href });
+      } catch (err) {
+        sendResponse({ success: false, error: String(err) });
+      }
+      break;
+    }
+
+    case 'SCRAPE_CONTRACTS': {
+      try {
+        const data = _scrapeContracts();
+        sendResponse({ success: true, data, url: window.location.href });
       } catch (err) {
         sendResponse({ success: false, error: String(err) });
       }

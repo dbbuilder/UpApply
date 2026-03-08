@@ -13,6 +13,8 @@ from app.core.config import settings
 from app.models.user import User, UserProfile
 from app.models.job import Job
 from app.models.cover_letter import CoverLetter
+from app.models.application import Application, ApplicationStatus
+from app.models.proposal import Proposal
 from app.schemas.job import (
     JobCreate,
     JobResponse,
@@ -25,6 +27,8 @@ from app.schemas.job import (
     ExtractAttachmentsResponse,
     AttachmentMetadata,
     JobBulkImportRequest,
+    ContractImportRequest,
+    ContractImportResponse,
 )
 from app.services.job_analysis import (
     find_relevant_proposals,
@@ -372,6 +376,118 @@ async def delete_job(
 
     await db.delete(job)
     await db.commit()
+
+
+@router.post("/import-contracts", response_model=ContractImportResponse)
+async def import_contracts(
+    request: ContractImportRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import Upwork contract history as won jobs for scoring calibration."""
+    imported = 0
+    updated = 0
+
+    for contract in request.contracts:
+        upwork_job_id = f"contract_{contract.contract_id}"
+
+        # Check if already imported
+        existing = await db.execute(
+            select(Job).where(
+                Job.user_id == current_user.id,
+                Job.upwork_job_id == upwork_job_id,
+            )
+        )
+        existing_job = existing.scalar_one_or_none()
+
+        # Build description from available fields
+        description_parts = [contract.title]
+        if contract.rate:
+            description_parts.append(f"Rate: {contract.rate}")
+        if contract.client_name:
+            description_parts.append(f"Client: {contract.client_name}")
+        if contract.date_range:
+            description_parts.append(f"Dates: {contract.date_range}")
+        description = "\n".join(description_parts)
+
+        # Generate embedding
+        embedding = await generate_embedding(description)
+
+        if existing_job:
+            # Update embedding if missing
+            if existing_job.embedding is None:
+                existing_job.embedding = embedding
+                updated += 1
+            job = existing_job
+        else:
+            job = Job(
+                user_id=current_user.id,
+                upwork_job_id=upwork_job_id,
+                upwork_url=f"https://www.upwork.com/nx/wm/workroom/{contract.contract_id}/overview",
+                title=contract.title,
+                description=description,
+                budget_type=contract.contract_type if contract.contract_type != "unknown" else None,
+                budget_amount=contract.rate,
+                client_info={"name": contract.client_name} if contract.client_name else None,
+                is_saved=True,
+                source="contract_import",
+                match_score=100.0,  # Won contracts are calibration anchors
+                embedding=embedding,
+            )
+            db.add(job)
+            await db.flush()  # Materialise job.id before creating Application
+            imported += 1
+
+        # Ensure an Application record exists with HIRED status
+        existing_app = await db.execute(
+            select(Application).where(
+                Application.user_id == current_user.id,
+                Application.job_id == job.id,
+            )
+        )
+        app = existing_app.scalar_one_or_none()
+        if not app:
+            app = Application(
+                user_id=current_user.id,
+                job_id=job.id,
+                status=ApplicationStatus.HIRED,
+                outcome_notes=f"Imported from contract history. Status: {contract.status}",
+            )
+            db.add(app)
+        elif app.status != ApplicationStatus.HIRED:
+            app.status = ApplicationStatus.HIRED
+
+        # If a winning proposal text was scraped, create/update a Proposal record
+        if contract.cover_letter_text and contract.cover_letter_text.strip():
+            workroom_url = f"https://www.upwork.com/nx/wm/workroom/{contract.contract_id}/overview"
+            existing_prop = await db.execute(
+                select(Proposal).where(
+                    Proposal.user_id == current_user.id,
+                    Proposal.upwork_job_url == workroom_url,
+                )
+            )
+            prop = existing_prop.scalar_one_or_none()
+            if prop:
+                prop.cover_letter_text = contract.cover_letter_text.strip()
+                prop.was_hired = True
+                prop.job_id = job.id
+            else:
+                prop_embedding = await generate_embedding(contract.cover_letter_text.strip())
+                prop = Proposal(
+                    user_id=current_user.id,
+                    job_id=job.id,
+                    upwork_job_url=workroom_url,
+                    job_title=contract.title,
+                    cover_letter_text=contract.cover_letter_text.strip(),
+                    was_hired=True,
+                    status="hired",
+                    source="contract_import",
+                    embedding=prop_embedding,
+                )
+                db.add(prop)
+
+    await db.commit()
+    return ContractImportResponse(imported=imported, updated=updated, total=len(request.contracts))
 
 
 # Cover Letter endpoints

@@ -19,6 +19,7 @@ class ProposalCreate(BaseModel):
     bid_amount: Optional[float] = None
     bid_type: Optional[str] = None  # hourly, fixed
     status: Optional[str] = None
+    was_hired: Optional[bool] = None
     submitted_at: Optional[datetime] = None
     source: str = "manual"  # manual, scraped, extension
 
