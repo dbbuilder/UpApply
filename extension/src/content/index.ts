@@ -980,17 +980,20 @@ async function _processNotifQueue(): Promise<void> {
       // Vue re-renders, which is what causes "Page Unresponsive".
       await new Promise<void>(resolve => setTimeout(resolve, 50));
       // Hard 35s ceiling per item (8s GraphQL + 25s API + 2s buffer).
-      // Guarantees queue always makes progress even if AbortSignal.timeout
-      // somehow fails to fire in an unusual browser/network state.
+      // MUST clearTimeout when scoring wins — otherwise the stale callback
+      // fires later and overwrites a successfully-set score badge with '?'.
+      let hardTimeoutId: ReturnType<typeof setTimeout>;
       await Promise.race([
-        _scoreOneNotif(item),
-        new Promise<void>(resolve => setTimeout(() => {
-          console.warn(`[UpApply] item hard timeout: ${item.jobUrl}`);
-          item.badge.textContent = '?';
-          item.badge.style.background = '#6b7280';
-          item.badge.title = 'UpApply: timed out';
-          resolve();
-        }, 35_000)),
+        _scoreOneNotif(item).finally(() => clearTimeout(hardTimeoutId)),
+        new Promise<void>(resolve => {
+          hardTimeoutId = setTimeout(() => {
+            console.warn(`[UpApply] item hard timeout: ${item.jobUrl}`);
+            item.badge.textContent = '?';
+            item.badge.style.background = '#6b7280';
+            item.badge.title = 'UpApply: timed out';
+            resolve();
+          }, 35_000);
+        }),
       ]);
       _notifDone++;
       _updateProgressBar(_notifDone, _notifTotal);
