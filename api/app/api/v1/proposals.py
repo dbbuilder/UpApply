@@ -103,15 +103,19 @@ async def get_proposal_stats(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get proposal statistics."""
+    """Get proposal statistics including funnel metrics."""
     sql = text("""
         SELECT
             COUNT(*) as total,
             COUNT(*) FILTER (WHERE was_hired = true) as hired,
             COUNT(*) FILTER (WHERE client_responded = true) as responded,
-            SUM(earnings) FILTER (WHERE earnings IS NOT NULL) as total_earnings,
+            COUNT(*) FILTER (WHERE status = 'interviewed') as interviewed,
             COUNT(*) FILTER (WHERE status = 'submitted') as submitted,
-            COUNT(*) FILTER (WHERE status = 'viewed') as viewed
+            COUNT(*) FILTER (WHERE status = 'viewed') as viewed,
+            SUM(earnings) FILTER (WHERE earnings IS NOT NULL) as total_earnings,
+            AVG(
+                EXTRACT(EPOCH FROM (updated_at - submitted_at)) / 86400.0
+            ) FILTER (WHERE client_responded = true AND submitted_at IS NOT NULL) as avg_days_to_response
         FROM proposals
         WHERE user_id = :user_id
     """)
@@ -119,15 +123,28 @@ async def get_proposal_stats(
     result = await db.execute(sql, {"user_id": current_user.id})
     row = result.fetchone()
 
+    # Get scored count from job_reviews (top of funnel)
+    scored_sql = text("SELECT COUNT(*) as cnt FROM job_reviews WHERE user_id = :user_id")
+    scored_result = await db.execute(scored_sql, {"user_id": current_user.id})
+    scored_row = scored_result.fetchone()
+    scored_count = scored_row.cnt or 0
+
+    total = row.total or 0
+    hired = row.hired or 0
+    responded = row.responded or 0
+
     return {
-        "total_proposals": row.total or 0,
-        "hired": row.hired or 0,
-        "responded": row.responded or 0,
+        "total_proposals": total,
+        "hired": hired,
+        "responded": responded,
+        "interviewed": row.interviewed or 0,
         "total_earnings": float(row.total_earnings) if row.total_earnings else 0,
         "submitted": row.submitted or 0,
         "viewed": row.viewed or 0,
-        "hire_rate": (row.hired / row.total * 100) if row.total else 0,
-        "response_rate": (row.responded / row.total * 100) if row.total else 0,
+        "scored_count": scored_count,
+        "hire_rate": (hired / total * 100) if total else 0,
+        "response_rate": (responded / total * 100) if total else 0,
+        "avg_days_to_response": round(float(row.avg_days_to_response), 1) if row.avg_days_to_response else None,
     }
 
 

@@ -866,11 +866,14 @@ export interface ProposalStats {
   total_proposals: number;
   hired: number;
   responded: number;
+  interviewed: number;
   total_earnings: number;
   submitted: number;
   viewed: number;
+  scored_count: number;
   hire_rate: number;
   response_rate: number;
+  avg_days_to_response?: number;
 }
 
 // Attachment Extraction Types
