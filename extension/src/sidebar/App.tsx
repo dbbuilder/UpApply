@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useAppStore } from './store';
+import AppShell from './AppShell';
 import AuthPage from './pages/Auth';
 import SetupPage from './pages/Setup';
 import GeneratorPage from './pages/Generator';
@@ -9,6 +10,9 @@ import AnalyticsPage from './pages/Analytics';
 import BetaFeedbackPage from './pages/BetaFeedback';
 import SkillsPage from './pages/Skills';
 import EditProfilePage from './pages/EditProfile';
+import MePage from './pages/MePage';
+import FindPage from './pages/FindPage';
+import TrackPage from './pages/TrackPage';
 
 function App() {
   const { currentView, isLoading, checkAuth } = useAppStore();
@@ -33,6 +37,12 @@ function App() {
         return <SetupPage />;
       case 'generator':
         return <GeneratorPage />;
+      case 'me':
+        return <MePage />;
+      case 'find':
+        return <FindPage />;
+      case 'track':
+        return <TrackPage />;
       case 'memories':
         return <MemoriesPage />;
       case 'history':
@@ -51,9 +61,9 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <AppShell>
       {renderView()}
-    </div>
+    </AppShell>
   );
 }
 

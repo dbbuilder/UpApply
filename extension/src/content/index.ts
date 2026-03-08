@@ -1037,6 +1037,24 @@ function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[]
   item.badge.textContent = String(rounded);
   item.badge.title = `UpApply match: ${rounded}/100${fromCache ? ' (cached)' : ''}`;
   if (chips.length) _injectChips(item.row, chips);
+
+  // Persist to scoredJobsCache for the sidebar's Find view
+  chrome.storage.local.get('scoredJobsCache', (data) => {
+    const cache: Record<string, { url: string; title: string; score: number; chips: string[]; scored_at: string }> =
+      data.scoredJobsCache || {};
+    cache[item.jobUrl] = {
+      url: item.jobUrl,
+      title: item.title || '',
+      score: rounded,
+      chips,
+      scored_at: new Date().toISOString(),
+    };
+    // Cap at 500 entries — evict oldest by scored_at
+    const entries = Object.values(cache).sort((a, b) => b.scored_at.localeCompare(a.scored_at));
+    const capped: typeof cache = {};
+    entries.slice(0, 500).forEach(e => { capped[e.url] = e; });
+    chrome.storage.local.set({ scoredJobsCache: capped });
+  });
 }
 
 async function _processNotifQueue(): Promise<void> {
