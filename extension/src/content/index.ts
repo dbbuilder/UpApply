@@ -663,7 +663,9 @@ function _resetNotifState(): void {
   _notifDone = 0;
   _scoredNotifUrls.clear();
   _scoreButtonInjected = false;
+  _savedBtnInjected = false;
   document.getElementById('ua-score-btn')?.remove();
+  document.getElementById('ua-saved-score-btn')?.remove();
   document.getElementById('ua-notif-progress')?.remove();
 }
 
@@ -973,23 +975,17 @@ async function _processNotifQueue(): Promise<void> {
   const items = _notifQueue.splice(0);
   console.log(`[UpApply] queue START total=${items.length}`);
 
-  async function worker(id: number): Promise<void> {
-    console.log(`[UpApply] worker-${id} START`);
-    while (items.length > 0) {
-      const item = items.shift();
-      if (!item) break;
+  try {
+    for (const item of items) {
+      // Yield to the browser event loop before each item.
+      // One item at a time prevents concurrent DOM updates from stacking
+      // Vue re-renders, which is what causes "Page Unresponsive".
+      await new Promise<void>(resolve => setTimeout(resolve, 50));
       await _scoreOneNotif(item);
       _notifDone++;
       _updateProgressBar(_notifDone, _notifTotal);
-      console.log(`[UpApply] worker-${id} progress ${_notifDone}/${_notifTotal} remaining=${items.length}`);
+      console.log(`[UpApply] progress ${_notifDone}/${_notifTotal}`);
     }
-    console.log(`[UpApply] worker-${id} DONE`);
-  }
-
-  try {
-    const concurrency = Math.min(3, items.length);
-    console.log(`[UpApply] queue launching ${concurrency} workers`);
-    await Promise.allSettled(Array.from({ length: concurrency }, (_, i) => worker(i)));
   } finally {
     console.log(`[UpApply] queue FINISHED done=${_notifDone}/${_notifTotal}`);
     _notifProcessing = false;
@@ -1034,40 +1030,51 @@ function _processSavedJobCards(): void {
 }
 
 // ---------------------------------------------------------------------------
-// "Score with UpApply" button injected into the bell dropdown
+// Score buttons — fixed overlays injected into document.body, never into
+// Vue-managed component trees (which breaks Upwork's event handlers).
 // ---------------------------------------------------------------------------
 
 let _scoreButtonInjected = false;
+let _savedBtnInjected = false;
+
+const _BTN_STYLE =
+  'position:fixed;bottom:80px;right:16px;z-index:2147483647;' +
+  'display:flex;align-items:center;gap:6px;' +
+  'padding:6px 14px;border-radius:20px;cursor:pointer;' +
+  'background:#1d4ed8;color:#fff;' +
+  'font-size:12px;font-weight:600;font-family:-apple-system,sans-serif;' +
+  'box-shadow:0 2px 8px rgba(0,0,0,0.25);white-space:nowrap;' +
+  'user-select:none;transition:background 0.15s;';
+
+function _makeScoreBtn(id: string, label: string, onClick: () => void): void {
+  document.getElementById(id)?.remove();
+  const btn = document.createElement('div');
+  btn.id = id;
+  btn.style.cssText = _BTN_STYLE;
+  btn.textContent = label;
+  btn.title = label;
+  btn.addEventListener('mouseenter', () => { btn.style.background = '#1e40af'; });
+  btn.addEventListener('mouseleave', () => { btn.style.background = '#1d4ed8'; });
+  btn.addEventListener('click', () => { btn.remove(); onClick(); });
+  document.body.appendChild(btn);
+}
 
 function _injectScoreButton(): void {
   if (_scoreButtonInjected) return;
-  if (!document.querySelector('ul[data-cy="notifications-list"]')) return;
   _scoreButtonInjected = true;
-
-  document.getElementById('ua-score-btn')?.remove();
-
-  const btn = document.createElement('div');
-  btn.id = 'ua-score-btn';
-  // Injected into document.body as a fixed overlay — never touches the
-  // Vue-managed dropdown DOM, which would break Upwork's event handlers.
-  btn.style.cssText =
-    'position:fixed;bottom:80px;right:16px;z-index:2147483647;' +
-    'display:flex;align-items:center;gap:6px;' +
-    'padding:6px 14px;border-radius:20px;cursor:pointer;' +
-    'background:#1d4ed8;color:#fff;' +
-    'font-size:12px;font-weight:600;font-family:-apple-system,sans-serif;' +
-    'box-shadow:0 2px 8px rgba(0,0,0,0.25);white-space:nowrap;' +
-    'user-select:none;transition:background 0.15s;';
-  btn.textContent = '⚡ Score jobs';
-  btn.title = 'Score all job notifications with UpApply AI';
-  btn.addEventListener('mouseenter', () => { btn.style.background = '#1e40af'; });
-  btn.addEventListener('mouseleave', () => { btn.style.background = '#1d4ed8'; });
-  btn.addEventListener('click', () => {
-    btn.remove();
+  _makeScoreBtn('ua-score-btn', '⚡ Score notifications', () => {
+    _scoreButtonInjected = false;
     _processNotificationRows();
   });
+}
 
-  document.body.appendChild(btn);
+function _injectSavedJobsButton(): void {
+  if (_savedBtnInjected) return;
+  _savedBtnInjected = true;
+  _makeScoreBtn('ua-saved-score-btn', '⚡ Score saved jobs', () => {
+    _savedBtnInjected = false;
+    _processSavedJobCards();
+  });
 }
 
 // MutationObserver covers three cases:
@@ -1092,20 +1099,21 @@ function _handleMutations(): void {
   const hasRows     = !!document.querySelector('.notification-row a[href*="/jobs/~"]');
   const hasTiles    = !!document.querySelector('article[data-test="JobTile"]');
 
-  // Show score button whenever notification rows exist — dropdown OR full page.
-  // Never auto-score; user must always click the button to start.
+  // Notification button: dropdown open OR full notifications page with rows
   const hasNotifContent = hasDropdown || (isNotifPage && hasRows);
   if (hasNotifContent) {
     _injectScoreButton();
-  } else {
-    if (_scoreButtonInjected) {
-      document.getElementById('ua-score-btn')?.remove();
-      _scoreButtonInjected = false;
-    }
+  } else if (_scoreButtonInjected) {
+    document.getElementById('ua-score-btn')?.remove();
+    _scoreButtonInjected = false;
   }
 
+  // Saved jobs button: show when tiles are present — never auto-score
   if (isSavedPage && hasTiles) {
-    _processSavedJobCards();
+    _injectSavedJobsButton();
+  } else if (_savedBtnInjected) {
+    document.getElementById('ua-saved-score-btn')?.remove();
+    _savedBtnInjected = false;
   }
 }
 
@@ -1118,10 +1126,7 @@ new MutationObserver(() => {
   _observerDebounce = setTimeout(_handleMutations, 200);
 }).observe(document.body, { childList: true, subtree: true });
 
-// Saved jobs page: auto-score tiles on initial load
-if (window.location.pathname.includes('/nx/search/jobs')) {
-  setTimeout(_processSavedJobCards, 1500);
-}
+// No auto-scoring on any page — all scoring is user-initiated via buttons
 
 // ---------------------------------------------------------------------------
 
