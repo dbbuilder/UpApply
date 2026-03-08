@@ -981,7 +981,18 @@ async function _processNotifQueue(): Promise<void> {
       // One item at a time prevents concurrent DOM updates from stacking
       // Vue re-renders, which is what causes "Page Unresponsive".
       await new Promise<void>(resolve => setTimeout(resolve, 50));
-      await _scoreOneNotif(item);
+      // Hard 20s ceiling per item — guarantees queue always makes progress even
+      // if internal timeouts (5s SW race, 8s fetch abort) somehow fail to fire.
+      await Promise.race([
+        _scoreOneNotif(item),
+        new Promise<void>(resolve => setTimeout(() => {
+          console.warn(`[UpApply] item hard timeout: ${item.jobUrl}`);
+          item.badge.textContent = '?';
+          item.badge.style.background = '#6b7280';
+          item.badge.title = 'UpApply: timed out';
+          resolve();
+        }, 20_000)),
+      ]);
       _notifDone++;
       _updateProgressBar(_notifDone, _notifTotal);
       console.log(`[UpApply] progress ${_notifDone}/${_notifTotal}`);
@@ -1099,19 +1110,21 @@ function _handleMutations(): void {
   const hasRows     = !!document.querySelector('.notification-row a[href*="/jobs/~"]');
   const hasTiles    = !!document.querySelector('article[data-test="JobTile"]');
 
-  // Notification button: dropdown open OR full notifications page with rows
+  // Notification button: dropdown open OR full notifications page with rows.
+  // Don't re-inject while scoring is active — avoids button flicker and
+  // prevents _notifTotal diverging from items.length mid-run.
   const hasNotifContent = hasDropdown || (isNotifPage && hasRows);
-  if (hasNotifContent) {
+  if (hasNotifContent && !_notifProcessing) {
     _injectScoreButton();
-  } else if (_scoreButtonInjected) {
+  } else if (_scoreButtonInjected && !_notifProcessing) {
     document.getElementById('ua-score-btn')?.remove();
     _scoreButtonInjected = false;
   }
 
   // Saved jobs button: show when tiles are present — never auto-score
-  if (isSavedPage && hasTiles) {
+  if (isSavedPage && hasTiles && !_notifProcessing) {
     _injectSavedJobsButton();
-  } else if (_savedBtnInjected) {
+  } else if (_savedBtnInjected && !_notifProcessing) {
     document.getElementById('ua-saved-score-btn')?.remove();
     _savedBtnInjected = false;
   }
