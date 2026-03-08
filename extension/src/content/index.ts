@@ -604,6 +604,78 @@ function fillScreeningQuestion(selector: string, answer: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Milestone filling helpers
+// ---------------------------------------------------------------------------
+
+interface MilestoneData {
+  description: string;
+  days_from_start: number;
+  amount: number;
+}
+
+/** Use the native setter to trigger Vue/React reactivity on an input. */
+function _setNativeValue(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  if (setter) {
+    setter.call(input, value);
+  } else {
+    input.value = value;
+  }
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+async function fillMilestones(milestones: MilestoneData[]): Promise<{ success: boolean; filled: number }> {
+  const container = document.querySelector('[data-test="milestones"], .up-fe-milestones');
+  if (!container) return { success: false, filled: 0 };
+
+  const addBtn = container.querySelector<HTMLElement>('.milestone-add, [data-ev-label="milestone_add"]');
+
+  // Add milestone rows until we have enough
+  for (let i = container.querySelectorAll('[data-test="milestone"], .up-fe-milestone').length; i < milestones.length; i++) {
+    addBtn?.click();
+    await new Promise(r => setTimeout(r, 400));
+  }
+
+  const rows = container.querySelectorAll<HTMLElement>('[data-test="milestone"], .up-fe-milestone');
+  let filled = 0;
+
+  for (let i = 0; i < Math.min(milestones.length, rows.length); i++) {
+    const ms = milestones[i];
+    const row = rows[i];
+
+    // Description
+    const descInput = row.querySelector<HTMLInputElement>('[data-test="milestone-description"]');
+    if (descInput) {
+      _setNativeValue(descInput, ms.description);
+    }
+
+    // Amount
+    const amountInput = row.querySelector<HTMLInputElement>('[data-test="milestone-amount"] [data-test="currency-input"]');
+    if (amountInput) {
+      _setNativeValue(amountInput, ms.amount.toFixed(2));
+    }
+
+    // Due date — compute absolute date from days_from_start
+    const dateInput = row.querySelector<HTMLInputElement>('[data-test="milestone-due-date"] [data-test="input"]');
+    if (dateInput && ms.days_from_start > 0) {
+      const d = new Date();
+      d.setDate(d.getDate() + ms.days_from_start);
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const yyyy = d.getFullYear();
+      // Remove inputmode="none" so typing works, then set value
+      dateInput.removeAttribute('inputmode');
+      _setNativeValue(dateInput, `${mm}/${dd}/${yyyy}`);
+    }
+
+    filled++;
+  }
+
+  return { success: true, filled };
+}
+
+// ---------------------------------------------------------------------------
 // Notification page job scorer
 // ---------------------------------------------------------------------------
 
@@ -1449,6 +1521,34 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const questionFilled = fillScreeningQuestion(message.selector, message.answer);
       sendResponse({ success: questionFilled });
       break;
+
+    case 'FILL_ALL_QUESTIONS': {
+      // message.answers = [{index: number, answer: string}]
+      const textareas = Array.from(
+        document.querySelectorAll<HTMLTextAreaElement>(
+          '.fe-proposal-job-questions .air3-textarea.inner-textarea, .questions-area .air3-textarea.inner-textarea'
+        )
+      );
+      let filled = 0;
+      for (const { index, answer } of message.answers as { index: number; answer: string }[]) {
+        const ta = textareas[index];
+        if (!ta || !answer) continue;
+        ta.value = answer;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        ta.dispatchEvent(new Event('change', { bubbles: true }));
+        filled++;
+      }
+      sendResponse({ success: true, filled });
+      break;
+    }
+
+    case 'FILL_MILESTONES': {
+      (async () => {
+        const result = await fillMilestones(message.milestones);
+        sendResponse(result);
+      })();
+      return true;
+    }
 
     case 'SCRAPE_PROPOSALS': {
       if (!isMyProposalsPage()) {

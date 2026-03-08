@@ -29,6 +29,9 @@ from app.schemas.job import (
     JobBulkImportRequest,
     ContractImportRequest,
     ContractImportResponse,
+    SuggestMilestonesRequest,
+    SuggestMilestonesResponse,
+    MilestoneSuggestion,
 )
 from app.services.job_analysis import (
     find_relevant_proposals,
@@ -488,6 +491,78 @@ async def import_contracts(
 
     await db.commit()
     return ContractImportResponse(imported=imported, updated=updated, total=len(request.contracts))
+
+
+# Milestone suggestion endpoint
+
+@router.post("/suggest-milestones", response_model=SuggestMilestonesResponse)
+async def suggest_milestones(
+    request: SuggestMilestonesRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Suggest milestones for a fixed-price Upwork contract."""
+    import json
+    import re
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+    # Parse total budget from string like "$500" or "$1,500"
+    total_budget: Optional[float] = None
+    if request.budget_amount:
+        amount_match = re.search(r"[\d,]+\.?\d*", request.budget_amount.replace(",", ""))
+        if amount_match:
+            try:
+                total_budget = float(amount_match.group().replace(",", ""))
+            except ValueError:
+                pass
+
+    budget_context = ""
+    if total_budget:
+        budget_context = f"The total budget is {request.budget_amount} (${total_budget:.2f}). The milestone amounts MUST sum to approximately ${total_budget:.2f}."
+    else:
+        budget_context = "No specific budget was provided. Use reasonable amounts based on the project scope."
+
+    user_prompt = f"""Job Title: {request.job_title}
+
+Job Description:
+{request.job_description[:2000]}
+
+{budget_context}
+
+Suggest exactly {request.num_milestones} milestones for this fixed-price contract.
+Return a JSON object with a "milestones" array. Each milestone has:
+- "description": string (concise deliverable description, max 80 chars)
+- "days_from_start": integer (when this milestone is due, e.g. 14, 30, 45)
+- "amount": number (dollar amount for this milestone)"""
+
+    response = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a project scoping assistant. Given a job description and budget, suggest milestones for a fixed-price Upwork contract. Return JSON.",
+            },
+            {"role": "user", "content": user_prompt},
+        ],
+        response_format={"type": "json_object"},
+        max_tokens=400,
+        temperature=0,
+    )
+
+    data = json.loads(response.choices[0].message.content)
+    raw_milestones = data.get("milestones", [])
+
+    milestones = [
+        MilestoneSuggestion(
+            description=str(m.get("description", ""))[:80],
+            days_from_start=int(m.get("days_from_start", 14)),
+            amount=float(m.get("amount", 0)),
+        )
+        for m in raw_milestones
+    ]
+
+    return SuggestMilestonesResponse(milestones=milestones)
 
 
 # Cover Letter endpoints

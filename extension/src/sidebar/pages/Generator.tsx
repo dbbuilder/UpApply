@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
-import { apiClient, ScreeningAnswerSearchResult, AttachmentData } from '../../lib/api-client';
+import { apiClient, ScreeningAnswerSearchResult, AttachmentData, MilestoneSuggestion } from '../../lib/api-client';
 
 function MatchScoreBadge({ score }: { score: number }) {
   let colorClass = 'score-low';
@@ -76,6 +76,11 @@ export default function GeneratorPage() {
   // State for inclusions and prototype URL
   const [inclusions, setInclusions] = useState('');
   const [prototypeUrl, setPrototypeUrl] = useState('');
+
+  // State for milestones
+  const [milestones, setMilestones] = useState<MilestoneSuggestion[]>([]);
+  const [generatingMilestones, setGeneratingMilestones] = useState(false);
+  const [fillingMilestones, setFillingMilestones] = useState(false);
 
   useEffect(() => {
     // Request current job data from stored cache first
@@ -291,13 +296,65 @@ export default function GeneratorPage() {
 
   const handleFillAll = async () => {
     if (!currentJob?.screeningQuestions) return;
-    for (let i = 0; i < currentJob.screeningQuestions.length; i++) {
-      const q = currentJob.screeningQuestions[i];
-      const answer = questionAnswers[`q${i}`];
-      if (answer) {
-        await handleFillQuestion(q.inputSelector, i, q.question);
-      }
+    const answers = currentJob.screeningQuestions
+      .map((_, i) => ({ index: i, answer: questionAnswers[`q${i}`] }))
+      .filter(a => !!a.answer);
+    if (!answers.length) return;
+    await new Promise<void>((resolve) => {
+      chrome.runtime.sendMessage({ type: 'FILL_ALL_QUESTIONS', answers }, () => resolve());
+    });
+  };
+
+  const handleGenerateAll = async () => {
+    // Generate cover letter
+    await generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined);
+    // Generate all Q&A answers in parallel
+    if (currentJob?.screeningQuestions && currentJob.screeningQuestions.length > 0) {
+      const results = await Promise.allSettled(
+        currentJob.screeningQuestions.map((q, i) =>
+          apiClient.generateScreeningAnswer(
+            q.question,
+            currentJob.title ?? undefined,
+            currentJob.description ?? undefined,
+            currentJob.skills ?? undefined,
+          ).then(r => ({ index: i, answer: r.answer }))
+        )
+      );
+      const newAnswers: Record<string, string> = {};
+      results.forEach(r => {
+        if (r.status === 'fulfilled') {
+          newAnswers[`q${r.value.index}`] = r.value.answer;
+        }
+      });
+      setQuestionAnswers(prev => ({ ...prev, ...newAnswers }));
     }
+  };
+
+  const handleGenerateMilestones = async () => {
+    if (!currentJob) return;
+    setGeneratingMilestones(true);
+    try {
+      const result = await apiClient.suggestMilestones(
+        currentJob.title || '',
+        currentJob.description || '',
+        currentJob.budgetAmount ?? undefined,
+        3,
+      );
+      setMilestones(result.milestones);
+    } catch (err) {
+      console.error('Failed to generate milestones:', err);
+    } finally {
+      setGeneratingMilestones(false);
+    }
+  };
+
+  const handleFillMilestones = async () => {
+    if (!milestones.length) return;
+    setFillingMilestones(true);
+    await new Promise<void>((resolve) => {
+      chrome.runtime.sendMessage({ type: 'FILL_MILESTONES', milestones }, () => resolve());
+    });
+    setFillingMilestones(false);
   };
 
   const handleAddMissingSkill = async (skillName: string) => {
@@ -718,13 +775,22 @@ export default function GeneratorPage() {
                     </p>
                   )}
                 </div>
-                <button
-                  type="button"
-                  onClick={handleGenerate}
-                  className="btn-primary w-full"
-                >
-                  Generate Cover Letter
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleGenerate}
+                    className="btn-outline flex-1"
+                  >
+                    Cover Letter Only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGenerateAll}
+                    className="btn-primary flex-1"
+                  >
+                    Generate All
+                  </button>
+                </div>
               </div>
             )}
 
@@ -915,6 +981,51 @@ export default function GeneratorPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Milestones */}
+            {coverLetter && (
+              <div className="card animate-slide-up">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-medium text-gray-900">Milestones</h4>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleGenerateMilestones}
+                      disabled={generatingMilestones}
+                      className="btn-outline text-xs py-1 px-3 disabled:opacity-60"
+                    >
+                      {generatingMilestones ? 'Generating...' : milestones.length ? 'Regenerate' : 'Generate'}
+                    </button>
+                    {milestones.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleFillMilestones}
+                        disabled={fillingMilestones}
+                        className="btn-primary text-xs py-1 px-3 disabled:opacity-60"
+                      >
+                        {fillingMilestones ? 'Filling...' : 'Fill Milestones ↵'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {milestones.length > 0 && (
+                  <div className="space-y-3">
+                    {milestones.map((ms, i) => (
+                      <div key={i} className="border border-gray-100 rounded-lg p-2 text-sm">
+                        <div className="font-medium text-gray-800">{ms.description}</div>
+                        <div className="flex gap-4 mt-1 text-gray-500 text-xs">
+                          <span>Day {ms.days_from_start}</span>
+                          <span>${ms.amount.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {!milestones.length && (
+                  <p className="text-xs text-gray-400">Click Generate to suggest milestones based on the job scope.</p>
+                )}
               </div>
             )}
           </>

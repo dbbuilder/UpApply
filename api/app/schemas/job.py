@@ -249,3 +249,26 @@ class ContractImportResponse(BaseModel):
     imported: int
     updated: int
     total: int
+
+
+class MilestoneSuggestion(BaseModel):
+    """A single milestone suggestion."""
+
+    description: str
+    days_from_start: int  # e.g. 14, 30, 45
+    amount: float
+
+
+class SuggestMilestonesRequest(BaseModel):
+    """Request to suggest milestones for a fixed-price job."""
+
+    job_title: str
+    job_description: str
+    budget_amount: Optional[str] = None  # e.g. "$500", "$1,500"
+    num_milestones: int = 3
+
+
+class SuggestMilestonesResponse(BaseModel):
+    """Response containing milestone suggestions."""
+
+    milestones: List[MilestoneSuggestion]

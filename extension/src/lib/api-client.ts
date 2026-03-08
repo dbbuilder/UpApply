@@ -320,6 +320,23 @@ class ApiClient {
     });
   }
 
+  async suggestMilestones(
+    jobTitle: string,
+    jobDescription: string,
+    budgetAmount?: string,
+    numMilestones: number = 3
+  ): Promise<{ milestones: MilestoneSuggestion[] }> {
+    return this.request('/api/v1/jobs/suggest-milestones', {
+      method: 'POST',
+      body: {
+        job_title: jobTitle,
+        job_description: jobDescription,
+        budget_amount: budgetAmount,
+        num_milestones: numMilestones,
+      },
+    });
+  }
+
   // Proposals
   async createProposal(data: ProposalCreate) {
     return this.request<Proposal>('/api/v1/proposals', {
@@ -866,6 +883,13 @@ export interface BetaFeedbackResponse {
   page_url?: string;
   extension_version?: string;
   created_at: string;
+}
+
+// Milestone Types
+export interface MilestoneSuggestion {
+  description: string;
+  days_from_start: number;
+  amount: number;
 }
 
 // Search Query Types
