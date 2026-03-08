@@ -118,19 +118,13 @@ async def analyze_skill_match(
     return matches, missing
 
 
-async def find_relevant_memories(
+async def find_relevant_memories_with_embedding(
     db: AsyncSession,
     user_id: str,
-    job_description: str,
-    job_skills: List[str],
+    query_embedding: List[float],
     limit: int = 5,
 ) -> List[Dict]:
-    """Find memories relevant to the job using semantic search."""
-    # Create search text combining description and skills
-    search_text = f"{job_description}\nRequired skills: {', '.join(job_skills)}"
-    query_embedding = await generate_embedding(search_text)
-
-    # Vector similarity search
+    """Find memories relevant to the job using a pre-computed embedding."""
     sql = text("""
         SELECT
             id, title, content, category, skills_demonstrated,
@@ -166,6 +160,126 @@ async def find_relevant_memories(
             })
 
     return memories
+
+
+async def find_relevant_memories(
+    db: AsyncSession,
+    user_id: str,
+    job_description: str,
+    job_skills: List[str],
+    limit: int = 5,
+) -> List[Dict]:
+    """Find memories relevant to the job using semantic search."""
+    # Create search text combining description and skills
+    search_text = f"{job_description}\nRequired skills: {', '.join(job_skills)}"
+    query_embedding = await generate_embedding(search_text)
+    return await find_relevant_memories_with_embedding(
+        db=db, user_id=user_id, query_embedding=query_embedding, limit=limit
+    )
+
+
+async def find_similar_wins(
+    db: AsyncSession,
+    user_id: str,
+    query_embedding: List[float],
+    limit: int = 3,
+) -> List[Dict]:
+    """Find past jobs where user was hired, ranked by similarity to current job."""
+    sql = text("""
+        SELECT j.title, j.description, j.skills_required,
+               1 - (j.embedding <=> CAST(:embedding AS vector)) as similarity
+        FROM jobs j
+        JOIN applications a ON a.job_id = j.id
+        WHERE j.user_id = :user_id
+          AND a.user_id = :user_id
+          AND a.status = 'hired'
+          AND j.embedding IS NOT NULL
+        ORDER BY j.embedding <=> CAST(:embedding AS vector)
+        LIMIT :limit
+    """)
+    result = await db.execute(sql, {
+        "embedding": str(query_embedding),
+        "user_id": user_id,
+        "limit": limit,
+    })
+    wins = []
+    for row in result.fetchall():
+        wins.append({
+            "title": row.title,
+            "description": (row.description or "")[:300],
+            "skills": row.skills_required or [],
+            "similarity": float(row.similarity),
+        })
+    return wins
+
+
+async def score_job_with_llm(
+    job_title: str,
+    job_description: str,
+    profile: UserProfile,
+    similar_wins: List[Dict],
+) -> Optional[float]:
+    """Use gpt-4o-mini to score 0-100 with win rubric. Returns None on failure."""
+    import json
+    from openai import AsyncOpenAI
+    from app.core.config import settings
+
+    if not settings.openai_api_key:
+        return None
+
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+    skills_str = ", ".join([
+        s.get("name", "") for s in (profile.skills or [])[:25] if s.get("name")
+    ])
+
+    if similar_wins:
+        win_context = "\n\nPAST JOBS THIS FREELANCER WAS HIRED FOR (calibration examples):\n"
+        for i, win in enumerate(similar_wins, 1):
+            sim_pct = int(win["similarity"] * 100)
+            win_context += f"{i}. \"{win['title']}\" ({sim_pct}% similar to current job)\n"
+            if win["description"]:
+                win_context += f"   {win['description'][:200]}\n"
+    else:
+        win_context = "\n\n(No past hired jobs recorded yet — score based on profile fit only.)\n"
+
+    bio_snippet = (profile.bio or "")[:400]
+    goals_snippet = (profile.career_goals or "")[:200]
+    desc_snippet = job_description[:1500]
+
+    prompt = f"""You are scoring a freelance Upwork job for this consultant. Be discriminating — most jobs should score 40–70, exceptional fits 85+, poor fits below 35.
+
+CONSULTANT:
+Skills: {skills_str}
+Bio: {bio_snippet}
+Goals: {goals_snippet}
+{win_context}
+JOB TO SCORE:
+Title: {job_title}
+Description: {desc_snippet}
+
+RUBRIC:
+85–100 = Near-perfect match; closely resembles past wins; very high win probability
+65–84  = Strong match; competitive candidate; likely to win
+45–64  = Moderate fit; relevant skills but some gaps
+25–44  = Weak fit; significant skill or domain mismatch
+0–24   = Poor fit; not worth applying
+
+Respond with JSON only (no markdown): {{"score": <integer 0-100>, "reason": "<one sentence max 120 chars>"}}"""
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            max_tokens=80,
+            temperature=0,
+        )
+        data = json.loads(response.choices[0].message.content)
+        score = float(data.get("score", 0))
+        return min(max(score, 0), 100)
+    except Exception:
+        return None
 
 
 def check_deal_breakers(
@@ -361,12 +475,22 @@ async def run_full_analysis(
     """Run complete job analysis pipeline and return consolidated result."""
     skill_matches, missing_skills = await analyze_skill_match(job_skills, profile)
 
-    relevant_memories = await find_relevant_memories(
+    # Generate embedding once and reuse for both memories and win lookup
+    search_text = f"{job_description}\nRequired skills: {', '.join(job_skills)}"
+    query_embedding = await generate_embedding(search_text)
+
+    relevant_memories = await find_relevant_memories_with_embedding(
         db=db,
         user_id=user_id,
-        job_description=job_description,
-        job_skills=job_skills,
+        query_embedding=query_embedding,
         limit=5,
+    )
+
+    similar_wins = await find_similar_wins(
+        db=db,
+        user_id=user_id,
+        query_embedding=query_embedding,
+        limit=3,
     )
 
     deal_breakers = check_deal_breakers(
@@ -386,13 +510,27 @@ async def run_full_analysis(
         budget_amount=budget_amount,
     )
 
-    match_score = calculate_match_score(
+    rule_score = calculate_match_score(
         skill_matches=skill_matches,
         missing_skills=missing_skills,
         relevant_memories=relevant_memories,
         deal_breakers=deal_breakers,
         profile=profile,
     )
+
+    # Use LLM scoring blended with rule-based (70/30) when available
+    job_title = job_description[:80]
+    llm_score = await score_job_with_llm(
+        job_title=job_title,
+        job_description=job_description,
+        profile=profile,
+        similar_wins=similar_wins,
+    )
+
+    if llm_score is not None:
+        match_score = round(0.7 * llm_score + 0.3 * rule_score, 1)
+    else:
+        match_score = rule_score
 
     recommendation = generate_recommendation(match_score, deal_breakers, concerns)
 
