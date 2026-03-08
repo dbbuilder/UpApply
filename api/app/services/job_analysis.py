@@ -213,11 +213,38 @@ async def find_similar_wins(
     return wins
 
 
+async def find_similar_highly_rated(
+    db: AsyncSession,
+    user_id: str,
+    query_embedding: List[float],
+    limit: int = 3,
+) -> List[Dict]:
+    """Find jobs the user rated 4-5 stars — strong positive signal for scoring calibration."""
+    from app.models.job_review import JobReview
+    result = await db.execute(
+        select(JobReview).where(
+            JobReview.user_id == user_id,
+            JobReview.user_rating >= 4,
+        ).order_by(JobReview.created_at.desc()).limit(limit * 3)
+    )
+    reviews = result.scalars().all()
+    return [
+        {
+            "job_title": r.job_title,
+            "user_comment": r.user_comment or "",
+            "ai_score": r.ai_score,
+            "chips": r.chips or [],
+        }
+        for r in reviews[:limit]
+    ]
+
+
 async def score_job_with_llm(
     job_title: str,
     job_description: str,
     profile: UserProfile,
     similar_wins: List[Dict],
+    highly_rated: List[Dict] = [],
 ) -> Optional[float]:
     """Use gpt-4o-mini to score 0-100 with win rubric. Returns None on failure."""
     import json
@@ -243,6 +270,14 @@ async def score_job_with_llm(
     else:
         win_context = "\n\n(No past hired jobs recorded yet — score based on profile fit only.)\n"
 
+    if highly_rated:
+        highly_rated_context = "\nJobs this freelancer rated 4-5 stars (strong personal fit):\n"
+        for r in highly_rated[:3]:
+            note = r.get("user_comment", "")
+            highly_rated_context += f'  - "{r["job_title"]}"' + (f' — note: "{note}"' if note else "") + "\n"
+    else:
+        highly_rated_context = ""
+
     bio_snippet = (profile.bio or "")[:400]
     goals_snippet = (profile.career_goals or "")[:200]
     desc_snippet = job_description[:1500]
@@ -253,7 +288,7 @@ CONSULTANT:
 Skills: {skills_str}
 Bio: {bio_snippet}
 Goals: {goals_snippet}
-{win_context}
+{win_context}{highly_rated_context}
 JOB TO SCORE:
 Title: {job_title}
 Description: {desc_snippet}
@@ -493,6 +528,13 @@ async def run_full_analysis(
         limit=3,
     )
 
+    highly_rated = await find_similar_highly_rated(
+        db=db,
+        user_id=user_id,
+        query_embedding=query_embedding,
+        limit=3,
+    )
+
     deal_breakers = check_deal_breakers(
         job_description=job_description,
         job_skills=job_skills,
@@ -525,6 +567,7 @@ async def run_full_analysis(
         job_description=job_description,
         profile=profile,
         similar_wins=similar_wins,
+        highly_rated=highly_rated,
     )
 
     if llm_score is not None:

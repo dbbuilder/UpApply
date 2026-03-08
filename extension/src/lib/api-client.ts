@@ -5,7 +5,7 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://upapply-api.onrender.com';
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   body?: unknown;
   headers?: Record<string, string>;
 }
@@ -459,6 +459,38 @@ class ApiClient {
       body: { queries },
     });
   }
+
+  // Job Reviews
+  async upsertJobReview(data: {
+    upwork_job_url: string;
+    job_title: string;
+    ai_score?: number;
+    chips?: string[];
+    budget_amount?: string | null;
+    budget_type?: string | null;
+    scored_at?: string;
+  }) {
+    return this.request<JobReview>('/api/v1/job-reviews', {
+      method: 'POST',
+      body: data,
+    });
+  }
+
+  async listJobReviews(params?: { sort?: string; min_score?: number; limit?: number }) {
+    const qs = new URLSearchParams();
+    if (params?.sort) qs.set('sort', params.sort);
+    if (params?.min_score != null) qs.set('min_score', String(params.min_score));
+    if (params?.limit) qs.set('limit', String(params.limit));
+    const q = qs.toString();
+    return this.request<JobReviewListResponse>(`/api/v1/job-reviews${q ? `?${q}` : ''}`);
+  }
+
+  async rateJobReview(id: string, data: JobReviewRateRequest) {
+    return this.request<JobReview>(`/api/v1/job-reviews/${id}/rate`, {
+      method: 'PATCH',
+      body: data,
+    });
+  }
 }
 
 export class ApiError extends Error {
@@ -908,6 +940,32 @@ export interface SearchQuery {
   is_stale: boolean;
   is_low_performer: boolean;
   created_at: string;
+}
+
+// Job Review Types
+export interface JobReview {
+  id: string;
+  upwork_job_url: string;
+  upwork_job_id?: string;
+  job_title: string;
+  ai_score?: number;
+  chips?: string[];
+  budget_amount?: string;
+  budget_type?: string;
+  user_rating?: number;
+  user_comment?: string;
+  scored_at?: string;
+  created_at: string;
+}
+
+export interface JobReviewListResponse {
+  reviews: JobReview[];
+  total: number;
+}
+
+export interface JobReviewRateRequest {
+  user_rating: number;
+  user_comment?: string;
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

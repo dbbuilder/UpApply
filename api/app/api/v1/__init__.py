@@ -11,6 +11,7 @@ from app.api.v1.screening_answers import router as screening_answers_router
 from app.api.v1.proposals import router as proposals_router
 from app.api.v1.beta_feedback import router as beta_feedback_router
 from app.api.v1.search_queries import router as search_queries_router
+from app.api.v1.job_reviews import router as job_reviews_router
 
 router = APIRouter()
 
@@ -24,3 +25,4 @@ router.include_router(screening_answers_router, prefix="/screening-answers", tag
 router.include_router(proposals_router, prefix="/proposals", tags=["Proposals"])
 router.include_router(beta_feedback_router, prefix="/beta-feedback", tags=["Beta Feedback"])
 router.include_router(search_queries_router, prefix="/search-queries", tags=["Search Queries"])
+router.include_router(job_reviews_router, prefix="/job-reviews", tags=["Job Reviews"])

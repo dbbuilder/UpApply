@@ -1055,6 +1055,29 @@ function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[]
     entries.slice(0, 500).forEach(e => { capped[e.url] = e; });
     chrome.storage.local.set({ scoredJobsCache: capped });
   });
+
+  // Fire-and-forget write to API job-reviews for persistence across sessions
+  _getAuthToken().then(token => {
+    if (!token) return;
+    const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
+    // Parse budget from chips
+    const budgetChip = chips.find(c => c.startsWith('$'));
+    const budgetType = budgetChip?.includes('/hr') ? 'hourly' : budgetChip ? 'fixed' : undefined;
+    fetch(`${apiBase}/api/v1/job-reviews`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({
+        upwork_job_url: item.jobUrl,
+        job_title: item.title || '',
+        ai_score: score,
+        chips,
+        budget_amount: budgetChip || null,
+        budget_type: budgetType || null,
+        scored_at: new Date().toISOString(),
+      }),
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => {}); // silent — never block badge display
+  }).catch(() => {});
 }
 
 async function _processNotifQueue(): Promise<void> {
