@@ -860,6 +860,7 @@ interface JobFetchResult {
   budgetAmount: string | null;
   budgetType: 'hourly' | 'fixed' | null;
   skills: string[];
+  clientCountry: string | null;
 }
 
 /**
@@ -887,6 +888,7 @@ async function _fetchJobViaGraphQL(jobUid: string): Promise<JobFetchResult | nul
       hourlyBudgetMin hourlyBudgetMax
       amount{ amount currencyCode }
       skills{ prettyName }
+      client{ location{ country } }
     }
   }`;
 
@@ -927,7 +929,9 @@ async function _fetchJobViaGraphQL(jobUid: string): Promise<JobFetchResult | nul
   const description = (job.description as string) || '';
   const skillsRaw = (job.skills as Array<{ prettyName?: string }> | null) || [];
   const skills = skillsRaw.map(s => s.prettyName || '').filter(Boolean);
-  return { description, pageText: description, budgetAmount, budgetType, skills };
+  const clientData = job.client as { location?: { country?: string } } | null;
+  const clientCountry = clientData?.location?.country || null;
+  return { description, pageText: description, budgetAmount, budgetType, skills, clientCountry };
 }
 
 // _fetchJobViaHTML removed: Upwork is CSR so the HTML shell is nearly empty,
@@ -947,7 +951,7 @@ async function _fetchJobData(jobUrl: string): Promise<JobFetchResult> {
       return result;
     }
   }
-  return { description: '', pageText: '', budgetAmount: null, budgetType: null, skills: [] };
+  return { description: '', pageText: '', budgetAmount: null, budgetType: null, skills: [], clientCountry: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -975,7 +979,7 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
   console.log(`[UpApply] score START  ${uid} "${item.title.slice(0, 40)}"`);
   try {
     // 1. Persistent cache check (chrome.storage.local, no SW round trip)
-    const CACHE_KEY = `sc_v6_${item.jobUrl}`;
+    const CACHE_KEY = `sc_v7_${item.jobUrl}`;
     const CACHE_TTL = 24 * 60 * 60 * 1000;
     const cacheStore = await chrome.storage.local.get(CACHE_KEY);
     const cached = cacheStore[CACHE_KEY] as { score: number; chips: string[]; reason?: string; ts: number } | undefined;
@@ -1014,6 +1018,7 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
         title: item.title || 'Job',
         description: description || item.title,
         skills_required: jobData.skills.length > 0 ? jobData.skills : undefined,
+        client_info: jobData.clientCountry ? { location: jobData.clientCountry } : undefined,
       }),
       signal: AbortSignal.timeout(25_000),
     });

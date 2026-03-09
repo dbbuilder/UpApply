@@ -1,4 +1,5 @@
 """Job analysis and matching service."""
+import re
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy import select, text
@@ -8,6 +9,85 @@ from app.core.embeddings import generate_embedding
 from app.models.user import UserProfile
 from app.models.memory import Memory
 from app.schemas.job import SkillMatch
+
+
+# ---------------------------------------------------------------------------
+# Geographic scoring tiers
+# ---------------------------------------------------------------------------
+_GEO_US = {"united states", "usa"}
+
+_GEO_TIER2 = {
+    "united kingdom", "uk", "great britain", "canada", "australia", "new zealand",
+    "germany", "france", "netherlands", "sweden", "norway", "denmark", "switzerland",
+    "austria", "ireland", "belgium", "finland", "spain", "portugal", "italy",
+    "singapore", "japan", "south korea", "hong kong", "taiwan",
+    "brazil", "mexico", "argentina", "colombia", "chile", "peru",
+    "poland", "czech republic", "czechia", "hungary", "romania",
+}
+
+_GEO_LOW = {
+    "india", "pakistan", "bangladesh", "sri lanka", "nepal",
+    "saudi arabia", "uae", "united arab emirates", "qatar", "kuwait",
+    "bahrain", "oman", "jordan", "lebanon", "iraq", "iran", "yemen",
+    "egypt", "nigeria", "kenya", "ghana", "ethiopia", "tanzania",
+    "south africa", "uganda", "cameroon", "senegal", "zimbabwe",
+    "algeria", "morocco", "tunisia", "libya",
+}
+
+
+def _geo_modifier(location: Optional[str]) -> Tuple[int, Optional[str]]:
+    """Return (score_delta, label) based on client country."""
+    if not location:
+        return 0, None
+    loc = location.lower().strip()
+    if any(c in loc for c in _GEO_US):
+        return 15, "US client (+15)"
+    if any(c in loc for c in _GEO_TIER2):
+        return 5, f"{location} client (+5)"
+    if any(c in loc for c in _GEO_LOW):
+        return -15, f"{location} client (-15)"
+    return 0, None
+
+
+# ---------------------------------------------------------------------------
+# Language requirement detection
+# ---------------------------------------------------------------------------
+_NON_ENGLISH_LANGUAGES = [
+    "spanish", "french", "german", "portuguese", "arabic", "mandarin",
+    "chinese", "dutch", "italian", "russian", "japanese", "korean",
+    "hindi", "urdu", "turkish", "polish", "vietnamese", "thai",
+    "hebrew", "persian", "farsi", "indonesian", "malay", "tagalog",
+    "greek", "romanian", "ukrainian", "czech", "hungarian",
+]
+
+_LANG_PATTERNS = [
+    re.compile(rf"\b{lang}\b.*?\b(required|fluency|proficiency|speaker|writing|written)\b")
+    for lang in _NON_ENGLISH_LANGUAGES
+] + [
+    re.compile(rf"\b(fluent|native|proficient)\b.*?\b{lang}\b")
+    for lang in _NON_ENGLISH_LANGUAGES
+] + [
+    re.compile(rf"\bmust\s+(?:speak|write)\s+{lang}\b")
+    for lang in _NON_ENGLISH_LANGUAGES
+] + [
+    re.compile(r"\bbilingual\b(?!\s+english)"),
+]
+
+
+def _language_modifier(description: str) -> Tuple[int, Optional[str]]:
+    """Return (score_delta, label) if a non-English language is required."""
+    desc_lower = description.lower()
+    for i, pattern in enumerate(_LANG_PATTERNS):
+        m = pattern.search(desc_lower)
+        if m:
+            # Identify which language matched
+            lang_idx = i % len(_NON_ENGLISH_LANGUAGES)
+            if i >= len(_NON_ENGLISH_LANGUAGES) * 3:
+                label = "bilingual required (-20)"
+            else:
+                label = f"{_NON_ENGLISH_LANGUAGES[lang_idx].title()} required (-20)"
+            return -20, label
+    return 0, None
 
 
 @dataclass
@@ -577,6 +657,19 @@ async def run_full_analysis(
     else:
         match_score = rule_score
 
+    # Apply geo and language modifiers to the blended score
+    client_location = (client_info or {}).get("location") if client_info else None
+    geo_delta, geo_label = _geo_modifier(client_location)
+    lang_delta, lang_label = _language_modifier(job_description)
+    match_score = round(min(max(match_score + geo_delta + lang_delta, 0), 100), 1)
+
+    # Prepend modifier notes to the reason line
+    modifier_notes = [l for l in [geo_label, lang_label] if l]
+    reason = llm_reason
+    if modifier_notes:
+        prefix = " | ".join(modifier_notes)
+        reason = f"{prefix} — {reason}" if reason else prefix
+
     recommendation = generate_recommendation(match_score, deal_breakers, concerns)
 
     return AnalysisResult(
@@ -588,7 +681,7 @@ async def run_full_analysis(
         deal_breaker_warnings=deal_breakers,
         relevant_memories=relevant_memories,
         recommendation=recommendation,
-        reason=llm_reason,
+        reason=reason,
     )
 
 
