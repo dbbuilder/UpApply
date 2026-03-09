@@ -197,6 +197,26 @@ class ApiClient {
     });
   }
 
+  async importChatGPTConversations(file: File): Promise<{
+    memories_imported: number;
+    proposals_imported: number;
+    conversations_processed: number;
+    skipped: number;
+  }> {
+    const stored = await chrome.storage.local.get('authToken');
+    const token = stored.authToken as string | undefined;
+    const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
+    const formData = new FormData();
+    formData.append('file', file);
+    const resp = await fetch(`${apiBase}/api/v1/import/import-chatgpt-conversations`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: formData,
+    });
+    if (!resp.ok) throw new Error(`API ${resp.status}`);
+    return resp.json();
+  }
+
   // Jobs
   async analyzeJob(data: JobAnalysisRequest) {
     return this.request<JobAnalysisResponse>('/api/v1/jobs/analyze', {

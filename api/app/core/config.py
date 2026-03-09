@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     default_model: str = "gpt-4o"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
+    anthropic_api_key: str = ""
+    cover_letter_model: str = "claude-sonnet-4-6"
 
     # Security
     secret_key: str = "dev-secret-key-change-in-production"

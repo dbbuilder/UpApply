@@ -20,13 +20,19 @@ export default function MemoriesPage() {
   const [newSkill, setNewSkill] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  // ChatGPT import
+  // ChatGPT memory.json import
   const [showImport, setShowImport] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState<{ count: number; samples: string[] } | null>(null);
   const [parsedMemories, setParsedMemories] = useState<MemoryCreate[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ChatGPT conversations.json import
+  const [showConvImport, setShowConvImport] = useState(false);
+  const [convImporting, setConvImporting] = useState(false);
+  const [convStatus, setConvStatus] = useState<string | null>(null);
+  const convFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadMemories();
@@ -191,6 +197,25 @@ export default function MemoriesPage() {
     }
   };
 
+  const handleConvImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setConvStatus('Uploading and analyzing conversations… this may take a minute.');
+    setConvImporting(true);
+    try {
+      const result = await apiClient.importChatGPTConversations(file);
+      setConvStatus(
+        `Done! ${result.memories_imported} memories + ${result.proposals_imported} cover letter examples extracted from ${result.conversations_processed} conversations.`
+      );
+      await loadMemories();
+    } catch {
+      setConvStatus('Import failed. Check that you selected conversations.json from your ChatGPT export.');
+    } finally {
+      setConvImporting(false);
+      if (convFileRef.current) convFileRef.current.value = '';
+    }
+  };
+
   const displayMemories = searchQuery && searchResults.length > 0 ? searchResults : memories;
 
   return (
@@ -302,6 +327,59 @@ export default function MemoriesPage() {
                 >
                   {importing ? 'Importing…' : `Import ${parsedMemories.length} memories`}
                 </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* conversations.json import — AI-extracted memories + cover letters */}
+        <div className="border border-dashed border-emerald-200 rounded-lg">
+          <button
+            type="button"
+            onClick={() => { setShowConvImport((v) => !v); setConvStatus(null); }}
+            className="w-full flex items-center justify-between px-4 py-3 text-sm text-gray-600 hover:text-gray-900"
+          >
+            <span className="font-medium">🤖 Import conversations.json <span className="text-emerald-600 font-semibold">(AI-powered)</span></span>
+            <span className="text-gray-400 text-xs">{showConvImport ? '▲' : '▼'}</span>
+          </button>
+
+          {showConvImport && (
+            <div className="px-4 pb-4 space-y-3 border-t border-emerald-100">
+              <div className="bg-emerald-50 rounded-lg p-3 space-y-2 text-xs text-emerald-800">
+                <p className="font-semibold">Extracts memories + cover letter examples from your full chat history:</p>
+                <ol className="space-y-1 list-decimal list-inside">
+                  <li>Export your data from <span className="font-mono bg-emerald-100 px-1 rounded">chatgpt.com</span> → Settings → Data Controls</li>
+                  <li>Unzip the download and find <span className="font-mono bg-emerald-100 px-1 rounded">conversations.json</span></li>
+                  <li>Upload it below — Claude reads every conversation and pulls out project stories, wins, and cover letters</li>
+                </ol>
+                <p className="text-emerald-600">This takes 1-3 minutes depending on how many conversations you have.</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Select conversations.json
+                </label>
+                <input
+                  ref={convFileRef}
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={handleConvImport}
+                  disabled={convImporting}
+                  className="block w-full text-xs text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 cursor-pointer disabled:opacity-50"
+                />
+              </div>
+
+              {convImporting && (
+                <div className="flex items-center gap-2 text-xs text-emerald-700">
+                  <div className="w-3 h-3 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                  Analyzing with Claude…
+                </div>
+              )}
+
+              {convStatus && (
+                <p className={`text-xs ${convStatus.includes('Done') ? 'text-emerald-600 font-medium' : convStatus.includes('failed') ? 'text-red-500' : 'text-gray-500'}`}>
+                  {convStatus}
+                </p>
               )}
             </div>
           )}

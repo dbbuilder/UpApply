@@ -1,14 +1,17 @@
-"""Cover letter generation service using OpenAI."""
+"""Cover letter generation service using Claude (Anthropic)."""
 import re
 from typing import Dict, Any, List, Optional
 
-from openai import AsyncOpenAI
+from anthropic import AsyncAnthropic
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import settings
-from app.core.embeddings import get_openai_client
 from app.models.user import UserProfile
 from app.schemas.job import SkillMatch
+
+
+def _get_anthropic_client() -> AsyncAnthropic:
+    return AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 
 def clean_cover_letter(content: str) -> str:
@@ -325,13 +328,8 @@ async def generate_cover_letter(
     inclusions: Optional[str] = None,
     prototype_url: Optional[str] = None,
 ) -> str:
-    """Generate a personalized cover letter using OpenAI.
-
-    Args:
-        past_proposals: List of past proposals for similar jobs to use as style examples.
-            Successful proposals (was_hired=True) are weighted more heavily.
-    """
-    client = get_openai_client()
+    """Generate a personalized cover letter using Claude."""
+    client = _get_anthropic_client()
 
     system_prompt = build_system_prompt(profile)
     user_prompt = build_user_prompt(
@@ -347,17 +345,15 @@ async def generate_cover_letter(
         inclusions=inclusions,
     )
 
-    response = await client.chat.completions.create(
-        model=model or settings.default_model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+    response = await client.messages.create(
+        model=model or settings.cover_letter_model,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_prompt}],
         max_tokens=1200,
         temperature=0.75,
     )
 
-    raw_content = response.choices[0].message.content.strip()
+    raw_content = response.content[0].text.strip()
     cleaned = clean_cover_letter(raw_content)
     with_prototype = append_prototype_url(cleaned, prototype_url)
     return append_closing(with_prototype, profile.preferred_closing)
@@ -375,8 +371,8 @@ async def regenerate_cover_letter(
     profile: UserProfile,
     model: Optional[str] = None,
 ) -> str:
-    """Regenerate cover letter with user feedback."""
-    client = get_openai_client()
+    """Regenerate cover letter with user feedback using Claude."""
+    client = _get_anthropic_client()
 
     system_prompt = build_system_prompt(profile)
     user_prompt = f"""Previous cover letter:
@@ -389,16 +385,14 @@ Job: {job_title}
 
 Please revise the cover letter based on this feedback while maintaining personalization for the job. Remember: NO salutation line, NO signature, NO placeholders."""
 
-    response = await client.chat.completions.create(
-        model=model or settings.default_model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+    response = await client.messages.create(
+        model=model or settings.cover_letter_model,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_prompt}],
         max_tokens=1000,
         temperature=0.7,
     )
 
-    raw_content = response.choices[0].message.content.strip()
+    raw_content = response.content[0].text.strip()
     cleaned = clean_cover_letter(raw_content)
     return append_closing(cleaned, profile.preferred_closing)
