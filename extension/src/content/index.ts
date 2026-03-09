@@ -1369,10 +1369,19 @@ function _scrapeContracts(): ScrapedContract[] {
 async function _scrapeAllContracts(): Promise<ScrapedContract[]> {
   const all: ScrapedContract[] = [];
 
-  const maxPages = parseInt(
-    document.querySelector('[data-ev-max_page_count]')?.getAttribute('data-ev-max_page_count') || '1',
-    10,
-  );
+  // Detect total pages from pagination buttons (most reliable — data-ev-max_page_count
+  // is not present on the live contracts page).
+  // "Current page 1 of N" sr-only text is the most explicit signal; fall back to
+  // counting the numbered page buttons.
+  let maxPages = 1;
+  const srOnly = document.querySelector('.air3-pagination-nr-btn.is-active .sr-only');
+  const srMatch = srOnly?.textContent?.match(/of\s+(\d+)/i);
+  if (srMatch) {
+    maxPages = parseInt(srMatch[1], 10);
+  } else {
+    const pageItems = document.querySelectorAll('[data-test="pagination-item"]');
+    if (pageItems.length > 0) maxPages = pageItems.length;
+  }
 
   const reportPage = (page: number) => {
     chrome.storage.local.set({ contractImportProgress: { stage: 'scraping', page, total: maxPages } });
