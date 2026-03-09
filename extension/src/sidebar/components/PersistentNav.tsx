@@ -1,6 +1,6 @@
 import { useAppStore } from '../store';
 
-type NavMode = 'me' | 'find' | 'apply' | 'track';
+type NavMode = 'me' | 'find' | 'apply' | 'track' | 'go';
 
 type ViewType =
   | 'auth'
@@ -9,6 +9,7 @@ type ViewType =
   | 'me'
   | 'find'
   | 'track'
+  | 'go'
   | 'memories'
   | 'history'
   | 'analytics'
@@ -19,11 +20,13 @@ type ViewType =
 const ME_VIEWS: string[] = ['me', 'profile', 'skills', 'memories', 'setup'];
 const FIND_VIEWS: string[] = ['find', 'scored'];
 const TRACK_VIEWS: string[] = ['track', 'history', 'analytics', 'feedback'];
+const GO_VIEWS: string[] = ['go'];
 
 function getMode(view: string): NavMode {
   if (ME_VIEWS.includes(view)) return 'me';
   if (FIND_VIEWS.includes(view)) return 'find';
   if (TRACK_VIEWS.includes(view)) return 'track';
+  if (GO_VIEWS.includes(view)) return 'go';
   return 'apply';
 }
 
@@ -41,10 +44,11 @@ export default function PersistentNav() {
   const hasJob = !!currentJob?.title;
 
   const items: NavItem[] = [
-    { mode: 'me', icon: '👤', label: 'Me', targetView: 'me' },
-    { mode: 'find', icon: '🔍', label: 'Find', targetView: 'find' },
+    { mode: 'me',    icon: '👤', label: 'Me',    targetView: 'me' },
+    { mode: 'find',  icon: '🔍', label: 'Find',  targetView: 'find' },
     { mode: 'apply', icon: '✍️', label: 'Apply', targetView: 'generator', dot: hasJob },
     { mode: 'track', icon: '📊', label: 'Track', targetView: 'track' },
+    { mode: 'go',    icon: '🔗', label: 'Go',    targetView: 'go' },
   ];
 
   return (

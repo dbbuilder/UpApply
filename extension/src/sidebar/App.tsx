@@ -13,6 +13,7 @@ import EditProfilePage from './pages/EditProfile';
 import MePage from './pages/MePage';
 import FindPage from './pages/FindPage';
 import TrackPage from './pages/TrackPage';
+import GoPage from './pages/GoPage';
 
 function App() {
   const { currentView, isLoading, checkAuth } = useAppStore();
@@ -43,6 +44,8 @@ function App() {
         return <FindPage />;
       case 'track':
         return <TrackPage />;
+      case 'go':
+        return <GoPage />;
       case 'memories':
         return <MemoriesPage />;
       case 'history':

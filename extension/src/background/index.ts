@@ -667,6 +667,53 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
       })();
       return true;
+
+    // Navigate the active tab to the contracts page, wait for load, then import.
+    // This lets the sidebar trigger a full import without the user visiting the page first.
+    case 'NAVIGATE_AND_IMPORT_CONTRACTS':
+      (async () => {
+        try {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          const tabId = tabs[0]?.id;
+          if (!tabId) { sendResponse({ success: false, error: 'No active tab' }); return; }
+
+          await chrome.tabs.update(tabId, { url: 'https://www.upwork.com/nx/wm/freelancer/contracts' });
+          await waitForTabLoad(tabId, 20_000);
+          // Give Vue time to render the contract sections
+          await new Promise(r => setTimeout(r, 2500));
+
+          const scrapeResult = await new Promise<{ success: boolean; data?: unknown; error?: string }>(resolve => {
+            chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_CONTRACTS' }, (resp) => {
+              if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
+              else resolve(resp || { success: false, error: 'No response' });
+            });
+          });
+
+          if (!scrapeResult?.success || !Array.isArray(scrapeResult.data)) {
+            sendResponse({ success: false, error: scrapeResult?.error || 'No contracts found on page' });
+            return;
+          }
+
+          const stored = await chrome.storage.local.get('authToken');
+          const token = stored.authToken as string | undefined;
+          if (!token) { sendResponse({ success: false, error: 'Not logged in' }); return; }
+
+          const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
+          const resp = await fetch(`${apiBase}/api/v1/jobs/import-contracts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ contracts: scrapeResult.data }),
+            signal: AbortSignal.timeout(30_000),
+          });
+
+          if (!resp.ok) { sendResponse({ success: false, error: `API ${resp.status}` }); return; }
+          const data = await resp.json();
+          sendResponse({ success: true, ...data });
+        } catch (err) {
+          sendResponse({ success: false, error: String(err) });
+        }
+      })();
+      return true;
   }
 
   return false;
