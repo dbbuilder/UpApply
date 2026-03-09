@@ -1396,24 +1396,32 @@ async function _scrapeAllContracts(): Promise<ScrapedContract[]> {
 
     nextBtn.click();
 
-    // Wait for the active page number to change to `page`
+    // Step 1: wait for the active page button to show the new page number
     await new Promise<void>(resolve => {
-      const deadline = Date.now() + 6000;
+      const deadline = Date.now() + 8000;
       const check = () => {
         const active = document.querySelector('.air3-pagination-nr-btn.is-active span[aria-hidden="true"]');
-        if (active?.textContent?.trim() === String(page)) {
-          resolve();
-        } else if (Date.now() > deadline) {
-          resolve();
-        } else {
-          setTimeout(check, 200);
-        }
+        if (active?.textContent?.trim() === String(page)) resolve();
+        else if (Date.now() > deadline) resolve();
+        else setTimeout(check, 200);
       };
       setTimeout(check, 300);
     });
 
-    // Extra render time for the contract sections to appear
-    await new Promise(r => setTimeout(r, 800));
+    // Step 2: wait for Upwork to remove old sections and render new ones.
+    // Sections briefly drop to 0 between pages — poll until they reappear.
+    await new Promise<void>(resolve => {
+      const deadline = Date.now() + 6000;
+      let seenEmpty = false;
+      const check = () => {
+        const count = document.querySelectorAll('section[data-test^="contract-"]').length;
+        if (count === 0) seenEmpty = true;
+        if ((seenEmpty && count > 0) || Date.now() > deadline) resolve();
+        else setTimeout(check, 100);
+      };
+      setTimeout(check, 100);
+    });
+
     reportPage(page);
     all.push(..._scrapeContracts());
   }
