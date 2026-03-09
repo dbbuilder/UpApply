@@ -1227,15 +1227,12 @@ function _handleMutations(): void {
 
   const isNotifPage = currentPath.includes('/notifications');
   const isSavedPage = currentPath.includes('/nx/search/jobs');
-  const hasDropdown = !!document.querySelector('ul[data-cy="notifications-list"]');
   const hasRows     = !!document.querySelector('.notification-row a[href*="/jobs/~"]');
   const hasTiles    = !!document.querySelector('article[data-test="JobTile"]');
 
-  // Notification button: dropdown open OR full notifications page with rows.
-  // Don't re-inject while scoring is active — avoids button flicker and
-  // prevents _notifTotal diverging from items.length mid-run.
-  const hasNotifContent = hasDropdown || (isNotifPage && hasRows);
-  if (hasNotifContent && !_notifProcessing) {
+  // Notification button: only show on the dedicated notifications page, never on
+  // other pages just because the bell dropdown happens to be open.
+  if (isNotifPage && hasRows && !_notifProcessing) {
     _injectScoreButton();
   } else if (_scoreButtonInjected && !_notifProcessing) {
     document.getElementById('ua-score-btn')?.remove();
