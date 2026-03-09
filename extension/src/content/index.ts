@@ -975,7 +975,7 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
   console.log(`[UpApply] score START  ${uid} "${item.title.slice(0, 40)}"`);
   try {
     // 1. Persistent cache check (chrome.storage.local, no SW round trip)
-    const CACHE_KEY = `sc_v4_${item.jobUrl}`;
+    const CACHE_KEY = `sc_v5_${item.jobUrl}`;
     const CACHE_TTL = 24 * 60 * 60 * 1000;
     const cacheStore = await chrome.storage.local.get(CACHE_KEY);
     const cached = cacheStore[CACHE_KEY] as { score: number; chips: string[]; ts: number } | undefined;

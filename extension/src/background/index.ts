@@ -544,7 +544,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'CHECK_NOTIF_CACHE':
       (async () => {
         const { jobUrl } = message as { jobUrl: string };
-        const CACHE_VERSION = 'v4';
+        const CACHE_VERSION = 'v5';
         const cacheKey = `sc_${CACHE_VERSION}_${jobUrl}`;
         const CACHE_TTL = 24 * 60 * 60 * 1000;
         const cacheStore = await chrome.storage.local.get(cacheKey);
@@ -572,7 +572,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           };
 
           // Cache check
-          const CACHE_VERSION = 'v4';
+          const CACHE_VERSION = 'v5';
           const cacheKey = `sc_${CACHE_VERSION}_${jobUrl}`;
           const CACHE_TTL = 24 * 60 * 60 * 1000;
           const cacheStore = await chrome.storage.local.get(cacheKey);
