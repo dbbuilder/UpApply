@@ -679,8 +679,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
           await chrome.tabs.update(tabId, { url: 'https://www.upwork.com/nx/wm/freelancer/contracts' });
           await waitForTabLoad(tabId, 20_000);
-          // Give Vue time to render the contract sections
-          await new Promise(r => setTimeout(r, 2500));
+          // Give Vue time to render the contract sections before scraping starts
+          await new Promise(r => setTimeout(r, 3000));
 
           const scrapeResult = await new Promise<{ success: boolean; data?: unknown; error?: string }>(resolve => {
             chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_CONTRACTS' }, (resp) => {

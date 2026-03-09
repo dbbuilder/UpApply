@@ -1361,6 +1361,51 @@ function _scrapeContracts(): ScrapedContract[] {
   return results;
 }
 
+/**
+ * Click through all pagination pages and collect every contract.
+ * Uses data-ev-max_page_count to know how many pages exist, then
+ * clicks [data-test="next-page"] and waits for Vue to re-render each page.
+ */
+async function _scrapeAllContracts(): Promise<ScrapedContract[]> {
+  const all: ScrapedContract[] = [];
+
+  const maxPages = parseInt(
+    document.querySelector('[data-ev-max_page_count]')?.getAttribute('data-ev-max_page_count') || '1',
+    10,
+  );
+
+  all.push(..._scrapeContracts());
+
+  for (let page = 2; page <= maxPages; page++) {
+    const nextBtn = document.querySelector<HTMLButtonElement>('[data-test="next-page"]');
+    if (!nextBtn || nextBtn.disabled || nextBtn.classList.contains('is-disabled')) break;
+
+    nextBtn.click();
+
+    // Wait for the active page number to change to `page`
+    await new Promise<void>(resolve => {
+      const deadline = Date.now() + 6000;
+      const check = () => {
+        const active = document.querySelector('.air3-pagination-nr-btn.is-active span[aria-hidden="true"]');
+        if (active?.textContent?.trim() === String(page)) {
+          resolve();
+        } else if (Date.now() > deadline) {
+          resolve();
+        } else {
+          setTimeout(check, 200);
+        }
+      };
+      setTimeout(check, 300);
+    });
+
+    // Extra render time for the contract sections to appear
+    await new Promise(r => setTimeout(r, 800));
+    all.push(..._scrapeContracts());
+  }
+
+  return all;
+}
+
 function _injectContractImportButton(): void {
   if (_contractImportBtnInjected) return;
   _contractImportBtnInjected = true;
@@ -1684,13 +1729,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     case 'SCRAPE_CONTRACTS': {
-      try {
-        const data = _scrapeContracts();
-        sendResponse({ success: true, data, url: window.location.href });
-      } catch (err) {
-        sendResponse({ success: false, error: String(err) });
-      }
-      break;
+      (async () => {
+        try {
+          const data = await _scrapeAllContracts();
+          sendResponse({ success: true, data, url: window.location.href });
+        } catch (err) {
+          sendResponse({ success: false, error: String(err) });
+        }
+      })();
+      return true; // async — keep message channel open
     }
 
     case 'GET_PAGE_TYPE':
