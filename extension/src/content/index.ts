@@ -1374,6 +1374,11 @@ async function _scrapeAllContracts(): Promise<ScrapedContract[]> {
     10,
   );
 
+  const reportPage = (page: number) => {
+    chrome.storage.local.set({ contractImportProgress: { stage: 'scraping', page, total: maxPages } });
+  };
+
+  reportPage(1);
   all.push(..._scrapeContracts());
 
   for (let page = 2; page <= maxPages; page++) {
@@ -1400,6 +1405,7 @@ async function _scrapeAllContracts(): Promise<ScrapedContract[]> {
 
     // Extra render time for the contract sections to appear
     await new Promise(r => setTimeout(r, 800));
+    reportPage(page);
     all.push(..._scrapeContracts());
   }
 

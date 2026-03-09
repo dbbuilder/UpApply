@@ -672,17 +672,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // This lets the sidebar trigger a full import without the user visiting the page first.
     case 'NAVIGATE_AND_IMPORT_CONTRACTS':
       (async () => {
+        const setProgress = (p: Record<string, unknown>) =>
+          chrome.storage.local.set({ contractImportProgress: p });
+
         try {
           const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
           const tabId = tabs[0]?.id;
           if (!tabId) { sendResponse({ success: false, error: 'No active tab' }); return; }
 
+          await setProgress({ stage: 'navigating' });
           await chrome.tabs.update(tabId, { url: 'https://www.upwork.com/nx/wm/freelancer/contracts' });
           await waitForTabLoad(tabId, 20_000);
           // Give Vue time to render the contract sections before scraping starts
           await new Promise(r => setTimeout(r, 3000));
 
-          const scrapeResult = await new Promise<{ success: boolean; data?: unknown; error?: string }>(resolve => {
+          await setProgress({ stage: 'scraping', page: 1 });
+          const scrapeResult = await new Promise<{ success: boolean; data?: unknown; error?: string; pages?: number }>(resolve => {
             chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_CONTRACTS' }, (resp) => {
               if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
               else resolve(resp || { success: false, error: 'No response' });
@@ -690,26 +695,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           });
 
           if (!scrapeResult?.success || !Array.isArray(scrapeResult.data)) {
+            await setProgress({ stage: 'error', error: scrapeResult?.error || 'No contracts found' });
             sendResponse({ success: false, error: scrapeResult?.error || 'No contracts found on page' });
             return;
           }
 
+          const total = (scrapeResult.data as unknown[]).length;
+          await setProgress({ stage: 'saving', count: total });
+
           const stored = await chrome.storage.local.get('authToken');
           const token = stored.authToken as string | undefined;
-          if (!token) { sendResponse({ success: false, error: 'Not logged in' }); return; }
+          if (!token) {
+            await setProgress({ stage: 'error', error: 'Not logged in' });
+            sendResponse({ success: false, error: 'Not logged in' });
+            return;
+          }
 
           const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
           const resp = await fetch(`${apiBase}/api/v1/jobs/import-contracts`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ contracts: scrapeResult.data }),
-            signal: AbortSignal.timeout(30_000),
+            signal: AbortSignal.timeout(90_000),
           });
 
-          if (!resp.ok) { sendResponse({ success: false, error: `API ${resp.status}` }); return; }
+          if (!resp.ok) {
+            const errText = await resp.text().catch(() => '');
+            await setProgress({ stage: 'error', error: `API ${resp.status}` });
+            sendResponse({ success: false, error: `API ${resp.status}: ${errText.slice(0, 200)}` });
+            return;
+          }
           const data = await resp.json();
+          await setProgress({ stage: 'done', ...data });
           sendResponse({ success: true, ...data });
         } catch (err) {
+          await setProgress({ stage: 'error', error: String(err) });
           sendResponse({ success: false, error: String(err) });
         }
       })();

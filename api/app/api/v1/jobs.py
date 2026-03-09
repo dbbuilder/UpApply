@@ -424,33 +424,47 @@ async def import_contracts(
     db: AsyncSession = Depends(get_db),
 ):
     """Import Upwork contract history as won jobs for scoring calibration."""
+    import asyncio
     imported = 0
     updated = 0
 
-    for contract in request.contracts:
-        upwork_job_id = f"contract_{contract.contract_id}"
-
-        # Check if already imported
-        existing = await db.execute(
-            select(Job).where(
-                Job.user_id == current_user.id,
-                Job.upwork_job_id == upwork_job_id,
-            )
+    # Pre-fetch all existing jobs to avoid N+1 queries
+    upwork_ids = [f"contract_{c.contract_id}" for c in request.contracts]
+    existing_result = await db.execute(
+        select(Job).where(
+            Job.user_id == current_user.id,
+            Job.upwork_job_id.in_(upwork_ids),
         )
-        existing_job = existing.scalar_one_or_none()
+    )
+    existing_map = {j.upwork_job_id: j for j in existing_result.scalars().all()}
 
-        # Build description from available fields
-        description_parts = [contract.title]
+    # Build descriptions for all contracts
+    descriptions = []
+    for contract in request.contracts:
+        parts = [contract.title]
         if contract.rate:
-            description_parts.append(f"Rate: {contract.rate}")
+            parts.append(f"Rate: {contract.rate}")
         if contract.client_name:
-            description_parts.append(f"Client: {contract.client_name}")
+            parts.append(f"Client: {contract.client_name}")
         if contract.date_range:
-            description_parts.append(f"Dates: {contract.date_range}")
-        description = "\n".join(description_parts)
+            parts.append(f"Dates: {contract.date_range}")
+        descriptions.append("\n".join(parts))
 
-        # Generate embedding
-        embedding = await generate_embedding(description)
+    # Generate all embeddings in parallel, skipping contracts that already have them
+    needs_embedding = [
+        i for i, c in enumerate(request.contracts)
+        if f"contract_{c.contract_id}" not in existing_map
+        or existing_map[f"contract_{c.contract_id}"].embedding is None
+    ]
+    embed_tasks = [generate_embedding(descriptions[i]) for i in needs_embedding]
+    embeddings_list = await asyncio.gather(*embed_tasks) if embed_tasks else []
+    embedding_by_idx = dict(zip(needs_embedding, embeddings_list))
+
+    for idx, contract in enumerate(request.contracts):
+        upwork_job_id = f"contract_{contract.contract_id}"
+        existing_job = existing_map.get(upwork_job_id)
+        description = descriptions[idx]
+        embedding = embedding_by_idx.get(idx)
 
         if existing_job:
             # Update embedding if missing

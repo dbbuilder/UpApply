@@ -9,6 +9,8 @@ from app.models.screening_answer import ScreeningAnswer
 from app.models.proposal import Proposal
 from app.models.beta_feedback import BetaFeedback
 from app.models.search_query import SearchQuery
+from app.models.job_review import JobReview
+from app.models.work_log import WorkLog
 
 __all__ = [
     "User",
@@ -23,4 +25,6 @@ __all__ = [
     "Proposal",
     "BetaFeedback",
     "SearchQuery",
+    "JobReview",
+    "WorkLog",
 ]
