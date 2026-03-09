@@ -1250,8 +1250,10 @@ function _handleMutations(): void {
     _savedBtnInjected = false;
   }
 
-  // Contract import button: show on /nx/contracts when contract sections are present
-  const isContractsPage = currentPath === '/nx/contracts';
+  // Contract import button: show on /nx/wm/freelancer/contracts (actual Upwork URL)
+  // Also accepts the legacy /nx/contracts path in case Upwork changes it back.
+  const isContractsPage = currentPath.includes('/wm/freelancer/contracts')
+    || currentPath === '/nx/contracts';
   const hasContracts = !!document.querySelector('section[data-test^="contract-"]');
   if (isContractsPage && hasContracts && !_contractImportBtnInjected) {
     _injectContractImportButton();
