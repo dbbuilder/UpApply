@@ -21,6 +21,7 @@ class AnalysisResult:
     deal_breaker_warnings: List[str]
     relevant_memories: List[Dict]
     recommendation: str
+    reason: Optional[str] = None
 
 
 # Skill synonyms for fuzzy matching
@@ -245,8 +246,8 @@ async def score_job_with_llm(
     profile: UserProfile,
     similar_wins: List[Dict],
     highly_rated: List[Dict] = [],
-) -> Optional[float]:
-    """Use gpt-4o-mini to score 0-100 with win rubric. Returns None on failure."""
+) -> Tuple[Optional[float], Optional[str]]:
+    """Use gpt-4o-mini to score 0-100 with win rubric. Returns (None, None) on failure."""
     import json
     from openai import AsyncOpenAI
     from app.core.config import settings
@@ -312,9 +313,10 @@ Respond with JSON only (no markdown): {{"score": <integer 0-100>, "reason": "<on
         )
         data = json.loads(response.choices[0].message.content)
         score = float(data.get("score", 0))
-        return min(max(score, 0), 100)
+        reason = data.get("reason", "")
+        return min(max(score, 0), 100), reason or None
     except Exception:
-        return None
+        return None, None
 
 
 def check_deal_breakers(
@@ -562,7 +564,7 @@ async def run_full_analysis(
     )
 
     # Use LLM scoring blended with rule-based (70/30) when available
-    llm_score = await score_job_with_llm(
+    llm_score, llm_reason = await score_job_with_llm(
         job_title=job_title or job_description[:80],
         job_description=job_description,
         profile=profile,
@@ -586,6 +588,7 @@ async def run_full_analysis(
         deal_breaker_warnings=deal_breakers,
         relevant_memories=relevant_memories,
         recommendation=recommendation,
+        reason=llm_reason,
     )
 
 

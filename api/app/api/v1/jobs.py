@@ -96,6 +96,7 @@ async def analyze_job(
         deal_breaker_warnings=result.deal_breaker_warnings,
         relevant_memories=result.relevant_memories,
         recommendation=result.recommendation,
+        reason=result.reason,
     )
 
 
@@ -393,6 +394,7 @@ async def get_job_match(
         deal_breaker_warnings=result.deal_breaker_warnings,
         relevant_memories=result.relevant_memories,
         recommendation=result.recommendation,
+        reason=result.reason,
     )
 
 

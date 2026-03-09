@@ -975,13 +975,13 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
   console.log(`[UpApply] score START  ${uid} "${item.title.slice(0, 40)}"`);
   try {
     // 1. Persistent cache check (chrome.storage.local, no SW round trip)
-    const CACHE_KEY = `sc_v5_${item.jobUrl}`;
+    const CACHE_KEY = `sc_v6_${item.jobUrl}`;
     const CACHE_TTL = 24 * 60 * 60 * 1000;
     const cacheStore = await chrome.storage.local.get(CACHE_KEY);
-    const cached = cacheStore[CACHE_KEY] as { score: number; chips: string[]; ts: number } | undefined;
+    const cached = cacheStore[CACHE_KEY] as { score: number; chips: string[]; reason?: string; ts: number } | undefined;
     if (cached && Date.now() - cached.ts < CACHE_TTL) {
       console.log(`[UpApply] score CACHED ${uid} score=${cached.score}`);
-      _applyBadgeResult(item, cached.score, cached.chips, true);
+      _applyBadgeResult(item, cached.score, cached.chips, true, cached.reason);
       return;
     }
 
@@ -1019,14 +1019,14 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
     });
 
     if (!apiResp.ok) throw new Error(`API ${apiResp.status}`);
-    const data = await apiResp.json() as { match_score: number };
+    const data = await apiResp.json() as { match_score: number; reason?: string };
     console.log(`[UpApply] score SCORE  ${uid} done — score=${data.match_score}`);
 
     // 5. Compute chips and cache result
     const chips = detectNotifChips(item.title, description, jobData.budgetAmount, jobData.budgetType);
-    await chrome.storage.local.set({ [CACHE_KEY]: { score: data.match_score, chips, ts: Date.now() } });
+    await chrome.storage.local.set({ [CACHE_KEY]: { score: data.match_score, chips, reason: data.reason, ts: Date.now() } });
 
-    _applyBadgeResult(item, data.match_score, chips, false);
+    _applyBadgeResult(item, data.match_score, chips, false, data.reason);
     console.log(`[UpApply] score DONE   ${uid}`);
   } catch (err) {
     console.error(`[UpApply] score ERROR  ${uid}`, err);
@@ -1036,7 +1036,7 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
   }
 }
 
-function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[], fromCache: boolean): void {
+function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[], fromCache: boolean, reason?: string): void {
   const rounded = Math.round(score);
   const { bg, color } = _scoreToNotifColors(rounded);
   item.badge.style.background = bg;
@@ -1045,6 +1045,21 @@ function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[]
   item.badge.textContent = String(rounded);
   item.badge.title = `UpApply match: ${rounded}/100${fromCache ? ' (cached)' : ''}`;
   if (chips.length) _injectChips(item.row, chips);
+
+  // Inject scoring reason as a blue line below the job title link
+  if (reason) {
+    const existingReason = item.row.querySelector('[data-upapply-reason]');
+    if (!existingReason) {
+      const link = item.row.querySelector<HTMLAnchorElement>('a[href*="/jobs/~"]');
+      if (link) {
+        const reasonEl = document.createElement('span');
+        reasonEl.setAttribute('data-upapply-reason', '1');
+        reasonEl.textContent = reason;
+        reasonEl.style.cssText = 'display:block;color:#3b82f6;font-size:11px;line-height:1.4;margin-top:3px;font-weight:normal;';
+        link.insertAdjacentElement('afterend', reasonEl);
+      }
+    }
+  }
 
   // Persist to scoredJobsCache for the sidebar's Find view
   chrome.storage.local.get('scoredJobsCache', (data) => {

@@ -113,6 +113,7 @@ class JobAnalysisResponse(BaseModel):
     deal_breaker_warnings: List[str]
     relevant_memories: List[dict]  # Memory summaries
     recommendation: str  # Overall recommendation
+    reason: Optional[str] = None  # One-sentence LLM scoring reason
 
 
 class CoverLetterGenerateRequest(BaseModel):
