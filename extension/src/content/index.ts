@@ -1194,10 +1194,40 @@ function _makeScoreBtn(id: string, label: string, onClick: () => void): void {
 function _injectScoreButton(): void {
   if (_scoreButtonInjected) return;
   _scoreButtonInjected = true;
-  _makeScoreBtn('ua-score-btn', '⚡ Score notifications', () => {
+  document.getElementById('ua-score-btn')?.remove();
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.style.cssText =
+    'background:#1d4ed8;color:#fff;border:none;cursor:pointer;' +
+    'padding:5px 12px;border-radius:20px;font-size:11px;font-weight:600;' +
+    'font-family:-apple-system,sans-serif;white-space:nowrap;' +
+    'display:flex;align-items:center;gap:4px;' +
+    'box-shadow:0 1px 4px rgba(0,0,0,0.2);transition:background 0.15s;';
+  btn.textContent = '⚡ Score';
+  btn.title = 'Score all notifications';
+  btn.addEventListener('mouseenter', () => { btn.style.background = '#1e40af'; });
+  btn.addEventListener('mouseleave', () => { btn.style.background = '#1d4ed8'; });
+  btn.addEventListener('click', () => {
+    document.getElementById('ua-score-btn')?.remove();
     _scoreButtonInjected = false;
     _processNotificationRows();
   });
+
+  // Prefer inserting as a nav sibling right after the bell <li>
+  const bellLi = document.querySelector('[data-cy="notifications-menu"]');
+  if (bellLi?.parentNode) {
+    const li = document.createElement('li');
+    li.id = 'ua-score-btn';
+    li.style.cssText = 'list-style:none;display:flex;align-items:center;padding:0 4px;';
+    li.appendChild(btn);
+    bellLi.parentNode.insertBefore(li, bellLi.nextSibling);
+  } else {
+    // Fallback: fixed just below the nav bar on the right
+    btn.id = 'ua-score-btn';
+    btn.style.cssText += 'position:fixed;top:64px;right:16px;z-index:2147483647;';
+    document.body.appendChild(btn);
+  }
 }
 
 function _injectSavedJobsButton(): void {
