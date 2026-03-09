@@ -503,6 +503,7 @@ async def run_full_analysis(
     profile: UserProfile,
     job_description: str,
     job_skills: List[str],
+    job_title: str = "",
     budget_amount: Optional[str] = None,
     budget_min: Optional[float] = None,
     client_info: Optional[Dict] = None,
@@ -561,9 +562,8 @@ async def run_full_analysis(
     )
 
     # Use LLM scoring blended with rule-based (70/30) when available
-    job_title = job_description[:80]
     llm_score = await score_job_with_llm(
-        job_title=job_title,
+        job_title=job_title or job_description[:80],
         job_description=job_description,
         profile=profile,
         similar_wins=similar_wins,

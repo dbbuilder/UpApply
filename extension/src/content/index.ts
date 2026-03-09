@@ -859,6 +859,7 @@ interface JobFetchResult {
   pageText: string;
   budgetAmount: string | null;
   budgetType: 'hourly' | 'fixed' | null;
+  skills: string[];
 }
 
 /**
@@ -885,6 +886,7 @@ async function _fetchJobViaGraphQL(jobUid: string): Promise<JobFetchResult | nul
       id title description contractorTier jobType
       hourlyBudgetMin hourlyBudgetMax
       amount{ amount currencyCode }
+      skills{ prettyName }
     }
   }`;
 
@@ -923,7 +925,9 @@ async function _fetchJobViaGraphQL(jobUid: string): Promise<JobFetchResult | nul
   }
 
   const description = (job.description as string) || '';
-  return { description, pageText: description, budgetAmount, budgetType };
+  const skillsRaw = (job.skills as Array<{ prettyName?: string }> | null) || [];
+  const skills = skillsRaw.map(s => s.prettyName || '').filter(Boolean);
+  return { description, pageText: description, budgetAmount, budgetType, skills };
 }
 
 // _fetchJobViaHTML removed: Upwork is CSR so the HTML shell is nearly empty,
@@ -943,7 +947,7 @@ async function _fetchJobData(jobUrl: string): Promise<JobFetchResult> {
       return result;
     }
   }
-  return { description: '', pageText: '', budgetAmount: null, budgetType: null };
+  return { description: '', pageText: '', budgetAmount: null, budgetType: null, skills: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -1006,7 +1010,11 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
       },
-      body: JSON.stringify({ title: item.title || 'Job', description: description || item.title }),
+      body: JSON.stringify({
+        title: item.title || 'Job',
+        description: description || item.title,
+        skills_required: jobData.skills.length > 0 ? jobData.skills : undefined,
+      }),
       signal: AbortSignal.timeout(25_000),
     });
 

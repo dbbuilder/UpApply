@@ -80,6 +80,7 @@ async def analyze_job(
         db=db,
         user_id=current_user.id,
         profile=profile,
+        job_title=request.title,
         job_description=request.description,
         job_skills=job_skills,
         budget_amount=request.budget_amount,
