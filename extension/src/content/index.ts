@@ -626,38 +626,63 @@ function _setNativeValue(input: HTMLInputElement, value: string): void {
 }
 
 async function fillMilestones(milestones: MilestoneData[]): Promise<{ success: boolean; filled: number }> {
-  const container = document.querySelector('[data-test="milestones"], .up-fe-milestones');
+  const container = document.querySelector('[data-test="milestones"], .up-fe-milestones, [data-test="milestone-list"]');
   if (!container) return { success: false, filled: 0 };
 
-  const addBtn = container.querySelector<HTMLElement>('.milestone-add, [data-ev-label="milestone_add"]');
+  const addBtn = container.querySelector<HTMLElement>(
+    '.milestone-add, [data-ev-label="milestone_add"], [data-test="add-milestone"], a[class*="add"], button[class*="add"]'
+  ) || document.querySelector<HTMLElement>('[data-test="add-milestone"]');
+
+  const initialCount = container.querySelectorAll('[data-test="milestone"], .up-fe-milestone, [data-test^="milestone-row"]').length;
 
   // Add milestone rows until we have enough
-  for (let i = container.querySelectorAll('[data-test="milestone"], .up-fe-milestone').length; i < milestones.length; i++) {
+  for (let i = initialCount; i < milestones.length; i++) {
     addBtn?.click();
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise(r => setTimeout(r, 700)); // give React time to mount the new row
   }
 
-  const rows = container.querySelectorAll<HTMLElement>('[data-test="milestone"], .up-fe-milestone');
+  // Extra settle time after all additions before querying inputs
+  if (milestones.length > initialCount) {
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  const rows = container.querySelectorAll<HTMLElement>('[data-test="milestone"], .up-fe-milestone, [data-test^="milestone-row"]');
   let filled = 0;
 
   for (let i = 0; i < Math.min(milestones.length, rows.length); i++) {
     const ms = milestones[i];
     const row = rows[i];
 
-    // Description
-    const descInput = row.querySelector<HTMLInputElement>('[data-test="milestone-description"]');
+    // Description — try data-test first, then common fallbacks for dynamically added rows
+    const descInput = row.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+      '[data-test="milestone-description"], ' +
+      'input[placeholder*="escription" i], ' +
+      'textarea[placeholder*="escription" i], ' +
+      'input[placeholder*="Describe" i], ' +
+      'input[placeholder*="milestone" i], ' +
+      'input[placeholder*="work to be" i], ' +
+      'input[type="text"]:not([data-test="currency-input"])'
+    );
     if (descInput) {
-      _setNativeValue(descInput, ms.description);
+      _setNativeValue(descInput as HTMLInputElement, ms.description);
     }
 
     // Amount
-    const amountInput = row.querySelector<HTMLInputElement>('[data-test="milestone-amount"] [data-test="currency-input"]');
+    const amountInput = row.querySelector<HTMLInputElement>(
+      '[data-test="milestone-amount"] [data-test="currency-input"], ' +
+      '[data-test="currency-input"], ' +
+      'input[type="number"], input[placeholder*="amount" i]'
+    );
     if (amountInput) {
       _setNativeValue(amountInput, ms.amount.toFixed(2));
     }
 
     // Due date — compute absolute date from days_from_start
-    const dateInput = row.querySelector<HTMLInputElement>('[data-test="milestone-due-date"] [data-test="input"]');
+    const dateInput = row.querySelector<HTMLInputElement>(
+      '[data-test="milestone-due-date"] [data-test="input"], ' +
+      '[data-test="milestone-due-date"] input, ' +
+      'input[placeholder*="date" i], input[placeholder*="MM/DD" i]'
+    );
     if (dateInput && ms.days_from_start > 0) {
       const d = new Date();
       d.setDate(d.getDate() + ms.days_from_start);
@@ -2007,15 +2032,20 @@ function init() {
       lastUrl = window.location.href;
       console.log('UpApply: URL changed to', lastUrl);
 
-      // Re-extract job data on navigation
+      // Re-extract job data on navigation — wait for React to finish rendering
       if (isJobPage()) {
-        setTimeout(() => {
+        const sendExtraction = () => {
           const jobData = extractJobData();
-          chrome.runtime.sendMessage({
-            type: 'JOB_DATA_EXTRACTED',
-            data: jobData,
-          }).catch(() => { /* no listener */ });
-        }, 2000);
+          if (!jobData.title) return false; // not ready
+          chrome.runtime.sendMessage({ type: 'JOB_DATA_EXTRACTED', data: jobData }).catch(() => {});
+          return true;
+        };
+        setTimeout(() => {
+          if (!sendExtraction()) {
+            // Still empty — retry once more
+            setTimeout(sendExtraction, 2000);
+          }
+        }, 3000);
       }
 
       // Re-initialize draft saver if navigated to apply page

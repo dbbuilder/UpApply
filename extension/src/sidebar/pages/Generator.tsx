@@ -80,6 +80,25 @@ export default function GeneratorPage() {
   const [milestones, setMilestones] = useState<MilestoneSuggestion[]>([]);
   const [generatingMilestones, setGeneratingMilestones] = useState(false);
   const [fillingMilestones, setFillingMilestones] = useState(false);
+  const [milestonesBudget, setMilestonesBudget] = useState('');
+
+  // Parse the max dollar value from a budget string like "$1,000–$5,000" or "$6,500"
+  const parseBudgetMax = (str: string | null | undefined): string => {
+    if (!str) return '';
+    const cleaned = str.replace(/[$,]/g, '').replace(/\/hr.*/i, '').trim();
+    const range = cleaned.match(/[\d.]+[-–]+([\d.]+)/);
+    if (range) return String(Math.round(parseFloat(range[1])));
+    const single = cleaned.match(/^[\d.]+/);
+    return single ? String(Math.round(parseFloat(single[0]))) : '';
+  };
+
+  // Sync default budget when job changes
+  useEffect(() => {
+    if (currentJob?.budgetAmount) {
+      const parsed = parseBudgetMax(currentJob.budgetAmount);
+      if (parsed) setMilestonesBudget(parsed);
+    }
+  }, [currentJob?.budgetAmount]);
 
   useEffect(() => {
     // Request current job data from stored cache first
@@ -333,10 +352,11 @@ export default function GeneratorPage() {
     if (!currentJob) return;
     setGeneratingMilestones(true);
     try {
+      const budgetStr = milestonesBudget ? `$${milestonesBudget}` : (currentJob.budgetAmount ?? undefined);
       const result = await apiClient.suggestMilestones(
         currentJob.title || '',
         currentJob.description || '',
-        currentJob.budgetAmount ?? undefined,
+        budgetStr,
         3,
       );
       setMilestones(result.milestones);
@@ -500,6 +520,14 @@ export default function GeneratorPage() {
               {Math.round(jobAnalysis.match_score)}%
             </span>
           )}
+          <button
+            type="button"
+            onClick={handleRefreshJob}
+            className="text-gray-400 hover:text-gray-700 text-sm"
+            title="Sync job from current page"
+          >
+            ⟳
+          </button>
           <button
             type="button"
             onClick={logout}
@@ -977,29 +1005,40 @@ export default function GeneratorPage() {
             {/* Milestones */}
             {coverLetter && (
               <div className="card animate-slide-up">
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center justify-between mb-2">
                   <h4 className="font-medium text-gray-900">Milestones</h4>
-                  <div className="flex gap-2">
+                  {milestones.length > 0 && (
                     <button
                       type="button"
-                      onClick={handleGenerateMilestones}
-                      disabled={generatingMilestones}
-                      className="btn-outline text-xs py-1 px-3 disabled:opacity-60"
+                      onClick={handleFillMilestones}
+                      disabled={fillingMilestones}
+                      className="btn-primary text-xs py-1 px-3 disabled:opacity-60"
                     >
-                      {generatingMilestones ? 'Generating...' : milestones.length ? 'Regenerate' : 'Generate'}
+                      {fillingMilestones ? 'Filling...' : 'Fill Milestones ↵'}
                     </button>
-                    {milestones.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={handleFillMilestones}
-                        disabled={fillingMilestones}
-                        className="btn-primary text-xs py-1 px-3 disabled:opacity-60"
-                      >
-                        {fillingMilestones ? 'Filling...' : 'Fill Milestones ↵'}
-                      </button>
-                    )}
-                  </div>
+                  )}
                 </div>
+
+                {/* Budget input — ask before generating */}
+                <div className="flex items-center gap-2 mb-3">
+                  <label className="text-xs font-medium text-gray-600 whitespace-nowrap">Total $</label>
+                  <input
+                    type="text"
+                    value={milestonesBudget}
+                    onChange={e => setMilestonesBudget(e.target.value.replace(/[^0-9.]/g, ''))}
+                    className="input text-sm flex-1"
+                    placeholder={currentJob?.budgetAmount ?? 'e.g. 6500'}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleGenerateMilestones}
+                    disabled={generatingMilestones}
+                    className="btn-outline text-xs py-1 px-3 disabled:opacity-60 whitespace-nowrap"
+                  >
+                    {generatingMilestones ? '…' : milestones.length ? 'Regenerate' : 'Generate'}
+                  </button>
+                </div>
+
                 {milestones.length > 0 && (
                   <div className="space-y-3">
                     {milestones.map((ms, i) => (
@@ -1007,14 +1046,14 @@ export default function GeneratorPage() {
                         <div className="font-medium text-gray-800">{ms.description}</div>
                         <div className="flex gap-4 mt-1 text-gray-500 text-xs">
                           <span>Day {ms.days_from_start}</span>
-                          <span>${ms.amount.toFixed(2)}</span>
+                          <span>${ms.amount.toFixed(0)}</span>
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
                 {!milestones.length && (
-                  <p className="text-xs text-gray-400">Click Generate to suggest milestones based on the job scope.</p>
+                  <p className="text-xs text-gray-400">Set total budget and click Generate.</p>
                 )}
               </div>
             )}

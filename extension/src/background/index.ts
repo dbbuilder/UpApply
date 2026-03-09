@@ -897,18 +897,30 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     // Delay extraction to let SPA content render (avoids null title)
     const timer = setTimeout(() => {
       pendingExtractions.delete(tabId);
+
+      const pushUpdate = (data: JobData) => {
+        currentJobData = data;
+        chrome.storage.local.set({ currentJob: data });
+        chrome.runtime.sendMessage({ type: 'JOB_DATA_UPDATED', data }).catch(() => {});
+      };
+
       chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_JOB_DATA' }, (response) => {
-        if (chrome.runtime.lastError) return; // Content script not loaded
+        if (chrome.runtime.lastError) return;
         if (response?.success && response.data) {
-          currentJobData = response.data;
-          chrome.storage.local.set({ currentJob: currentJobData });
-          chrome.runtime.sendMessage({
-            type: 'JOB_DATA_UPDATED',
-            data: currentJobData,
-          }).catch(() => {});
+          const job = response.data as JobData;
+          if (job.title) {
+            pushUpdate(job);
+          } else {
+            // Title empty — React may still be hydrating; retry after 2s
+            setTimeout(() => {
+              chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_JOB_DATA' }, (r2) => {
+                if (!chrome.runtime.lastError && r2?.success && r2.data) pushUpdate(r2.data);
+              });
+            }, 2000);
+          }
         }
       });
-    }, 2000);
+    }, 3500);
     pendingExtractions.set(tabId, timer);
   }
 });
