@@ -467,10 +467,10 @@ async def import_contracts(
         embedding = embedding_by_idx.get(idx)
 
         if existing_job:
-            # Update embedding if missing
-            if existing_job.embedding is None:
+            # Update embedding if missing; always count as synced
+            if existing_job.embedding is None and embedding is not None:
                 existing_job.embedding = embedding
-                updated += 1
+            updated += 1
             job = existing_job
         else:
             job = Job(
