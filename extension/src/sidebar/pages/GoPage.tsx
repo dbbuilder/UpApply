@@ -23,11 +23,13 @@ const LINKS: QuickLink[] = [
   { icon: '👤', label: 'Profile',       url: `${UPWORK}/freelancers/settings/`,      description: 'Public profile & settings' },
 ];
 
-function navigateTo(url: string) {
+function navigateTo(url: string, onDone?: () => void) {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const tabId = tabs[0]?.id;
     if (tabId) chrome.tabs.update(tabId, { url });
   });
+  // Close the sheet after a beat so the user sees the tap register
+  if (onDone) setTimeout(onDone, 380);
 }
 
 interface ImportProgress {
@@ -63,7 +65,11 @@ function progressDetail(p: ImportProgress | null): string | null {
   return null;
 }
 
-export default function GoPage() {
+interface GoPageProps {
+  onClose?: () => void;
+}
+
+export default function GoPage({ onClose }: GoPageProps) {
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -128,21 +134,22 @@ export default function GoPage() {
   const isError = progress?.stage === 'error';
 
   return (
-    <div className="flex flex-col h-full overflow-auto">
-      <div className="bg-white border-b px-4 pt-3 pb-3 flex-shrink-0">
-        <h1 className="font-bold text-gray-900 text-sm">Go</h1>
-        <p className="text-xs text-gray-400 mt-0.5">Open Upwork pages in your active tab</p>
+    <div className="flex flex-col bg-white overflow-auto" style={{ maxHeight: '72vh' }}>
+      {/* Sheet handle */}
+      <div className="flex flex-col items-center pt-2 pb-1 flex-shrink-0">
+        <div className="w-10 h-1 rounded-full bg-gray-200 mb-2" />
+        <p className="text-xs font-semibold text-gray-500 tracking-wide uppercase">Go</p>
       </div>
 
-      <div className="p-4 space-y-5">
+      <div className="p-3 space-y-4 overflow-auto">
         {/* Quick nav grid */}
         <div className="grid grid-cols-2 gap-2">
           {LINKS.map((link) => (
             <button
               key={link.url}
               type="button"
-              onClick={() => navigateTo(link.url)}
-              className="flex items-start gap-2 p-3 bg-white border border-gray-100 rounded-xl text-left hover:border-emerald-200 hover:bg-emerald-50 transition-colors group"
+              onClick={() => navigateTo(link.url, onClose)}
+              className="flex items-start gap-2 p-3 bg-gray-50 border border-gray-100 rounded-xl text-left hover:border-emerald-200 hover:bg-emerald-50 active:scale-95 transition-all group"
             >
               <span className="text-lg leading-none mt-0.5 flex-shrink-0">{link.icon}</span>
               <div className="min-w-0">
@@ -197,7 +204,7 @@ export default function GoPage() {
           </div>
         </div>
 
-        <p className="text-[10px] text-gray-300 text-center">
+        <p className="text-[10px] text-gray-300 text-center pb-1">
           Links open in your current Upwork tab
         </p>
       </div>
