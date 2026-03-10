@@ -44,10 +44,20 @@ def main():
     headers = {"Authorization": f"Bearer {token}"}
     print(f"Logged in as {args.email}")
 
-    # PATCH profile
-    resp = requests.patch(
+    # First GET the existing profile so we don't clobber other fields
+    get_resp = requests.get(f"{args.api_url}/api/v1/profile", headers=headers, timeout=30)
+    get_resp.raise_for_status()
+    existing = get_resp.json()
+
+    # Merge anchors in and PUT back
+    existing["proposal_anchors"] = anchors
+    # Remove read-only response-only fields that PUT doesn't accept
+    for key in ("id", "user_id", "updated_at"):
+        existing.pop(key, None)
+
+    resp = requests.put(
         f"{args.api_url}/api/v1/profile",
-        json={"proposal_anchors": anchors},
+        json=existing,
         headers=headers,
         timeout=30,
     )
