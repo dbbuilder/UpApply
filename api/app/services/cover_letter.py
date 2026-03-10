@@ -129,7 +129,9 @@ STRUCTURE — write these as flowing prose, do not label the sections:
 2. One concrete past story — specific problem, specific action, named project, real outcome
 3. Failure modes you eliminate — name the specific risks this client faces
 4. 1-2 portfolio anchors — real product names with a sentence of context
-5. Peer-level close ending with: "Warm regards,"
+5. No-cost call offer — one sentence offering a free, no-commitment call to discuss the project
+   (e.g. "Happy to jump on a quick call at no cost or obligation to talk through your requirements.")
+6. Peer-level close: "Warm regards,"
 
 LENGTH: 300-450 words. No salutation. No signature. No placeholders.
 No "Dear...", no "Hello", no "Subject:", no name at the end. End with "Warm regards,".""")
@@ -292,6 +294,7 @@ def build_user_prompt(
         "identify what situation this client is in and show you've been here before. "
         "Pick the most relevant portfolio story and tell it specifically. "
         "Name the failure modes. Anchor with portfolio products. "
+        "Before the close, include one sentence offering a free, no-commitment call to discuss their project. "
         "Remember: NO sentence starts with 'I'. End with 'Warm regards,'"
     )
 

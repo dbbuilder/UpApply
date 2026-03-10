@@ -1,0 +1,190 @@
+[
+  {
+    "title": "Migrated 160-server datacenter to Azure hybrid cloud",
+    "content": "Led the migration of a 160-server on-premises datacenter for SchoolVision to Azure hybrid cloud. Migration included: SQL Server databases to Azure SQL, VB.NET APIs rewritten in C# ASP.NET Core deployed to Azure Container Apps (Linux), 300+ static web apps migrated to Azure Static Web Apps, Azure Front Door and API Gateway for security and routing, Azure VPN for private SQL access, Azure Key Vault for all secrets management, and Azure Functions for data ingestion pipelines. This is a signature enterprise achievement referenced in cloud/Azure proposals.",
+    "category": "achievement",
+    "skills_demonstrated": [
+      "Azure",
+      "Azure SQL",
+      "Azure App Service",
+      "Azure Functions",
+      "Azure Key Vault",
+      "Azure Static Web Apps",
+      "Azure Front Door",
+      "Azure VPN",
+      "C#",
+      "ASP.NET Core",
+      "VB.NET",
+      "SQL Server",
+      "Docker",
+      "ARM Templates"
+    ],
+    "industry": "Education",
+    "project_type": "Cloud Migration",
+    "outcome": "160 servers migrated to Azure hybrid cloud; 300+ static web apps to Azure Static Web Apps",
+    "source": "chatgpt_corpus",
+    "importance_score": 1.0
+  },
+  {
+    "title": "DBBuilder, Inc. \u2014 25+ years enterprise software and SaaS",
+    "content": "Chris Therriault is President & CEO of DBBuilder, Inc., an S-Corporation founded in June 2001 in Washington State. Over 25 years, built multiple SaaS products from founding to scale and exit. Core expertise: enterprise data architecture, compliance technology, multi-tenant SaaS platforms, and database-driven solutions for education, transportation, and healthcare clients. Professional email: chris@servicevision.net. Phone: (206) 580-3250. GitHub: github.com/dbbuilder. MBA credential.",
+    "category": "achievement",
+    "skills_demonstrated": [
+      "SQL Server",
+      "Azure",
+      "C#",
+      ".NET",
+      "ASP.NET Core",
+      "VB.NET",
+      "Multi-tenant SaaS",
+      "Enterprise Architecture"
+    ],
+    "industry": "SaaS",
+    "project_type": "Company / Entrepreneurship",
+    "outcome": "25+ years running DBBuilder, Inc.; multiple SaaS products from founding to sale",
+    "source": "chatgpt_corpus",
+    "importance_score": 1.0
+  },
+  {
+    "title": "SchoolVision \u2014 20+ years K-12 education SaaS platform",
+    "content": "SchoolVision.net is a K-12 campus management SaaS built and owned by DBBuilder, Inc. Serves 3,000+ corporate clients each with their own SQL Server database. Features: student information system, attendance tracking, cafeteria/lunch POS, compliance (FERPA). Architecture: Azure SQL, Azure App Service, Azure Front Door, Azure API Gateway, Azure Key Vault, Azure Static Web Apps, Azure VPN. Licensed to Newman Consulting, LLC in August 2024 for $5,000/month while DBBuilder retains IP ownership.",
+    "category": "project",
+    "skills_demonstrated": [
+      "SQL Server",
+      "Azure SQL",
+      "Azure",
+      "C#",
+      "ASP.NET Core",
+      "VB.NET",
+      "Multi-tenant SaaS",
+      "FERPA Compliance",
+      "Azure App Service"
+    ],
+    "industry": "Education",
+    "project_type": "SaaS Platform",
+    "outcome": "3,000+ corporate clients; 20+ years of continuous operation",
+    "source": "chatgpt_corpus",
+    "importance_score": 1.0
+  },
+  {
+    "title": "UpApply \u2014 AI-powered Upwork proposal automation",
+    "content": "UpApply is a self-built AI-powered Upwork proposal automation system. Stack: Chrome Extension (React + TypeScript + Vite + Manifest V3) + FastAPI backend on Render + PostgreSQL with pgvector + GPT-4o for cover letter generation. Demonstrates: AI/LLM integration, semantic search, vector databases, Chrome extension development, FastAPI, async Python, Render deployment, and product ownership.",
+    "category": "project",
+    "skills_demonstrated": [
+      "Python",
+      "FastAPI",
+      "PostgreSQL",
+      "pgvector",
+      "React",
+      "TypeScript",
+      "OpenAI API",
+      "OpenAI Embeddings",
+      "RAG",
+      "Vector Search",
+      "Chrome Extension",
+      "Render",
+      "Docker"
+    ],
+    "industry": "SaaS",
+    "project_type": "AI Product",
+    "outcome": "Production system automating Upwork proposals with semantic memory retrieval",
+    "source": "chatgpt_corpus",
+    "importance_score": 0.95
+  },
+  {
+    "title": "ServiceVision.net \u2014 Technology consulting and AI integration",
+    "content": "ServiceVision.net is an active consulting brand for enterprise software architecture, AI integration, and cloud solutions. Portfolio of live demo prototypes for Upwork proposals: autocomply.servicevision.io, septic.servicevision.io, autodash.servicevision.io, onsite.servicevision.io, hightechfintech.servicevision.io, mvpcreator.servicevision.io, servicevisionai.com. Builds working prototypes matching each job posting spec before submitting proposals.",
+    "category": "project",
+    "skills_demonstrated": [
+      "Azure",
+      "C#",
+      "ASP.NET Core",
+      "Python",
+      "FastAPI",
+      "React",
+      "TypeScript",
+      "OpenAI API",
+      "LLM Integration",
+      "Docker"
+    ],
+    "industry": "Consulting",
+    "project_type": "Consulting / Portfolio",
+    "outcome": "Active consulting brand with live demo sites for each major Upwork proposal domain",
+    "source": "chatgpt_corpus",
+    "importance_score": 0.9
+  },
+  {
+    "title": "Multi-tenant SaaS architecture: 3,000 per-client SQL Server databases",
+    "content": "Deep expertise in multi-tenant SaaS architecture. Pattern: each client has their own SQL Server database connected via a shared C# API layer. URL patterns use client placeholder. Azure API Gateway with wildcard subdomains per client. Shared Report API pattern across all tenant databases. Azure VPN for private database connectivity.",
+    "category": "skill_demo",
+    "skills_demonstrated": [
+      "SQL Server",
+      "Azure SQL",
+      "Azure",
+      "Azure App Service",
+      "Azure API Gateway",
+      "C#",
+      "ASP.NET Core",
+      "Multi-tenant SaaS",
+      "Azure VPN"
+    ],
+    "industry": "SaaS",
+    "project_type": "Architecture",
+    "source": "chatgpt_corpus",
+    "importance_score": 0.9
+  },
+  {
+    "title": "SQL Server expert: stored procedures, CTEs, indexing, replication",
+    "content": "Deep SQL Server expertise over 25+ years. Preferred patterns: stored-procedure-driven architecture, CTE-first query design, view-heavy API layer, proactive index optimization, SQL Agent jobs, SQL Server dbmail alerting. Handles: deadlock detection, execution plan analysis, dynamic SQL, pivot/unpivot for reports, replication for multi-site sync, Azure SQL migration. Debug pattern: @DebugMode and @PreviewMode parameters on all stored procedures.",
+    "category": "skill_demo",
+    "skills_demonstrated": [
+      "SQL Server",
+      "T-SQL",
+      "Azure SQL",
+      "SQL Agent",
+      "SQL Replication",
+      "Index Optimization",
+      "Stored Procedures",
+      "CTEs",
+      "Dynamic SQL"
+    ],
+    "industry": "Enterprise",
+    "project_type": "Database Engineering",
+    "source": "chatgpt_corpus",
+    "importance_score": 0.9
+  },
+  {
+    "title": "Azure cloud architect: App Service, Functions, Front Door, Key Vault, DevOps",
+    "content": "Extensive Azure architecture across all major services: Azure SQL, App Service, Functions, Front Door, API Gateway, Key Vault, Static Web Apps, VPN, DevOps, Container Apps, ARM templates. Cost optimization experience. PowerShell for all Azure automation.",
+    "category": "skill_demo",
+    "skills_demonstrated": [
+      "Azure",
+      "Azure SQL",
+      "Azure App Service",
+      "Azure Functions",
+      "Azure Front Door",
+      "Azure API Gateway",
+      "Azure Key Vault",
+      "Azure Static Web Apps",
+      "Azure VPN",
+      "Azure DevOps",
+      "Docker",
+      "ARM Templates",
+      "PowerShell"
+    ],
+    "industry": "Enterprise",
+    "project_type": "Cloud Architecture",
+    "source": "chatgpt_corpus",
+    "importance_score": 0.9
+  },
+  {
+    "title": "Upwork proposal style and tone preferences",
+    "content": "Proposal style: direct, confident, specific — never flowery. Always includes: MBA credential, 25+ years enterprise experience, SchoolVision 20+ years education SaaS, 160-server Azure migration, 300+ static web apps migration, 3,000-client distributed SQL Server network, founding-to-scale narrative, demo prototype URL matching the job spec, no-cost/no-commitment call offer before the close. Never uses: Dear Hiring Manager, generic closings, clichés, sentences starting with I. Target length: 300-450 words. Ends with Warm regards,. Portfolio: servicevisionai.com and mvpcreator.servicevision.io.",
+    "category": "lesson",
+    "skills_demonstrated": [],
+    "industry": "Freelancing",
+    "project_type": "Proposal Strategy",
+    "source": "chatgpt_corpus",
+    "importance_score": 0.95
+  }
+]
