@@ -26,12 +26,12 @@ def clean_cover_letter(content: str) -> str:
         if stripped.lower().startswith('subject:'):
             continue
 
-        # Skip Dear... lines
-        if stripped.lower().startswith('dear '):
+        # Skip Dear... / Hello lines
+        if stripped.lower().startswith('dear ') or stripped.lower().startswith('hello,') or stripped.lower() == 'hello':
             continue
 
-        # Skip common signature lines
-        if stripped.lower() in ['sincerely,', 'best regards,', 'regards,', 'best,', 'thank you,', 'thanks,', 'warm regards,']:
+        # Skip generic sign-offs (but NOT "Warm regards," — that is always kept)
+        if stripped.lower() in ['sincerely,', 'regards,', 'best,', 'thank you,', 'thanks,']:
             continue
 
         # Skip lines that are just a name (likely signature)
@@ -51,9 +51,8 @@ def clean_cover_letter(content: str) -> str:
     result = re.sub(r'  +', ' ', result)
     result = re.sub(r'\n{3,}', '\n\n', result)
 
-    # Remove trailing signature-like content
-    # Pattern: ends with "Sincerely," or similar followed by optional name
-    result = re.sub(r'\n+(Sincerely|Best regards|Regards|Best|Thank you|Thanks|Warm regards),?\s*\n*[\w\s]*$', '', result, flags=re.IGNORECASE)
+    # Remove trailing generic sign-offs (but preserve "Warm regards,")
+    result = re.sub(r'\n+(Sincerely|Best regards|Regards|Best|Thank you|Thanks),?\s*\n*[\w\s]*$', '', result, flags=re.IGNORECASE)
 
     return result.strip()
 
@@ -81,6 +80,14 @@ def build_system_prompt(profile: UserProfile) -> str:
     if profile.unique_strengths:
         parts.append(f"\n\nCORE STRENGTHS: {', '.join(profile.unique_strengths)}")
 
+    # Per-user always_include items from proposal_anchors
+    anchors: dict = profile.proposal_anchors or {}
+    always_include_items: list = anchors.get("always_include", [])
+    always_include_block = ""
+    if always_include_items:
+        bullet_lines = "\n".join(f"- {item}" for item in always_include_items)
+        always_include_block = f"\n\nPER-USER CREDENTIAL REQUIREMENTS — these are specific to this user, always include when relevant:\n{bullet_lines}"
+
     parts.append(f"""
 
 VOICE:
@@ -90,24 +97,42 @@ VOICE:
 - Names specific failure modes and risk classes the client should worry about
 - Weaves skills into narrative — never lists them as bullets
 - Confident and direct, not arrogant or academic
-- Ends as an equal: "if we work together, you can expect..." not "I look forward to hearing from you"
+- Ends as a peer with a warm close: "Warm regards," — never "I look forward to hearing from you"
+
+SENTENCE RULES (violations are a hard failure):
+- NEVER begin a sentence with the word "I" — restructure every sentence that would start with I
+  (e.g. "I built..." → "That system was built..." or "The result was..." or "My team delivered...")
+- NEVER open the letter with "Hello", "Hi", "Dear", or any salutation — start immediately with content
+- ALWAYS end the letter with exactly: "Warm regards,"
+
+JOB PRIORITY — match the proposal emphasis to the engagement type:
+1. CTO / Technical Leadership / Senior Review — fractional CTO, architecture review, technical advisor, code audit
+2. SaaS / MVP / Product — build, fix, complete, or review an existing or new product
+3. Full-Stack Development — web app, API, frontend + backend projects
+4. Data Engineering & SQL — database design, migration, optimization; especially SQL Server, PostgreSQL, Azure SQL
+5. AI / ML / Cloud — LLM integration, RAG, Azure/GCP/AWS infrastructure
 
 BANNED PHRASES (these signal generic AI writing — using any of these is a failure):
 "I am well-equipped", "unique blend of skills", "align perfectly with your needs",
 "I am excited to apply", "I look forward to hearing from you", "my skills directly translate",
-"proven track record", "I am passionate about", "leverage my expertise",
-"I believe I would be a great fit", "I am confident that", "strong background in",
-"extensive experience in", "I would love the opportunity", "I am a perfect fit"
+"I am passionate about", "leverage my expertise",
+"I believe I would be a great fit", "I am confident that",
+"I would love the opportunity", "I am a perfect fit",
+"I am writing to", "I am reaching out"
+
+ALWAYS INCLUDE (when profile data is available):
+- Credentials listed in the user's bio and unique strengths — weave into narrative, never just list them
+- Named projects and products from the portfolio — use specific names, never generic descriptions{always_include_block}
 
 STRUCTURE — write these as flowing prose, do not label the sections:
-1. Pattern recognition hook — one sentence identifying the core situation (e.g., "founder-built system hitting operational risk", "vibe-coded platform that needs guardrails")
-2. One concrete past story — what you actually did in a near-identical situation: the specific problem, your specific action, the outcome. Use a real named project from their portfolio.
-3. Failure modes you eliminate — name the specific risks this client faces and how you address them
-4. 1-2 portfolio anchors — drop real product names with a sentence of context to establish range
-5. Peer-level close — what working together will feel like, not a request for a callback
+1. Pattern recognition hook — one sentence identifying the core situation
+2. One concrete past story — specific problem, specific action, named project, real outcome
+3. Failure modes you eliminate — name the specific risks this client faces
+4. 1-2 portfolio anchors — real product names with a sentence of context
+5. Peer-level close ending with: "Warm regards,"
 
 LENGTH: 300-450 words. No salutation. No signature. No placeholders.
-No "Dear...", no "Subject:", no "Sincerely,", no name at the end.""")
+No "Dear...", no "Hello", no "Subject:", no name at the end. End with "Warm regards,".""")
 
     return "".join(parts)
 
@@ -243,11 +268,31 @@ def build_user_prompt(
         if formatted_inclusions:
             parts.append(f"\n\nREQUIRED INCLUSIONS:\n{formatted_inclusions}")
 
+    # Inject job-type-specific credential reminders from user's proposal_anchors (if configured)
+    anchors: dict = (profile.proposal_anchors or {})
+    if anchors:
+        job_combined = (job_title + " " + job_description[:500]).lower()
+        job_type_map = [
+            (["cto", "chief technology", "technical lead", "architect", "advisory", "review", "audit", "fractional"], "cto"),
+            (["saas", "mvp", "product", "startup", "platform", "build", "launch"], "saas"),
+            (["sql server", "t-sql", "database", "migration", "stored proc", "azure sql", "postgresql", "postgres"], "sql"),
+            (["azure", "aws", "gcp", "cloud", "devops", "infrastructure"], "cloud"),
+            (["ai", "ml", "llm", "rag", "openai", "gpt", "embeddings", "vector", "chatbot", "automation"], "ai"),
+            (["full stack", "fullstack", "react", "vue", "angular", "frontend", "backend", "api", "node", "next.js"], "fullstack"),
+        ]
+        for keywords, anchor_key in job_type_map:
+            if any(w in job_combined for w in keywords):
+                guidance = anchors.get(anchor_key)
+                if guidance:
+                    parts.append(f"\n\nJOB-TYPE CREDENTIAL GUIDANCE:\n{guidance}")
+                break
+
     parts.append(
         "\n\nNow write the proposal. Start with the pattern recognition hook — "
         "identify what situation this client is in and show you've been here before. "
         "Pick the most relevant portfolio story and tell it specifically. "
-        "Name the failure modes. Anchor with portfolio products. Close as a peer."
+        "Name the failure modes. Anchor with portfolio products. "
+        "Remember: NO sentence starts with 'I'. End with 'Warm regards,'"
     )
 
     return "".join(parts)

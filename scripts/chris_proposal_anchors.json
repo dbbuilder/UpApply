@@ -1,0 +1,14 @@
+{
+  "always_include": [
+    "MBA credential — weave it into the narrative, never just 'I have an MBA'",
+    "25+ years of enterprise technology experience — anchor as context for any claim",
+    "DBBuilder, Inc. founded 2001 — founding-to-scale entrepreneur, not a freelancer",
+    "ServiceVision.net — active consulting brand for enterprise clients"
+  ],
+  "cto": "This is a CTO/leadership engagement — lead with founding-to-exit entrepreneur narrative (DBBuilder founded 2001, 25+ years enterprise technology, MBA). Position as a strategic peer who has owned the full stack from architecture to compliance. SchoolVision (3,000 clients, 20+ years) is the proof of scale.",
+  "saas": "This is a SaaS/MVP engagement — reference SchoolVision (20+ years operating, ~3,000 corporate client databases, FERPA-compliant education SaaS) as proof of building and running a product at scale. DBBuilder founding story shows entrepreneur credibility. MBA provides business context.",
+  "sql": "This is a SQL/data job — anchor on the 160-server on-premises datacenter migration to Azure hybrid cloud (SQL Server → Azure SQL, VB.NET → C# ASP.NET Core, 300+ static sites → Azure Static Web Apps) and the 3,000-client distributed SQL Server estate. MBA rounds out the senior profile.",
+  "cloud": "This is a cloud/infrastructure job — anchor on the 160-server datacenter migration to Azure (SQL → Azure SQL, VB.NET → ASP.NET Core, 300+ static sites → Azure Static Web Apps). Mention AnalyzeMyCloud.com (Azure cost analysis tool) if cost optimization is relevant. SchoolVision runs on Azure SQL, App Service, Front Door, API Gateway, Key Vault, VPN.",
+  "ai": "This is an AI/ML job — reference UpApply (pgvector HNSW semantic search, text-embedding-3-small, GPT-4o generation, FastAPI + PostgreSQL) and StratVault.ai (Python + ChromaDB + Streamlit + Fly.io RAG knowledge base). MBA + 25 years enterprise context makes the AI work credible beyond prototype level.",
+  "fullstack": "This is a full-stack job — reference ServiceVision portfolio demos built to spec at velocity (servicevisionai.com, mvpcreator.servicevision.io, autocomply.servicevision.io). Stack: React + TypeScript + Vite on the front, FastAPI or ASP.NET Core on the back, Azure or Render for deployment. SchoolVision (Vue 3 + .NET + Azure) proves enterprise-grade full-stack at scale."
+}

@@ -1,6 +1,6 @@
 """User profile schemas."""
 from datetime import date, datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 
 
@@ -177,6 +177,9 @@ class ProfileCreate(BaseModel):
     availability_start_date: Optional[date] = None
     currently_accepting_work: bool = True
 
+    # Per-user cover letter credential routing
+    proposal_anchors: Optional[Dict[str, Any]] = None
+
 
 class ProfileUpdate(ProfileCreate):
     """Schema for updating a profile (same as create, all optional)."""
@@ -241,6 +244,9 @@ class ProfileResponse(BaseModel):
     # Availability
     hours_per_week_available: Optional[int] = None
     currently_accepting_work: bool = True
+
+    # Per-user cover letter credential routing
+    proposal_anchors: Optional[Dict[str, Any]] = None
 
     # Setup status
     setup_completed: bool = False

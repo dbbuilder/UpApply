@@ -113,6 +113,9 @@ class UserProfile(Base):
     working_hours_preference: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     preferred_closing: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # e.g. "Best regards,\nChris"
 
+    # Per-user cover letter credential routing — job-type → anchor guidance + always_include list
+    proposal_anchors: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
     # Unique Value Propositions
     unique_strengths: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
     success_stories: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
