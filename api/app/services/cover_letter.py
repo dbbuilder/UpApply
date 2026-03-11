@@ -432,11 +432,12 @@ async def regenerate_cover_letter(
     job_description: str,
     profile: UserProfile,
     model: Optional[str] = None,
+    include_call_offer: bool = True,
 ) -> str:
     """Regenerate cover letter with user feedback using Claude."""
     client = _get_anthropic_client()
 
-    system_prompt = build_system_prompt(profile)
+    system_prompt = build_system_prompt(profile, include_call_offer=include_call_offer)
     user_prompt = f"""Previous cover letter:
 {original_letter}
 

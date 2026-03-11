@@ -141,7 +141,7 @@ export default function GeneratorPage() {
 
   const handleRegenerate = () => {
     if (showFeedbackInput && feedbackText.trim()) {
-      regenerateCoverLetter(feedbackText.trim());
+      regenerateCoverLetter(feedbackText.trim(), includeCallOffer);
       setFeedbackText('');
       setShowFeedbackInput(false);
     } else {

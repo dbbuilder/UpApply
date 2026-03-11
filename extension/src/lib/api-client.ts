@@ -269,10 +269,10 @@ class ApiClient {
     return this.request<CoverLetter[]>(`/api/v1/jobs/cover-letters${params}`);
   }
 
-  async regenerateCoverLetter(id: string, feedback?: string) {
+  async regenerateCoverLetter(id: string, feedback?: string, includeCallOffer: boolean = true) {
     return this.request<CoverLetter>(`/api/v1/jobs/cover-letters/${id}/regenerate`, {
       method: 'POST',
-      body: { feedback },
+      body: { feedback, include_call_offer: includeCallOffer },
     });
   }
 

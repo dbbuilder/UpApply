@@ -59,7 +59,7 @@ interface AppState {
   loadProfile: () => Promise<void>;
   analyzeCurrentJob: () => Promise<void>;
   generateCoverLetter: (inclusions?: string, prototypeUrl?: string, includeCallOffer?: boolean) => Promise<void>;
-  regenerateCoverLetter: (feedback?: string) => Promise<void>;
+  regenerateCoverLetter: (feedback?: string, includeCallOffer?: boolean) => Promise<void>;
   fillCoverLetter: () => Promise<boolean>;
   fillScreeningQuestion: (selector: string, answer: string) => Promise<boolean>;
   saveCurrentJob: () => Promise<string | null>;
@@ -305,16 +305,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   // Regenerate cover letter with optional feedback
-  regenerateCoverLetter: async (feedback?: string) => {
+  regenerateCoverLetter: async (feedback?: string, includeCallOffer: boolean = true) => {
     const { coverLetterId } = get();
     if (!coverLetterId) {
       // Fall back to fresh generation
-      return get().generateCoverLetter();
+      return get().generateCoverLetter(undefined, undefined, includeCallOffer);
     }
 
     set({ coverLetterLoading: true, coverLetterError: null });
     try {
-      const result = await apiClient.regenerateCoverLetter(coverLetterId, feedback);
+      const result = await apiClient.regenerateCoverLetter(coverLetterId, feedback, includeCallOffer);
       set({
         coverLetter: result.content,
         coverLetterId: result.id,

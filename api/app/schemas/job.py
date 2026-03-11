@@ -163,6 +163,7 @@ class CoverLetterRegenerateRequest(BaseModel):
     focus_skills: Optional[List[str]] = None
     custom_instructions: Optional[str] = None
     feedback: Optional[str] = None  # What to improve
+    include_call_offer: bool = True
 
 
 # Attachment extraction schemas

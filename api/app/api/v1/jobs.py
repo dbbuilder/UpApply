@@ -870,6 +870,7 @@ async def regenerate_cover_letter_endpoint(
             job_title=job.title,
             job_description=job.description,
             profile=profile,
+            include_call_offer=request.include_call_offer,
         )
     else:
         # Generate fresh
@@ -900,6 +901,7 @@ async def regenerate_cover_letter_endpoint(
             relevant_memories=ar.relevant_memories,
             profile=profile,
             past_proposals=past_proposals,
+            include_call_offer=request.include_call_offer,
         )
 
     # Create new version
