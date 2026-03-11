@@ -134,11 +134,56 @@ The job analysis service (`api/app/services/job_analysis.py`) scores jobs agains
 - Match score calculation (0-100)
 
 ### Cover Letter Generation
-Personalized prompts built from user profile including:
-- Professional identity and goals
-- Tone preference
-- Relevant memories (via semantic search)
-- Skill emphasis
+
+The generation pipeline in `api/app/services/cover_letter.py` is corpus-trained and user-specific. See `docs/corpus-guided-cover-letters.md` for full architecture detail.
+
+**Pipeline:**
+1. `build_system_prompt(profile, include_call_offer)` — user identity, voice rules, job priority hierarchy, banned phrases, per-user credential requirements from `profile.proposal_anchors["always_include"]`
+2. `build_user_prompt(...)` — job context, top-N relevant memories (pgvector), past proposals for voice calibration, per-user job-type credential routing from `profile.proposal_anchors[job_type]`, optional call offer
+3. Claude claude-sonnet-4-6 generation (model: `cover_letter_model` setting)
+4. `clean_cover_letter()` — strips salutations, generic sign-offs (preserves "Warm regards,"), placeholders
+5. `append_prototype_url()` — appends demo URL sentence if provided
+6. `append_closing()` — appends user's `preferred_closing`
+
+**Key prompt rules (hard failures if violated):**
+- No sentence may begin with "I" — must restructure ("I built..." → "That system was built...")
+- No salutation opening (Hello/Hi/Dear/Subject)
+- Always ends with "Warm regards,"
+- 23 banned phrases that signal generic AI writing
+- Length: 300–450 words
+
+**Job priority hierarchy (CTO/Advisory → SaaS/MVP → Full-Stack → SQL/Data → AI/Cloud):**
+Each job type maps to a credential anchor in `profile.proposal_anchors`:
+- `cto` — founding-to-exit narrative, MBA lead
+- `saas` — SchoolVision 20yr/3,000-client SaaS story
+- `sql` — 160-server migration + distributed SQL estate
+- `cloud` — 160-server Azure migration + AnalyzeMyCloud.com
+- `ai` — UpApply (pgvector) + StratVault.ai
+- `fullstack` — ServiceVision portfolio demos
+
+**No-cost call offer toggle:**
+`CoverLetterGenerateRequest.include_call_offer: bool = True` — when `true`, adds one sentence before the close offering a free, no-commitment call. Exposed as a checkbox in the extension UI (default checked).
+
+### Corpus-Guided Memory System
+
+Two types of memories feed cover letter generation:
+
+**Bio/Achievement memories** — curated JSON, seeded via `scripts/import_chatgpt_corpus.py --bio-only`:
+- Format: `scripts/chris_bio_memories.json` (9 entries for Chris)
+- Importance scores 0.9–1.0 so they always surface in top-N search
+
+**Past proposal memories** — extracted from ChatGPT export, seeded via `scripts/import_chatgpt_corpus.py --proposals-only`:
+- Detects cover letter conversations by title + content patterns
+- Stores job posting + final letter together in one embedding
+- Used at generation time as voice calibration examples (`PAST WINNING PROPOSALS`)
+
+**Proposal anchors** — per-user JSONB on `user_profiles.proposal_anchors`:
+- Seeded via `scripts/seed_proposal_anchors.py`
+- Chris's config: `scripts/chris_proposal_anchors.json`
+- Controls job-type credential routing and `always_include` items
+- Generic users without this field: routing section omitted, generic prompt applies
+
+Full seeding procedure: see `docs/corpus-guided-cover-letters.md` § Installing the Corpus.
 
 ### Extension DOM Selectors
 The content script (`extension/src/content/upwork-selectors.ts`) uses fallback selectors for Upwork's dynamic DOM. These may need updates if Upwork changes their page structure.
@@ -161,6 +206,43 @@ The `render.yaml` configures:
 2. Go to `chrome://extensions`
 3. Enable Developer Mode
 4. Click "Load unpacked" and select `extension/dist/`
+
+## Corpus & Memory Scripts
+
+Located in `scripts/`:
+
+| Script | Purpose |
+|--------|---------|
+| `import_chatgpt_corpus.py` | Extract past proposals + bio memories from ChatGPT export and bulk-import to UpApply API |
+| `seed_proposal_anchors.py` | SET `proposal_anchors` JSONB on a user's profile via API PUT |
+| `chris_bio_memories.json` | Chris Therriault's 9 canonical bio/achievement memories |
+| `chris_proposal_anchors.json` | Chris's job-type credential routing config (cto/saas/sql/cloud/ai/fullstack + always_include) |
+
+**Usage (avoid shell `!` in passwords — use Python sys.argv injection):**
+```python
+python3 -c "
+import sys
+sys.argv = ['script.py', '--email', 'you@example.com', '--password', 'your!pass', ...]
+exec(open('scripts/import_chatgpt_corpus.py').read())
+"
+```
+
+## Database Migrations
+
+| Version | Description |
+|---------|-------------|
+| 001 | Initial schema (users, profiles, memories, jobs, applications) |
+| 002 | Add cover letter columns |
+| 003 | Add preferred_closing to user_profiles |
+| 004 | Add screening_answers and proposals tables |
+| 005 | Add attachment text fields to jobs |
+| 006 | Add beta_feedback table |
+| 007 | Lowercase emails |
+| 008 | Add job source fields |
+| 009 | Add search_queries table |
+| 010 | Add job_reviews table |
+| 011 | Add work_logs table |
+| 012 | Add proposal_anchors JSONB to user_profiles |
 
 ## Environment Variables
 
@@ -198,7 +280,7 @@ VITE_API_URL=https://upapply-api.onrender.com
 - `POST /api/v1/memories` - Create with embedding
 - `GET /api/v1/memories` - List all
 - `POST /api/v1/memories/search` - Semantic search
-- `POST /api/v1/memories/bulk-import` - Import from resume
+- `POST /api/v1/memories/bulk-import` - Bulk import (corpus seeding)
 
 ### Jobs
 - `POST /api/v1/jobs/analyze` - Analyze without saving
