@@ -57,7 +57,7 @@ def clean_cover_letter(content: str) -> str:
     return result.strip()
 
 
-def build_system_prompt(profile: UserProfile) -> str:
+def build_system_prompt(profile: UserProfile, include_call_offer: bool = True) -> str:
     """Build system prompt from user profile."""
     name = profile.full_name or "the freelancer"
     title = profile.professional_title or "senior technical professional"
@@ -87,6 +87,13 @@ def build_system_prompt(profile: UserProfile) -> str:
     if always_include_items:
         bullet_lines = "\n".join(f"- {item}" for item in always_include_items)
         always_include_block = f"\n\nPER-USER CREDENTIAL REQUIREMENTS — these are specific to this user, always include when relevant:\n{bullet_lines}"
+
+    call_offer_step = (
+        "No-cost call offer — one sentence offering a free, no-commitment call to discuss the project\n"
+        '   (e.g. "Happy to jump on a quick call at no cost or obligation to talk through your requirements.")'
+        if include_call_offer
+        else "Skip the call offer — go straight to the close"
+    )
 
     parts.append(f"""
 
@@ -129,8 +136,7 @@ STRUCTURE — write these as flowing prose, do not label the sections:
 2. One concrete past story — specific problem, specific action, named project, real outcome
 3. Failure modes you eliminate — name the specific risks this client faces
 4. 1-2 portfolio anchors — real product names with a sentence of context
-5. No-cost call offer — one sentence offering a free, no-commitment call to discuss the project
-   (e.g. "Happy to jump on a quick call at no cost or obligation to talk through your requirements.")
+5. {call_offer_step}
 6. Peer-level close: "Warm regards,"
 
 LENGTH: 300-450 words. No salutation. No signature. No placeholders.
@@ -223,6 +229,7 @@ def build_user_prompt(
     profile: UserProfile,
     past_proposals: Optional[List[Dict]] = None,
     inclusions: Optional[str] = None,
+    include_call_offer: bool = True,
 ) -> str:
     """Build user prompt with job and match details."""
     parts = [
@@ -289,12 +296,17 @@ def build_user_prompt(
                     parts.append(f"\n\nJOB-TYPE CREDENTIAL GUIDANCE:\n{guidance}")
                 break
 
+    call_offer_reminder = (
+        "Before the close, include one sentence offering a free, no-commitment call to discuss their project. "
+        if include_call_offer
+        else ""
+    )
     parts.append(
         "\n\nNow write the proposal. Start with the pattern recognition hook — "
         "identify what situation this client is in and show you've been here before. "
         "Pick the most relevant portfolio story and tell it specifically. "
-        "Name the failure modes. Anchor with portfolio products. "
-        "Before the close, include one sentence offering a free, no-commitment call to discuss their project. "
+        f"Name the failure modes. Anchor with portfolio products. "
+        f"{call_offer_reminder}"
         "Remember: NO sentence starts with 'I'. End with 'Warm regards,'"
     )
 
@@ -375,11 +387,12 @@ async def generate_cover_letter(
     past_proposals: Optional[List[Dict]] = None,
     inclusions: Optional[str] = None,
     prototype_url: Optional[str] = None,
+    include_call_offer: bool = True,
 ) -> str:
     """Generate a personalized cover letter using Claude."""
     client = _get_anthropic_client()
 
-    system_prompt = build_system_prompt(profile)
+    system_prompt = build_system_prompt(profile, include_call_offer=include_call_offer)
     user_prompt = build_user_prompt(
         job_title=job_title,
         job_description=job_description,
@@ -391,6 +404,7 @@ async def generate_cover_letter(
         profile=profile,
         past_proposals=past_proposals,
         inclusions=inclusions,
+        include_call_offer=include_call_offer,
     )
 
     response = await client.messages.create(

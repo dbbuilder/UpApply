@@ -759,6 +759,7 @@ export interface CoverLetterGenerateRequest {
   job_data?: JobCreate;
   custom_instructions?: string;
   prototype_url?: string;
+  include_call_offer?: boolean;
 }
 
 export interface CoverLetter {

@@ -58,7 +58,7 @@ interface AppState {
   logout: () => Promise<void>;
   loadProfile: () => Promise<void>;
   analyzeCurrentJob: () => Promise<void>;
-  generateCoverLetter: (inclusions?: string, prototypeUrl?: string) => Promise<void>;
+  generateCoverLetter: (inclusions?: string, prototypeUrl?: string, includeCallOffer?: boolean) => Promise<void>;
   regenerateCoverLetter: (feedback?: string) => Promise<void>;
   fillCoverLetter: () => Promise<boolean>;
   fillScreeningQuestion: (selector: string, answer: string) => Promise<boolean>;
@@ -268,7 +268,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   // Generate cover letter
-  generateCoverLetter: async (inclusions?: string, prototypeUrl?: string) => {
+  generateCoverLetter: async (inclusions?: string, prototypeUrl?: string, includeCallOffer: boolean = true) => {
     const { currentJob } = get();
     if (!currentJob || !currentJob.title || !currentJob.description) {
       return;
@@ -287,6 +287,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         },
         custom_instructions: inclusions || undefined,
         prototype_url: prototypeUrl || undefined,
+        include_call_offer: includeCallOffer,
       });
       set({
         coverLetter: result.content,

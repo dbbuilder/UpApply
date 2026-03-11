@@ -72,9 +72,10 @@ export default function GeneratorPage() {
   const [addingSkill, setAddingSkill] = useState<string | null>(null);
   const [addedSkills, setAddedSkills] = useState<Set<string>>(new Set());
 
-  // State for inclusions and prototype URL
+  // State for inclusions, prototype URL, and call offer
   const [inclusions, setInclusions] = useState('');
   const [prototypeUrl, setPrototypeUrl] = useState('');
+  const [includeCallOffer, setIncludeCallOffer] = useState(true);
 
   // State for milestones
   const [milestones, setMilestones] = useState<MilestoneSuggestion[]>([]);
@@ -135,7 +136,7 @@ export default function GeneratorPage() {
   };
 
   const handleGenerate = () => {
-    generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined);
+    generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
   };
 
   const handleRegenerate = () => {
@@ -151,7 +152,7 @@ export default function GeneratorPage() {
   const handleRegenerateFresh = () => {
     setShowFeedbackInput(false);
     setFeedbackText('');
-    generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined);
+    generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
   };
 
   const handleFill = async () => {
@@ -325,7 +326,7 @@ export default function GeneratorPage() {
 
   const handleGenerateAll = async () => {
     // Generate cover letter
-    await generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined);
+    await generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
     // Generate all Q&A answers in parallel
     if (currentJob?.screeningQuestions && currentJob.screeningQuestions.length > 0) {
       const results = await Promise.allSettled(
@@ -793,6 +794,18 @@ export default function GeneratorPage() {
                     </p>
                   )}
                 </div>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={includeCallOffer}
+                    onChange={e => setIncludeCallOffer(e.target.checked)}
+                    className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span className="text-xs text-gray-600">
+                    Include no-cost call offer
+                    <span className="text-gray-400 ml-1">(recommended)</span>
+                  </span>
+                </label>
                 <div className="flex gap-2">
                   <button
                     type="button"

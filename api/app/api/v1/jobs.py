@@ -748,6 +748,7 @@ async def generate_cover_letter_endpoint(
         past_proposals=past_proposals,
         inclusions=request.custom_instructions,
         prototype_url=request.prototype_url,
+        include_call_offer=request.include_call_offer,
     )
 
     # Save cover letter

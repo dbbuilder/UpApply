@@ -128,6 +128,7 @@ class CoverLetterGenerateRequest(BaseModel):
     focus_skills: Optional[List[str]] = None  # Skills to emphasize
     custom_instructions: Optional[str] = None  # Additional instructions
     prototype_url: Optional[str] = None  # URL to a prototype built for this job
+    include_call_offer: bool = True  # Append no-cost/no-commitment call offer before close
 
 
 class CoverLetterResponse(BaseModel):
