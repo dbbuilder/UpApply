@@ -718,11 +718,64 @@ function _normalizeJobUrl(url: string): string {
   }
 }
 
-function _scoreToNotifColors(score: number): { bg: string; color: string } {
-  if (score >= 90) return { bg: '#15803d', color: '#ffffff' }; // deep green
-  if (score >= 80) return { bg: '#22c55e', color: '#14532d' }; // lighter green
-  if (score >= 70) return { bg: '#ca8a04', color: '#ffffff' }; // yellow
-  return { bg: '#dc2626', color: '#ffffff' };                  // red
+// ---------------------------------------------------------------------------
+// Star rating — combines score + budget into 1–5 ★ for quick visual triage
+// ---------------------------------------------------------------------------
+
+function _parseBudgetFromChips(chips: string[]): { amount: number; type: 'hourly' | 'fixed' } | null {
+  const chip = chips.find(c => c.startsWith('$'));
+  if (!chip) return null;
+  // Use top-of-range if it's a range like "$50-$100/hr"
+  const top = chip.replace(/^\$[\d,]+(?:\.\d+)?\s*[-–]\s*/, ''); // strip lower bound
+  const isHourly = /\/h(r|our)?/.test(chip);
+  const num = parseFloat(top.replace(/[^0-9.]/g, ''));
+  if (!num || isNaN(num)) return null;
+  return { amount: num, type: isHourly ? 'hourly' : 'fixed' };
+}
+
+function _computeStars(score: number, chips: string[]): number {
+  // Base stars from AI score
+  let stars: number;
+  if (score >= 85) stars = 5;
+  else if (score >= 70) stars = 4;
+  else if (score >= 52) stars = 3;
+  else if (score >= 35) stars = 2;
+  else stars = 1;
+
+  // Budget modifier: ±1 based on rate/amount
+  const budget = _parseBudgetFromChips(chips);
+  if (budget) {
+    const { amount, type } = budget;
+    const isHigh = type === 'hourly' ? amount >= 100 : amount >= 8000;
+    const isLow  = type === 'hourly' ? amount < 25   : amount < 400;
+    if (isHigh) stars = Math.min(5, stars + 1);
+    else if (isLow) stars = Math.max(1, stars - 1);
+  }
+
+  return stars;
+}
+
+function _starsDisplay(stars: number): string {
+  return '★'.repeat(stars) + '☆'.repeat(5 - stars);
+}
+
+function _starsColors(stars: number): { bg: string; color: string } {
+  if (stars >= 5) return { bg: '#b45309', color: '#fff' }; // amber/gold
+  if (stars >= 4) return { bg: '#15803d', color: '#fff' }; // green
+  if (stars >= 3) return { bg: '#ca8a04', color: '#fff' }; // yellow
+  if (stars >= 2) return { bg: '#9a3412', color: '#fff' }; // orange
+  return { bg: '#6b7280', color: '#fff' };                  // gray
+}
+
+/** Trim the chip list based on star tier — fewer stars = less visual noise. */
+function _filterChipsByStars(chips: string[], stars: number): string[] {
+  const budgetChip = chips.find(c => c.startsWith('$'));
+  const keywords   = chips.filter(c => !c.startsWith('$'));
+
+  if (stars >= 4) return chips;                                      // all chips
+  if (stars === 3) return [...keywords.slice(0, 3), ...(budgetChip ? [budgetChip] : [])]; // 3 keywords + budget
+  if (stars === 2) return budgetChip ? [budgetChip] : [];            // budget only
+  return [];                                                          // 1★: none
 }
 
 function _injectNotifBadge(row: Element, jobUrl: string): HTMLElement {
@@ -730,11 +783,11 @@ function _injectNotifBadge(row: Element, jobUrl: string): HTMLElement {
   badge.dataset.upapplyJob = _normalizeJobUrl(jobUrl);
   badge.style.cssText =
     'display:inline-flex;align-items:center;justify-content:center;' +
-    'min-width:38px;height:24px;border-radius:12px;' +
+    'min-width:62px;height:22px;border-radius:11px;' +
     'font-size:13px;font-weight:700;color:#9ca3af;' +
     'background:#f3f4f6;border:1px solid #e5e7eb;' +
-    'padding:0 8px;margin-left:8px;vertical-align:middle;' +
-    'cursor:default;font-family:-apple-system,sans-serif;white-space:nowrap;';
+    'padding:0 6px;margin-left:8px;vertical-align:middle;' +
+    'cursor:default;font-family:-apple-system,sans-serif;white-space:nowrap;letter-spacing:1px;';
   badge.textContent = '…';
   badge.title = 'UpApply: scoring…';
   const link = row.querySelector<HTMLAnchorElement>('a[href*="/jobs/~"]');
@@ -1017,7 +1070,7 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
   console.log(`[UpApply] score START  ${uid} "${item.title.slice(0, 40)}"`);
   try {
     // 1. Persistent cache check
-    const CACHE_KEY = `sc_v7_${item.jobUrl}`;
+    const CACHE_KEY = `sc_v8_${item.jobUrl}`;
     const CACHE_TTL = 24 * 60 * 60 * 1000;
     const storageAvailable = !!(chrome?.storage?.local);
     if (storageAvailable) {
@@ -1100,13 +1153,15 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
 
 function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[], fromCache: boolean, reason?: string): void {
   const rounded = Math.round(score);
-  const { bg, color } = _scoreToNotifColors(rounded);
+  const stars = _computeStars(rounded, chips);
+  const { bg, color } = _starsColors(stars);
   item.badge.style.background = bg;
   item.badge.style.color = color;
   item.badge.style.border = 'none';
-  item.badge.textContent = String(rounded);
-  item.badge.title = `UpApply match: ${rounded}/100${fromCache ? ' (cached)' : ''}`;
-  if (chips.length) _injectChips(item.row, chips);
+  item.badge.textContent = _starsDisplay(stars);
+  item.badge.title = `UpApply: ${stars}★  (score ${rounded}/100)${fromCache ? ' · cached' : ''}`;
+  const visibleChips = _filterChipsByStars(chips, stars);
+  if (visibleChips.length) _injectChips(item.row, visibleChips);
 
   // Inject scoring reason as a blue line below the job title link
   if (reason) {
@@ -1216,8 +1271,11 @@ function _refreshHud(): void {
   if (!topRow) { hud.style.display = 'none'; return; }
 
   const badge = topRow.querySelector<HTMLElement>('[data-upapply-job]');
-  const score = parseInt(badge?.textContent?.trim() || '0', 10);
-  const { bg, color } = _scoreToNotifColors(score);
+  const badgeText = badge?.textContent?.trim() || '';
+  if (!badgeText || badgeText === '…' || badgeText === '?') { hud.style.display = 'none'; return; }
+  // Badge now shows stars (★★★☆☆); read star count from filled ★ chars
+  const stars = (badgeText.match(/★/g) || []).length || 0;
+  const { bg, color } = _starsColors(stars);
   const link = topRow.querySelector<HTMLAnchorElement>('a[href*="/jobs/~"]');
   const title = link?.textContent?.trim() || '';
   const reason = topRow.querySelector('[data-upapply-reason]')?.textContent?.trim() || '';
@@ -1226,8 +1284,8 @@ function _refreshHud(): void {
   hud.style.display = 'flex';
 
   const pill = document.createElement('span');
-  pill.textContent = String(score);
-  pill.style.cssText = `background:${bg};color:${color};font-size:16px;font-weight:700;border-radius:8px;padding:3px 10px;flex-shrink:0;min-width:36px;text-align:center;`;
+  pill.textContent = badgeText;
+  pill.style.cssText = `background:${bg};color:${color};font-size:14px;font-weight:700;border-radius:8px;padding:3px 10px;flex-shrink:0;letter-spacing:1px;`;
   hud.appendChild(pill);
 
   const info = document.createElement('div');
