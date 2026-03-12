@@ -1025,13 +1025,20 @@ function _showActionPanel(badge: HTMLElement, jobUrl: string, title: string, sta
   _closeActivePanel();
 
   const rect = badge.getBoundingClientRect();
-  const panelLeft = Math.min(rect.left, window.innerWidth - 330 - 8);
+  // Guard: badge not yet rendered (zero-size rect from race with Upwork's layout) — retry after paint
+  if (rect.width === 0 || rect.bottom === 0) {
+    requestAnimationFrame(() => _showActionPanel(badge, jobUrl, title, stars, score, chips, reason));
+    return;
+  }
+  const NAV_H = 72; // Upwork nav bar height — panel must never overlap it
+  const panelLeft = Math.max(8, Math.min(rect.left, window.innerWidth - 330 - 8));
+  const rawTop = rect.bottom + 6;
   const openAbove = (window.innerHeight - rect.bottom) < 160;
 
   const panel = document.createElement('div');
   panel.style.cssText = [
     'position:fixed',
-    openAbove ? `bottom:${window.innerHeight - rect.top + 6}px` : `top:${rect.bottom + 6}px`,
+    openAbove ? `bottom:${window.innerHeight - rect.top + 6}px` : `top:${Math.max(NAV_H, rawTop)}px`,
     `left:${panelLeft}px`,
     'z-index:2147483647',
     'background:#fff',
