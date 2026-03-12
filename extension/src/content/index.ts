@@ -939,37 +939,41 @@ async function _ensureJobSaved(jobUrl: string, token: string, apiBase: string, f
   return job.id;
 }
 
-function _makeActionRow(
+/** Small always-visible inline checkbox injected directly into the notification row. */
+function _makeInlineAction(
   text: string,
   accentColor: string,
   onClick: (cb: HTMLElement, lbl: HTMLElement) => Promise<void>,
 ): HTMLElement {
-  const row = document.createElement('div');
-  row.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;padding:3px 0;user-select:none;';
+  const wrap = document.createElement('span');
+  wrap.style.cssText =
+    'display:inline-flex;align-items:center;gap:3px;cursor:pointer;' +
+    'margin-left:7px;vertical-align:middle;user-select:none;';
 
   const cb = document.createElement('span');
   cb.style.cssText =
     `display:inline-flex;align-items:center;justify-content:center;` +
-    `width:16px;height:16px;border-radius:4px;border:1.5px solid ${accentColor};` +
-    `font-size:10px;flex-shrink:0;transition:background 0.15s;`;
+    `width:13px;height:13px;border-radius:3px;border:1.5px solid ${accentColor};` +
+    `font-size:9px;flex-shrink:0;transition:background 0.15s,border-color 0.15s;`;
 
   const lbl = document.createElement('span');
   lbl.textContent = text;
-  lbl.style.cssText = `font-size:11px;color:${accentColor};font-weight:600;white-space:nowrap;`;
+  lbl.style.cssText = `font-size:10px;color:${accentColor};font-weight:600;white-space:nowrap;`;
 
-  row.appendChild(cb);
-  row.appendChild(lbl);
+  wrap.appendChild(cb);
+  wrap.appendChild(lbl);
 
   let running = false;
-  row.addEventListener('click', (e) => {
+  wrap.addEventListener('click', (e) => {
     e.stopPropagation();
     if (running || cb.dataset.done === '1') return;
     running = true;
-    cb.style.background = '#f3f4f6';
-    onClick(cb, lbl).finally(() => { running = false; });
+    lbl.style.opacity = '0.6';
+    onClick(cb, lbl).finally(() => { running = false; lbl.style.opacity = '1'; });
   });
-  return row;
+  return wrap;
 }
+
 
 async function _queueJobAction(jobUrl: string, title: string, cb: HTMLElement, lbl: HTMLElement): Promise<void> {
   const token = await _getAuthToken();
@@ -1096,17 +1100,6 @@ function _showActionPanel(badge: HTMLElement, jobUrl: string, title: string, sta
     reasonEl.style.cssText = 'font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:8px;';
     panel.appendChild(reasonEl);
   }
-
-  // Divider
-  const divider = document.createElement('div');
-  divider.style.cssText = 'border-top:1px solid #f3f4f6;margin-bottom:7px;';
-  panel.appendChild(divider);
-
-  // Action rows
-  panel.appendChild(_makeActionRow('+ Apply Queue', '#16a34a', (c, l) => _queueJobAction(jobUrl, title, c, l)));
-  const clRow = _makeActionRow('+ Cover Letter', '#1d4ed8', (c, l) => _coverLetterAction(jobUrl, title, c, l));
-  clRow.style.marginTop = '2px';
-  panel.appendChild(clRow);
 
   document.body.appendChild(panel);
   _activePanel = { el: panel, timer: null };
@@ -1441,6 +1434,23 @@ function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[]
   const visibleChips = _filterChipsByStars(chips, stars);
   if (visibleChips.length) _injectChips(item.row, visibleChips);
   _attachBadgePanel(item.badge, item.jobUrl, item.title, stars, rounded, chips, reason ?? '');
+
+  // Inline action checkboxes — always visible on the row, no hover required
+  if (!item.row.querySelector('[data-upapply-actions]')) {
+    const actionsWrap = document.createElement('span');
+    actionsWrap.dataset.upapplyActions = '1';
+    actionsWrap.style.cssText = 'display:inline-flex;align-items:center;';
+    actionsWrap.appendChild(
+      _makeInlineAction('Queue', '#16a34a', (c, l) => _queueJobAction(item.jobUrl, item.title, c, l)),
+    );
+    actionsWrap.appendChild(
+      _makeInlineAction('Letter', '#1d4ed8', (c, l) => _coverLetterAction(item.jobUrl, item.title, c, l)),
+    );
+    // Insert after the last badge/chip in the row
+    const allInRow = [...item.row.querySelectorAll<HTMLElement>('[data-upapply-job],[data-upapply-chip]')];
+    const lastEl = allInRow[allInRow.length - 1] ?? item.badge;
+    lastEl.after(actionsWrap);
+  }
 
   // Inject scoring reason as a blue line below the job title link
   if (reason) {
