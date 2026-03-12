@@ -1009,8 +1009,9 @@ async function _fetchJobViaGraphQL(jobUid: string): Promise<JobFetchResult | nul
   if (xsrfToken) headers['X-XSRF-TOKEN'] = xsrfToken;
 
   // Minimal query — only the fields we need
-  const query = `query jobPosting($jobUid:String!){
-    jobPosting(jobUid:$jobUid){
+  // Note: Upwork changed the argument from jobUid → jobPostingId (same ~UID value)
+  const query = `query jobPosting($jobPostingId:String!){
+    jobPosting(jobPostingId:$jobPostingId){
       id title description contractorTier jobType
       hourlyBudgetMin hourlyBudgetMax
       amount{ amount currencyCode }
@@ -1023,7 +1024,7 @@ async function _fetchJobViaGraphQL(jobUid: string): Promise<JobFetchResult | nul
     method: 'POST',
     headers,
     credentials: 'include',
-    body: JSON.stringify({ operationName: 'jobPosting', query, variables: { jobUid } }),
+    body: JSON.stringify({ operationName: 'jobPosting', query, variables: { jobPostingId: jobUid } }),
     signal: AbortSignal.timeout(8000),
   });
 
@@ -1288,7 +1289,7 @@ function _getOrCreateHud(): HTMLElement {
   const el = document.createElement('div');
   el.setAttribute('data-upapply-hud', '1');
   el.style.cssText = [
-    'position:fixed', 'top:16px', 'right:16px', 'z-index:2147483647',
+    'position:fixed', 'top:72px', 'right:16px', 'z-index:2147483647',
     'display:none', 'align-items:center', 'gap:10px',
     'background:rgba(17,17,17,0.92)',
     'backdrop-filter:blur(8px)', '-webkit-backdrop-filter:blur(8px)',
