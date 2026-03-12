@@ -1284,78 +1284,7 @@ let _hud: HTMLElement | null = null;
 const _hudVisibleRows = new Set<Element>();
 let _hudObserver: IntersectionObserver | null = null;
 
-function _getOrCreateHud(): HTMLElement {
-  if (_hud && document.body.contains(_hud)) return _hud;
-  const el = document.createElement('div');
-  el.setAttribute('data-upapply-hud', '1');
-  el.style.cssText = [
-    'position:fixed', 'top:72px', 'right:16px', 'z-index:2147483647',
-    'display:none', 'align-items:center', 'gap:10px',
-    'background:rgba(17,17,17,0.92)',
-    'backdrop-filter:blur(8px)', '-webkit-backdrop-filter:blur(8px)',
-    'border-radius:12px', 'padding:8px 14px 8px 10px',
-    'box-shadow:0 4px 20px rgba(0,0,0,0.45)',
-    'font-family:system-ui,-apple-system,sans-serif',
-    'max-width:360px', 'pointer-events:none',
-  ].join(';');
-  document.body.appendChild(el);
-  _hud = el;
-  return el;
-}
-
-function _refreshHud(): void {
-  const path = window.location.pathname;
-  const onScoredPage = path.includes('/notifications') || path.includes('/nx/search/jobs');
-  const hud = _getOrCreateHud();
-  if (!onScoredPage) { hud.style.display = 'none'; return; }
-
-  // Pick the topmost visible scored row
-  let topRow: Element | null = null;
-  let topY = Infinity;
-  for (const row of _hudVisibleRows) {
-    const badge = row.querySelector<HTMLElement>('[data-upapply-job]');
-    const txt = badge?.textContent?.trim();
-    if (!txt || txt === '…' || txt === '?') continue;
-    const y = row.getBoundingClientRect().top;
-    if (y < topY) { topY = y; topRow = row; }
-  }
-
-  if (!topRow) { hud.style.display = 'none'; return; }
-
-  const badge = topRow.querySelector<HTMLElement>('[data-upapply-job]');
-  const badgeText = badge?.textContent?.trim() || '';
-  if (!badgeText || badgeText === '…' || badgeText === '?') { hud.style.display = 'none'; return; }
-  // Badge now shows stars (★★★☆☆); read star count from filled ★ chars
-  const stars = (badgeText.match(/★/g) || []).length || 0;
-  const { bg, color } = _starsColors(stars);
-  const link = topRow.querySelector<HTMLAnchorElement>('a[href*="/jobs/~"]');
-  const title = link?.textContent?.trim() || '';
-  const reason = topRow.querySelector('[data-upapply-reason]')?.textContent?.trim() || '';
-
-  hud.innerHTML = '';
-  hud.style.display = 'flex';
-
-  const pill = document.createElement('span');
-  pill.textContent = badgeText;
-  pill.style.cssText = `background:${bg};color:${color};font-size:14px;font-weight:700;border-radius:8px;padding:3px 10px;flex-shrink:0;letter-spacing:1px;`;
-  hud.appendChild(pill);
-
-  const info = document.createElement('div');
-  info.style.cssText = 'min-width:0;flex:1;';
-
-  const titleEl = document.createElement('div');
-  titleEl.textContent = title.length > 55 ? title.slice(0, 55) + '…' : title;
-  titleEl.style.cssText = 'color:#fff;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;';
-  info.appendChild(titleEl);
-
-  if (reason) {
-    const reasonDiv = document.createElement('div');
-    reasonDiv.textContent = reason.length > 72 ? reason.slice(0, 72) + '…' : reason;
-    reasonDiv.style.cssText = 'color:#93c5fd;font-size:10px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;';
-    info.appendChild(reasonDiv);
-  }
-  hud.appendChild(info);
-}
+function _refreshHud(): void { /* HUD removed — inline star badges are sufficient */ }
 
 function _observeRowForHud(row: Element): void {
   if (!_hudObserver) {
