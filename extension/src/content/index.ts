@@ -1412,24 +1412,41 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
   console.log(`[UpApply] score START  ${uid} "${item.title.slice(0, 40)}"`);
   try {
     // 1. Persistent cache check
-    const CACHE_KEY = `sc_v8_${item.jobUrl}`;
+    // sc_v9: added description/title/skills so preview toggle never needs to re-fetch
+    const CACHE_KEY = `sc_v9_${item.jobUrl}`;
     const CACHE_TTL = 24 * 60 * 60 * 1000;
+    type CacheEntry = { score: number; chips: string[]; reason?: string; title?: string; description?: string; skills?: string[]; ts: number };
     const storageAvailable = !!(chrome?.storage?.local);
     if (storageAvailable) {
       const cacheStore = await chrome.storage.local.get(CACHE_KEY);
-      const cached = cacheStore[CACHE_KEY] as { score: number; chips: string[]; reason?: string; ts: number } | undefined;
+      const cached = cacheStore[CACHE_KEY] as CacheEntry | undefined;
       if (cached && Date.now() - cached.ts < CACHE_TTL) {
         console.log(`[UpApply] score CACHED ${uid} score=${cached.score}`);
+        // Restore job data so preview toggle and action panel don't need to re-fetch
+        if (!_jobDataStore.has(item.jobUrl)) {
+          _jobDataStore.set(item.jobUrl, {
+            title: cached.title || item.title,
+            description: cached.description || '',
+            skills: cached.skills || [],
+          });
+        }
         _applyBadgeResult(item, cached.score, cached.chips, true, cached.reason);
         return;
       }
     } else {
       // Fallback: ask background for cached value
       try {
-        const resp = await chrome.runtime.sendMessage({ type: 'GET_NOTIF_CACHE', key: CACHE_KEY }) as { value: { score: number; chips: string[]; reason?: string; ts: number } | null };
+        const resp = await chrome.runtime.sendMessage({ type: 'GET_NOTIF_CACHE', key: CACHE_KEY }) as { value: CacheEntry | null };
         const cached = resp?.value;
         if (cached && Date.now() - cached.ts < CACHE_TTL) {
           console.log(`[UpApply] score CACHED(SW) ${uid} score=${cached.score}`);
+          if (!_jobDataStore.has(item.jobUrl)) {
+            _jobDataStore.set(item.jobUrl, {
+              title: cached.title || item.title,
+              description: cached.description || '',
+              skills: cached.skills || [],
+            });
+          }
           _applyBadgeResult(item, cached.score, cached.chips, true, cached.reason);
           return;
         }
@@ -1476,7 +1493,11 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
 
     // 5. Compute chips and cache result
     const chips = detectNotifChips(item.title, description, jobData.budgetAmount, jobData.budgetType);
-    const cacheValue = { score: data.match_score, chips, reason: data.reason, ts: Date.now() };
+    const cacheValue = {
+      score: data.match_score, chips, reason: data.reason,
+      title: item.title, description, skills: jobData.skills,
+      ts: Date.now(),
+    };
     if (storageAvailable) {
       await chrome.storage.local.set({ [CACHE_KEY]: cacheValue });
     } else {
