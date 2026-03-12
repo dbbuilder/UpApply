@@ -991,8 +991,18 @@ let _contentAuthToken: string | null | undefined = undefined;
 
 async function _getAuthToken(): Promise<string | null> {
   if (_contentAuthToken !== undefined) return _contentAuthToken;
-  const stored = await chrome.storage.local.get('authToken');
-  _contentAuthToken = (stored['authToken'] as string) || null;
+  if (chrome?.storage?.local) {
+    const stored = await chrome.storage.local.get('authToken');
+    _contentAuthToken = (stored['authToken'] as string) || null;
+  } else {
+    // chrome.storage unavailable in this module context — ask background SW
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: 'GET_AUTH_TOKEN' }) as { token: string | null };
+      _contentAuthToken = resp?.token || null;
+    } catch {
+      _contentAuthToken = null;
+    }
+  }
   return _contentAuthToken;
 }
 
@@ -1006,15 +1016,29 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
   const uid = item.jobUrl.match(/(~[0-9a-f]+)/i)?.[1] ?? item.jobUrl.slice(-12);
   console.log(`[UpApply] score START  ${uid} "${item.title.slice(0, 40)}"`);
   try {
-    // 1. Persistent cache check (chrome.storage.local, no SW round trip)
+    // 1. Persistent cache check
     const CACHE_KEY = `sc_v7_${item.jobUrl}`;
     const CACHE_TTL = 24 * 60 * 60 * 1000;
-    const cacheStore = await chrome.storage.local.get(CACHE_KEY);
-    const cached = cacheStore[CACHE_KEY] as { score: number; chips: string[]; reason?: string; ts: number } | undefined;
-    if (cached && Date.now() - cached.ts < CACHE_TTL) {
-      console.log(`[UpApply] score CACHED ${uid} score=${cached.score}`);
-      _applyBadgeResult(item, cached.score, cached.chips, true, cached.reason);
-      return;
+    const storageAvailable = !!(chrome?.storage?.local);
+    if (storageAvailable) {
+      const cacheStore = await chrome.storage.local.get(CACHE_KEY);
+      const cached = cacheStore[CACHE_KEY] as { score: number; chips: string[]; reason?: string; ts: number } | undefined;
+      if (cached && Date.now() - cached.ts < CACHE_TTL) {
+        console.log(`[UpApply] score CACHED ${uid} score=${cached.score}`);
+        _applyBadgeResult(item, cached.score, cached.chips, true, cached.reason);
+        return;
+      }
+    } else {
+      // Fallback: ask background for cached value
+      try {
+        const resp = await chrome.runtime.sendMessage({ type: 'GET_NOTIF_CACHE', key: CACHE_KEY }) as { value: { score: number; chips: string[]; reason?: string; ts: number } | null };
+        const cached = resp?.value;
+        if (cached && Date.now() - cached.ts < CACHE_TTL) {
+          console.log(`[UpApply] score CACHED(SW) ${uid} score=${cached.score}`);
+          _applyBadgeResult(item, cached.score, cached.chips, true, cached.reason);
+          return;
+        }
+      } catch { /* skip cache on error */ }
     }
 
     // 2. Auth token (read once per scoring session, cached in memory)
@@ -1057,7 +1081,12 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
 
     // 5. Compute chips and cache result
     const chips = detectNotifChips(item.title, description, jobData.budgetAmount, jobData.budgetType);
-    await chrome.storage.local.set({ [CACHE_KEY]: { score: data.match_score, chips, reason: data.reason, ts: Date.now() } });
+    const cacheValue = { score: data.match_score, chips, reason: data.reason, ts: Date.now() };
+    if (storageAvailable) {
+      await chrome.storage.local.set({ [CACHE_KEY]: cacheValue });
+    } else {
+      chrome.runtime.sendMessage({ type: 'SET_NOTIF_CACHE', key: CACHE_KEY, value: cacheValue }).catch(() => {});
+    }
 
     _applyBadgeResult(item, data.match_score, chips, false, data.reason);
     console.log(`[UpApply] score DONE   ${uid}`);
@@ -1095,22 +1124,24 @@ function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[]
   }
 
   // Persist to scoredJobsCache for the sidebar's Find view
-  chrome.storage.local.get('scoredJobsCache', (data) => {
-    const cache: Record<string, { url: string; title: string; score: number; chips: string[]; scored_at: string }> =
-      data.scoredJobsCache || {};
-    cache[item.jobUrl] = {
-      url: item.jobUrl,
-      title: item.title || '',
-      score: rounded,
-      chips,
-      scored_at: new Date().toISOString(),
-    };
-    // Cap at 500 entries — evict oldest by scored_at
-    const entries = Object.values(cache).sort((a, b) => b.scored_at.localeCompare(a.scored_at));
-    const capped: typeof cache = {};
-    entries.slice(0, 500).forEach(e => { capped[e.url] = e; });
-    chrome.storage.local.set({ scoredJobsCache: capped });
-  });
+  if (chrome?.storage?.local) {
+    chrome.storage.local.get('scoredJobsCache', (data) => {
+      const cache: Record<string, { url: string; title: string; score: number; chips: string[]; scored_at: string }> =
+        data.scoredJobsCache || {};
+      cache[item.jobUrl] = {
+        url: item.jobUrl,
+        title: item.title || '',
+        score: rounded,
+        chips,
+        scored_at: new Date().toISOString(),
+      };
+      // Cap at 500 entries — evict oldest by scored_at
+      const entries = Object.values(cache).sort((a, b) => b.scored_at.localeCompare(a.scored_at));
+      const capped: typeof cache = {};
+      entries.slice(0, 500).forEach(e => { capped[e.url] = e; });
+      chrome.storage.local.set({ scoredJobsCache: capped });
+    });
+  }
 
   // Fire-and-forget write to API job-reviews for persistence across sessions
   _getAuthToken().then(token => {
@@ -1533,7 +1564,9 @@ async function _scrapeAllContracts(): Promise<ScrapedContract[]> {
   }
 
   const reportPage = (page: number) => {
-    chrome.storage.local.set({ contractImportProgress: { stage: 'scraping', page, total: maxPages } });
+    if (chrome?.storage?.local) {
+      chrome.storage.local.set({ contractImportProgress: { stage: 'scraping', page, total: maxPages } });
+    }
   };
 
   reportPage(1);
@@ -1955,6 +1988,7 @@ const INIT_FLAG = '__upapply_initialized__';
  */
 async function checkPendingAutoFill(): Promise<void> {
   if (!window.location.href.includes('/apply')) return;
+  if (!chrome?.storage?.local) return;  // no-op if storage unavailable
 
   const result = await chrome.storage.local.get('pendingAutoFill');
   const pending = result.pendingAutoFill as {

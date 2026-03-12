@@ -59,6 +59,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ data: currentJobData });
       break;
 
+    case 'GET_AUTH_TOKEN': {
+      // Content script may not have chrome.storage access — delegate to SW
+      chrome.storage.local.get('authToken').then((stored) => {
+        sendResponse({ token: (stored['authToken'] as string) || null });
+      }).catch(() => sendResponse({ token: null }));
+      return true;
+    }
+
+    case 'SET_NOTIF_CACHE': {
+      // Content script delegates cache writes when chrome.storage unavailable
+      const { key, value } = message as { key: string; value: unknown };
+      chrome.storage.local.set({ [key]: value }).catch(() => {});
+      break;
+    }
+
+    case 'GET_NOTIF_CACHE': {
+      const { key: cacheKey } = message as { key: string };
+      chrome.storage.local.get(cacheKey).then((stored) => {
+        sendResponse({ value: stored[cacheKey] ?? null });
+      }).catch(() => sendResponse({ value: null }));
+      return true;
+    }
+
     case 'REQUEST_JOB_EXTRACTION':
       // Forward extraction request to content script in active tab
       chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
