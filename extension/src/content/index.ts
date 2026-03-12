@@ -848,23 +848,69 @@ const _CHIP_COLORS: Record<string, { bg: string; color: string }> = {
   'Long-term': { bg: '#059669', color: '#fff' },  // emerald
 };
 
-function _injectChips(row: Element, chips: string[]): void {
-  chips.forEach((label) => {
-    const chip = document.createElement('span');
-    const colors = _CHIP_COLORS[label] ?? { bg: '#166534', color: '#fff' }; // budget → green
-    chip.style.cssText =
-      'display:inline-flex;align-items:center;justify-content:center;' +
-      `background:${colors.bg};color:${colors.color};` +
-      'height:20px;border-radius:10px;' +
-      'font-size:11px;font-weight:600;' +
-      'padding:0 7px;margin-left:5px;vertical-align:middle;' +
-      'font-family:-apple-system,sans-serif;white-space:nowrap;letter-spacing:0.01em;';
-    chip.textContent = label;
-    // Insert after the last upapply element in this row
+const _CHIP_BASE_CSS =
+  'display:inline-flex;align-items:center;justify-content:center;' +
+  'height:20px;border-radius:10px;' +
+  'font-size:11px;font-weight:600;' +
+  'vertical-align:middle;' +
+  'font-family:-apple-system,sans-serif;white-space:nowrap;letter-spacing:0.01em;';
+
+function _makeChipEl(label: string, bonus: boolean): HTMLElement {
+  const chip = document.createElement('span');
+  const colors = _CHIP_COLORS[label] ?? { bg: '#166534', color: '#fff' };
+  chip.style.cssText =
+    _CHIP_BASE_CSS +
+    `background:${colors.bg};color:${colors.color};` +
+    (bonus
+      ? 'max-width:0;overflow:hidden;opacity:0;padding:0;margin-left:0;' +
+        'transition:max-width 0.22s ease,opacity 0.18s ease,margin-left 0.22s ease,padding 0.22s ease;'
+      : 'padding:0 7px;margin-left:5px;');
+  chip.textContent = label;
+  chip.dataset.upapplyChip = label;
+  if (bonus) chip.dataset.upapplyBonus = '1';
+  return chip;
+}
+
+function _injectChips(row: Element, chips: string[], bonus = false): HTMLElement[] {
+  return chips.map((label) => {
+    const chip = _makeChipEl(label, bonus);
     const all = [...row.querySelectorAll<HTMLElement>('[data-upapply-job],[data-upapply-chip]')];
-    const lastBadge = all[all.length - 1];
-    if (lastBadge) lastBadge.after(chip);
-    chip.dataset.upapplyChip = label;
+    const last = all[all.length - 1];
+    if (last) last.after(chip);
+    return chip;
+  });
+}
+
+function _attachBonusHover(badge: HTMLElement, bonusEls: HTMLElement[]): void {
+  if (!bonusEls.length) return;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const expand = () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    bonusEls.forEach(c => {
+      c.style.maxWidth = '150px';
+      c.style.opacity = '1';
+      c.style.marginLeft = '5px';
+      c.style.padding = '0 7px';
+    });
+  };
+  const scheduleCollapse = () => {
+    timer = setTimeout(() => {
+      bonusEls.forEach(c => {
+        c.style.maxWidth = '0';
+        c.style.opacity = '0';
+        c.style.marginLeft = '0';
+        c.style.padding = '0';
+      });
+      timer = null;
+    }, 220);
+  };
+
+  badge.addEventListener('mouseenter', expand);
+  badge.addEventListener('mouseleave', scheduleCollapse);
+  bonusEls.forEach(el => {
+    el.addEventListener('mouseenter', expand);
+    el.addEventListener('mouseleave', scheduleCollapse);
   });
 }
 
@@ -1159,9 +1205,14 @@ function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[]
   item.badge.style.color = color;
   item.badge.style.border = 'none';
   item.badge.textContent = _starsDisplay(stars);
-  item.badge.title = `UpApply: ${stars}★  (score ${rounded}/100)${fromCache ? ' · cached' : ''}`;
+  item.badge.title = `UpApply: ${stars}★  (score ${rounded}/100)${fromCache ? ' · cached' : ''} — hover for all tags`;
+  item.badge.style.cursor = 'default';
   const visibleChips = _filterChipsByStars(chips, stars);
-  if (visibleChips.length) _injectChips(item.row, visibleChips);
+  const visibleSet = new Set(visibleChips);
+  const bonusChips = chips.filter(c => !visibleSet.has(c));
+  if (visibleChips.length) _injectChips(item.row, visibleChips, false);
+  const bonusEls = bonusChips.length ? _injectChips(item.row, bonusChips, true) : [];
+  _attachBonusHover(item.badge, bonusEls);
 
   // Inject scoring reason as a blue line below the job title link
   if (reason) {
