@@ -939,6 +939,84 @@ async function _ensureJobSaved(jobUrl: string, token: string, apiBase: string, f
   return job.id;
 }
 
+/** Inject a "+" toggle button after the job link that expands an inline description preview. */
+function _injectPreviewToggle(row: Element, jobUrl: string): void {
+  if (row.querySelector('[data-upapply-toggle]')) return;
+  const link = row.querySelector<HTMLAnchorElement>('a[href*="/jobs/~"]');
+  if (!link) return;
+
+  // Toggle button — inline, immediately after the job link
+  const toggle = document.createElement('span');
+  toggle.dataset.upapplyToggle = '1';
+  toggle.textContent = '+';
+  toggle.title = 'Preview job posting';
+  toggle.style.cssText =
+    'display:inline-flex;align-items:center;justify-content:center;' +
+    'width:15px;height:15px;border-radius:50%;border:1.5px solid #9ca3af;' +
+    'font-size:11px;font-weight:700;color:#6b7280;cursor:pointer;' +
+    'margin-left:5px;vertical-align:middle;flex-shrink:0;' +
+    'transition:background 0.15s,color 0.15s,border-color 0.15s;';
+
+  // Outer: animates max-height. Inner: carries padding (avoids animation glitch).
+  const preview = document.createElement('div');
+  preview.dataset.upapplyPreview = '1';
+  preview.style.cssText = 'max-height:0;overflow:hidden;transition:max-height 0.28s ease;';
+
+  const previewInner = document.createElement('div');
+  previewInner.style.cssText =
+    'padding:8px 10px;font-size:12px;line-height:1.6;color:#374151;' +
+    'background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;' +
+    'white-space:pre-wrap;word-break:break-word;margin-top:5px;';
+  preview.appendChild(previewInner);
+
+  let open = false;
+  let loaded = false;
+
+  toggle.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    open = !open;
+
+    if (open) {
+      toggle.textContent = '−';
+      toggle.style.background = '#1d4ed8';
+      toggle.style.color = '#fff';
+      toggle.style.borderColor = '#1d4ed8';
+
+      if (!loaded) {
+        previewInner.textContent = 'Loading…';
+        preview.style.maxHeight = '120px';
+        preview.style.overflowY = 'auto';
+
+        let description = _jobDataStore.get(jobUrl)?.description || '';
+        if (!description) {
+          const d = await _fetchJobData(jobUrl);
+          description = d.description || '(No description available)';
+          const rec = _jobDataStore.get(jobUrl);
+          if (rec) rec.description = description;
+          else _jobDataStore.set(jobUrl, { title: link.textContent?.trim() || '', description, skills: d.skills });
+        }
+        previewInner.textContent = description;
+        loaded = true;
+      } else {
+        preview.style.maxHeight = '120px';
+        preview.style.overflowY = 'auto';
+      }
+    } else {
+      toggle.textContent = '+';
+      toggle.style.background = '';
+      toggle.style.color = '#6b7280';
+      toggle.style.borderColor = '#9ca3af';
+      preview.style.maxHeight = '0';
+      preview.style.overflowY = 'hidden';
+    }
+  });
+
+  // Insert toggle inline right after the job link
+  link.after(toggle);
+  // Insert preview block right after toggle (collapses to 0 height until opened)
+  toggle.after(preview);
+}
+
 /** Small always-visible inline checkbox injected directly into the notification row. */
 function _makeInlineAction(
   text: string,
@@ -1451,6 +1529,9 @@ function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[]
     const lastEl = allInRow[allInRow.length - 1] ?? item.badge;
     lastEl.after(actionsWrap);
   }
+
+  // Preview toggle "+" after the job link
+  _injectPreviewToggle(item.row, item.jobUrl);
 
   // Inject scoring reason as a blue line below the job title link
   if (reason) {
