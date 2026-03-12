@@ -767,6 +767,15 @@ function _starsColors(stars: number): { bg: string; color: string } {
   return { bg: '#6b7280', color: '#fff' };                  // gray
 }
 
+// Job data stored at score time so action panel can save/generate without re-fetching
+interface _JobRecord {
+  title: string;
+  description: string;
+  skills: string[];
+  savedJobId?: string;  // set after first successful POST /api/v1/jobs
+}
+const _jobDataStore = new Map<string, _JobRecord>();
+
 /** Trim the chip list based on star tier — fewer stars = less visual noise. */
 function _filterChipsByStars(chips: string[], stars: number): string[] {
   const budgetChip = chips.find(c => c.startsWith('$'));
@@ -820,7 +829,8 @@ function _resetNotifState(): void {
   _contractImportBtnInjected = false;
   _workroomProposalBtnInjected = false;
   _clearAuthTokenCache();
-  // Hide HUD on navigation — will reappear as new scored rows enter view
+  _closeActivePanel();
+  _jobDataStore.clear();
   _hudVisibleRows.clear();
   if (_hud) _hud.style.display = 'none';
   document.getElementById('ua-score-btn')?.remove();
@@ -855,62 +865,269 @@ const _CHIP_BASE_CSS =
   'vertical-align:middle;' +
   'font-family:-apple-system,sans-serif;white-space:nowrap;letter-spacing:0.01em;';
 
-function _makeChipEl(label: string, bonus: boolean): HTMLElement {
+function _makeChipEl(label: string): HTMLElement {
   const chip = document.createElement('span');
   const colors = _CHIP_COLORS[label] ?? { bg: '#166534', color: '#fff' };
   chip.style.cssText =
     _CHIP_BASE_CSS +
-    `background:${colors.bg};color:${colors.color};` +
-    (bonus
-      ? 'max-width:0;overflow:hidden;opacity:0;padding:0;margin-left:0;' +
-        'transition:max-width 0.22s ease,opacity 0.18s ease,margin-left 0.22s ease,padding 0.22s ease;'
-      : 'padding:0 7px;margin-left:5px;');
+    `background:${colors.bg};color:${colors.color};padding:0 7px;margin-left:5px;`;
   chip.textContent = label;
   chip.dataset.upapplyChip = label;
-  if (bonus) chip.dataset.upapplyBonus = '1';
   return chip;
 }
 
-function _injectChips(row: Element, chips: string[], bonus = false): HTMLElement[] {
-  return chips.map((label) => {
-    const chip = _makeChipEl(label, bonus);
+function _injectChips(row: Element, chips: string[]): void {
+  chips.forEach((label) => {
+    const chip = _makeChipEl(label);
     const all = [...row.querySelectorAll<HTMLElement>('[data-upapply-job],[data-upapply-chip]')];
     const last = all[all.length - 1];
     if (last) last.after(chip);
-    return chip;
   });
 }
 
-function _attachBonusHover(badge: HTMLElement, bonusEls: HTMLElement[]): void {
-  if (!bonusEls.length) return;
-  let timer: ReturnType<typeof setTimeout> | null = null;
+// ---------------------------------------------------------------------------
+// Action panel — score details + Apply Queue + Cover Letter
+// ---------------------------------------------------------------------------
 
-  const expand = () => {
-    if (timer) { clearTimeout(timer); timer = null; }
-    bonusEls.forEach(c => {
-      c.style.maxWidth = '150px';
-      c.style.opacity = '1';
-      c.style.marginLeft = '5px';
-      c.style.padding = '0 7px';
+let _activePanel: { el: HTMLElement; timer: ReturnType<typeof setTimeout> | null } | null = null;
+
+function _closeActivePanel(): void {
+  if (_activePanel) {
+    _activePanel.el.remove();
+    if (_activePanel.timer) clearTimeout(_activePanel.timer);
+    _activePanel = null;
+  }
+}
+function _cancelClosePanel(): void {
+  if (_activePanel?.timer) { clearTimeout(_activePanel.timer); _activePanel.timer = null; }
+}
+function _scheduleClosePanel(): void {
+  if (!_activePanel) return;
+  _activePanel.timer = setTimeout(_closeActivePanel, 350);
+}
+
+/** Save the job to the API (idempotent — caches savedJobId). */
+async function _ensureJobSaved(jobUrl: string, token: string, apiBase: string, fallbackTitle = ''): Promise<string | null> {
+  const rec = _jobDataStore.get(jobUrl);
+  if (rec?.savedJobId) return rec.savedJobId;
+
+  // Lazy-fetch description if not already cached from scoring
+  let title = rec?.title || fallbackTitle || 'Job';
+  let description = rec?.description || '';
+  let skills = rec?.skills || [];
+  if (!description) {
+    const d = await _fetchJobData(jobUrl);
+    description = d.description || title;
+    skills = d.skills || [];
+  }
+
+  const resp = await fetch(`${apiBase}/api/v1/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({
+      upwork_url: jobUrl,
+      title,
+      description,
+      skills_required: skills.length ? skills : undefined,
+    }),
+    signal: AbortSignal.timeout(25_000),
+  });
+  if (!resp.ok) return null;
+  const job = await resp.json() as { id: string };
+  if (rec) rec.savedJobId = job.id;
+  else _jobDataStore.set(jobUrl, { title, description, skills, savedJobId: job.id });
+  return job.id;
+}
+
+function _makeActionRow(
+  text: string,
+  accentColor: string,
+  onClick: (cb: HTMLElement, lbl: HTMLElement) => Promise<void>,
+): HTMLElement {
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;padding:3px 0;user-select:none;';
+
+  const cb = document.createElement('span');
+  cb.style.cssText =
+    `display:inline-flex;align-items:center;justify-content:center;` +
+    `width:16px;height:16px;border-radius:4px;border:1.5px solid ${accentColor};` +
+    `font-size:10px;flex-shrink:0;transition:background 0.15s;`;
+
+  const lbl = document.createElement('span');
+  lbl.textContent = text;
+  lbl.style.cssText = `font-size:11px;color:${accentColor};font-weight:600;white-space:nowrap;`;
+
+  row.appendChild(cb);
+  row.appendChild(lbl);
+
+  let running = false;
+  row.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (running || cb.dataset.done === '1') return;
+    running = true;
+    cb.style.background = '#f3f4f6';
+    onClick(cb, lbl).finally(() => { running = false; });
+  });
+  return row;
+}
+
+async function _queueJobAction(jobUrl: string, title: string, cb: HTMLElement, lbl: HTMLElement): Promise<void> {
+  const token = await _getAuthToken();
+  if (!token) { lbl.textContent = '× Not logged in'; lbl.style.color = '#ef4444'; return; }
+  const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
+  try {
+    lbl.textContent = '⟳ Saving job…';
+    const jobId = await _ensureJobSaved(jobUrl, token, apiBase, title);
+    if (!jobId) throw new Error('save failed');
+    lbl.textContent = '⟳ Queuing…';
+    const r = await fetch(`${apiBase}/api/v1/applications`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ job_id: jobId }),
+      signal: AbortSignal.timeout(10_000),
     });
-  };
-  const scheduleCollapse = () => {
-    timer = setTimeout(() => {
-      bonusEls.forEach(c => {
-        c.style.maxWidth = '0';
-        c.style.opacity = '0';
-        c.style.marginLeft = '0';
-        c.style.padding = '0';
-      });
-      timer = null;
-    }, 220);
-  };
+    if (!r.ok) throw new Error(`${r.status}`);
+    cb.textContent = '✓'; cb.dataset.done = '1';
+    cb.style.cssText += 'background:#16a34a;border-color:#16a34a;color:#fff;';
+    lbl.textContent = 'Apply Queue'; lbl.style.color = '#16a34a';
+  } catch {
+    lbl.textContent = '× Failed'; lbl.style.color = '#ef4444';
+  }
+}
 
-  badge.addEventListener('mouseenter', expand);
-  badge.addEventListener('mouseleave', scheduleCollapse);
-  bonusEls.forEach(el => {
-    el.addEventListener('mouseenter', expand);
-    el.addEventListener('mouseleave', scheduleCollapse);
+async function _coverLetterAction(jobUrl: string, title: string, cb: HTMLElement, lbl: HTMLElement): Promise<void> {
+  const token = await _getAuthToken();
+  if (!token) { lbl.textContent = '× Not logged in'; lbl.style.color = '#ef4444'; return; }
+  const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
+  try {
+    lbl.textContent = '⟳ Saving job…';
+    const jobId = await _ensureJobSaved(jobUrl, token, apiBase, title);
+    lbl.textContent = '⟳ Generating…';
+    const body = jobId
+      ? { job_id: jobId, include_call_offer: true }
+      : { job_data: { upwork_url: jobUrl, title, description: _jobDataStore.get(jobUrl)?.description || title }, include_call_offer: true };
+    const r = await fetch(`${apiBase}/api/v1/jobs/cover-letters/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!r.ok) throw new Error(`${r.status}`);
+    cb.textContent = '✓'; cb.dataset.done = '1';
+    cb.style.cssText += 'background:#1d4ed8;border-color:#1d4ed8;color:#fff;';
+    lbl.textContent = '+ Cover Letter'; lbl.style.color = '#1d4ed8';
+  } catch {
+    lbl.textContent = '× Failed'; lbl.style.color = '#ef4444';
+  }
+}
+
+function _showActionPanel(badge: HTMLElement, jobUrl: string, title: string, stars: number, score: number, chips: string[], reason: string): void {
+  _closeActivePanel();
+
+  const rect = badge.getBoundingClientRect();
+  const panelLeft = Math.min(rect.left, window.innerWidth - 330 - 8);
+  const openAbove = (window.innerHeight - rect.bottom) < 160;
+
+  const panel = document.createElement('div');
+  panel.style.cssText = [
+    'position:fixed',
+    openAbove ? `bottom:${window.innerHeight - rect.top + 6}px` : `top:${rect.bottom + 6}px`,
+    `left:${panelLeft}px`,
+    'z-index:2147483647',
+    'background:#fff',
+    'border:1px solid #e5e7eb',
+    'border-radius:10px',
+    'box-shadow:0 4px 18px rgba(0,0,0,0.16)',
+    'padding:10px 12px',
+    'min-width:240px',
+    'max-width:320px',
+    'font-family:system-ui,-apple-system,sans-serif',
+  ].join(';');
+
+  // Row 1: stars pill + score + budget
+  const { bg, color } = _starsColors(stars);
+  const budgetChip = chips.find(c => c.startsWith('$'));
+  const topRow = document.createElement('div');
+  topRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;';
+
+  const starPill = document.createElement('span');
+  starPill.textContent = _starsDisplay(stars);
+  starPill.style.cssText = `background:${bg};color:${color};font-size:12px;font-weight:700;border-radius:6px;padding:2px 8px;letter-spacing:1px;flex-shrink:0;`;
+  topRow.appendChild(starPill);
+
+  const scoreEl = document.createElement('span');
+  scoreEl.textContent = `${score}/100`;
+  scoreEl.style.cssText = 'font-size:12px;font-weight:700;color:#374151;';
+  topRow.appendChild(scoreEl);
+
+  if (budgetChip) {
+    const budgetEl = document.createElement('span');
+    budgetEl.textContent = budgetChip;
+    budgetEl.style.cssText = 'font-size:11px;font-weight:600;color:#059669;background:#d1fae5;padding:1px 6px;border-radius:4px;margin-left:auto;white-space:nowrap;';
+    topRow.appendChild(budgetEl);
+  }
+  panel.appendChild(topRow);
+
+  // Bonus chips (those hidden by star tier)
+  const visibleSet = new Set(_filterChipsByStars(chips, stars));
+  const bonusChips = chips.filter(c => !visibleSet.has(c) && !c.startsWith('$'));
+  if (bonusChips.length) {
+    const chipRow = document.createElement('div');
+    chipRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;';
+    bonusChips.forEach(label => {
+      const c = _makeChipEl(label);
+      c.style.marginLeft = '0';
+      chipRow.appendChild(c);
+    });
+    panel.appendChild(chipRow);
+  }
+
+  // Reason text
+  if (reason) {
+    const reasonEl = document.createElement('div');
+    reasonEl.textContent = reason.length > 110 ? reason.slice(0, 110) + '…' : reason;
+    reasonEl.style.cssText = 'font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:8px;';
+    panel.appendChild(reasonEl);
+  }
+
+  // Divider
+  const divider = document.createElement('div');
+  divider.style.cssText = 'border-top:1px solid #f3f4f6;margin-bottom:7px;';
+  panel.appendChild(divider);
+
+  // Action rows
+  panel.appendChild(_makeActionRow('+ Apply Queue', '#16a34a', (c, l) => _queueJobAction(jobUrl, title, c, l)));
+  const clRow = _makeActionRow('+ Cover Letter', '#1d4ed8', (c, l) => _coverLetterAction(jobUrl, title, c, l));
+  clRow.style.marginTop = '2px';
+  panel.appendChild(clRow);
+
+  document.body.appendChild(panel);
+  _activePanel = { el: panel, timer: null };
+
+  panel.addEventListener('mouseenter', _cancelClosePanel);
+  panel.addEventListener('mouseleave', _scheduleClosePanel);
+
+  // Close on outside click
+  const closeOnClick = (e: MouseEvent) => {
+    if (!panel.contains(e.target as Node) && e.target !== badge) {
+      _closeActivePanel();
+      document.removeEventListener('click', closeOnClick, true);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', closeOnClick, true), 0);
+}
+
+function _attachBadgePanel(badge: HTMLElement, jobUrl: string, title: string, stars: number, score: number, chips: string[], reason: string): void {
+  badge.style.cursor = 'pointer';
+  badge.addEventListener('mouseenter', () => {
+    _cancelClosePanel();
+    _showActionPanel(badge, jobUrl, title, stars, score, chips, reason);
+  });
+  badge.addEventListener('mouseleave', _scheduleClosePanel);
+  badge.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (_activePanel) { _closeActivePanel(); }
+    else { _showActionPanel(badge, jobUrl, title, stars, score, chips, reason); }
   });
 }
 
@@ -1188,6 +1405,13 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
       chrome.runtime.sendMessage({ type: 'SET_NOTIF_CACHE', key: CACHE_KEY, value: cacheValue }).catch(() => {});
     }
 
+    // Store full job data so the action panel can save/generate without re-fetching
+    _jobDataStore.set(item.jobUrl, {
+      title: item.title,
+      description,
+      skills: jobData.skills,
+    });
+
     _applyBadgeResult(item, data.match_score, chips, false, data.reason);
     console.log(`[UpApply] score DONE   ${uid}`);
   } catch (err) {
@@ -1206,14 +1430,10 @@ function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[]
   item.badge.style.color = color;
   item.badge.style.border = 'none';
   item.badge.textContent = _starsDisplay(stars);
-  item.badge.title = `UpApply: ${stars}★  (score ${rounded}/100)${fromCache ? ' · cached' : ''} — hover for all tags`;
-  item.badge.style.cursor = 'default';
+  item.badge.title = `UpApply: ${stars}★  (score ${rounded}/100)${fromCache ? ' · cached' : ''} — click for details`;
   const visibleChips = _filterChipsByStars(chips, stars);
-  const visibleSet = new Set(visibleChips);
-  const bonusChips = chips.filter(c => !visibleSet.has(c));
-  if (visibleChips.length) _injectChips(item.row, visibleChips, false);
-  const bonusEls = bonusChips.length ? _injectChips(item.row, bonusChips, true) : [];
-  _attachBonusHover(item.badge, bonusEls);
+  if (visibleChips.length) _injectChips(item.row, visibleChips);
+  _attachBadgePanel(item.badge, item.jobUrl, item.title, stars, rounded, chips, reason ?? '');
 
   // Inject scoring reason as a blue line below the job title link
   if (reason) {
