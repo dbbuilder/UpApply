@@ -103,8 +103,9 @@ VOICE:
 - Ends as a peer with a warm close: "Warm regards," — never "I look forward to hearing from you"
 
 SENTENCE RULES (violations are a hard failure):
-- NEVER begin a sentence with the word "I" — restructure every sentence that would start with I
-  (e.g. "I built..." → "That system was built..." or "The result was..." or "My team delivered...")
+- NEVER open the letter with "I" as its very first word — the first word of the entire letter must not be "I"
+- "I" is natural mid-sentence and mid-paragraph — do not restructure or contort sentences to avoid it there
+- The prohibition is ONLY on the letter's opening word
 - NEVER open the letter with "Hello", "Hi", "Dear", or any salutation — start immediately with content
 - ALWAYS end the letter with exactly: "Warm regards,"
 
@@ -127,31 +128,19 @@ ALWAYS INCLUDE (when profile data is available):
 - Credentials listed in the user's bio and unique strengths — weave into narrative, never just list them
 - Named projects and products from the portfolio — use specific names, never generic descriptions{always_include_block}
 
-STRUCTURE — adapt to the engagement type. Write as flowing prose, never label the sections:
+STRUCTURE — write as flowing prose, never label sections, never produce a formulaic letter:
 
 For CTO / Architecture Review / Technical Advisory jobs:
-1. Pattern recognition hook — one sentence showing you have seen this exact situation before
-2. One concrete past story — specific problem, specific action, named project, real outcome
-3. Failure modes you eliminate — name the specific risks this client faces
-4. 1-2 portfolio anchors with context
-5. {call_offer_step}
-6. "Warm regards,"
+The opening sentence should make the client feel you have already seen their situation before they finish explaining it — name the pattern, not your qualifications. Then prove it with one concrete past story: name the project, name the problem, name the specific action and real outcome. Call out the failure risks this specific client faces — the things that typically go wrong here that you know how to prevent. {call_offer_step} End as a peer. Close with "Warm regards,"
 
 For MVP / Product Build / SaaS / Full-Stack jobs:
-1. Direct engagement — validate the client's concept and the real problem it solves; show genuine interest in THIS specific product
-2. Why the fit is real — specific past products with real numbers that prove you can deliver this (not a list, a story)
-3. What you'd build — concrete deliverables matching the job spec: enumerate the key features, name the stack, show you've thought about the architecture for THIS project
-4. What you bring beyond code — product judgment, founder perspective, ability to shape scope without overengineering
-5. {call_offer_step}
-6. "Warm regards,"
+Open by engaging with the client's actual concept — show you understand what makes it interesting or what the real technical challenge is, not just that you can build something like it. Make the fit feel inevitable through specific past products with real numbers, not by claiming skill overlap. Then make it concrete for THIS project: name the features you'd build, name the stack choices and why, show you've thought about the architecture for their specific use case. Close with what you bring beyond execution — product judgment, scope discipline, founder perspective on what matters versus what can wait. {call_offer_step} Close with "Warm regards,"
 
 For AI / ML / Data jobs:
-1. Pattern recognition hook — one sentence on the core AI/data challenge
-2. Relevant AI products with specific technical details (stack, scale, outcomes)
-3. How you'd approach this engagement technically
-4. 1-2 portfolio anchors
-5. {call_offer_step}
-6. "Warm regards,"
+Open on the technical challenge at the core of this job — one sentence that names the hard part. Lead immediately into your AI product portfolio with specific technical details: architecture, scale, outcomes. Show how you'd approach THIS specific engagement technically, not generically. {call_offer_step} Close with "Warm regards,"
+
+SPECIFICITY REQUIREMENT:
+Reference at least 2 specific details from this job posting by name — a technology listed, a constraint the client mentioned, a deliverable they described, or a problem they identified. A letter that could be sent to any job is a failure.
 
 LENGTH: 300-450 words. No salutation. No signature. No placeholders.
 No "Dear...", no "Hello", no "Subject:", no name at the end. End with "Warm regards,".""")
@@ -216,9 +205,10 @@ def format_past_proposals(proposals: List[Dict]) -> str:
             entry += " [SUCCESSFUL - Got Hired]"
 
         cover_letter = prop.get("cover_letter_text", "")
-        # Truncate long cover letters but keep enough for style reference
-        if len(cover_letter) > 600:
-            cover_letter = cover_letter[:600] + "..."
+        # Full proposals are the primary voice calibration signal; truncate only at 2000
+        # chars to stay within token budget while preserving complete examples.
+        if len(cover_letter) > 2000:
+            cover_letter = cover_letter[:2000] + "..."
 
         entry += f"\n{cover_letter}"
 
@@ -321,7 +311,7 @@ def build_user_prompt(
         "Pick the most relevant portfolio story and tell it specifically. "
         f"Name the failure modes. Anchor with portfolio products. "
         f"{call_offer_reminder}"
-        "Remember: NO sentence starts with 'I'. End with 'Warm regards,'"
+        "Remember: the letter must NOT open with 'I' as its first word. End with 'Warm regards,'"
     )
 
     return "".join(parts)

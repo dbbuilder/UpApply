@@ -816,6 +816,7 @@ let _notifTotal = 0;   // total jobs queued in this scoring run
 let _notifDone  = 0;   // jobs completed (success or failure)
 let _contractImportBtnInjected = false;
 let _workroomProposalBtnInjected = false;
+let _tileObserver: IntersectionObserver | null = null;
 
 /** Reset all scoring state — called on SPA navigation so stale flags never block a fresh run. */
 function _resetNotifState(): void {
@@ -825,16 +826,15 @@ function _resetNotifState(): void {
   _notifDone = 0;
   _scoredNotifUrls.clear();
   _scoreButtonInjected = false;
-  _savedBtnInjected = false;
   _contractImportBtnInjected = false;
   _workroomProposalBtnInjected = false;
+  if (_tileObserver) { _tileObserver.disconnect(); _tileObserver = null; }
   _clearAuthTokenCache();
   _closeActivePanel();
   _jobDataStore.clear();
   _hudVisibleRows.clear();
   if (_hud) _hud.style.display = 'none';
   document.getElementById('ua-score-btn')?.remove();
-  document.getElementById('ua-saved-score-btn')?.remove();
   document.getElementById('ua-contract-import-btn')?.remove();
   document.getElementById('ua-workroom-proposal-btn')?.remove();
   document.getElementById('ua-notif-progress')?.remove();
@@ -1682,6 +1682,11 @@ async function _processNotifQueue(): Promise<void> {
     console.log(`[UpApply] queue FINISHED done=${_notifDone}/${_notifTotal}`);
     _notifProcessing = false;
     _hideProgressBar();
+    // Re-trigger: items pushed by IntersectionObserver while this run was active
+    // sit in _notifQueue. The guard at the top prevents double-entry.
+    if (_notifQueue.length > 0) {
+      _processNotifQueue();
+    }
   }
 }
 
@@ -1705,20 +1710,40 @@ function _processNotificationRows(): void {
   _processNotifQueue();
 }
 
-function _processSavedJobCards(): void {
-  document.querySelectorAll<Element>('article[data-test="JobTile"]').forEach((article) => {
+/** Scores a job tile the moment it scrolls into view. One observation per tile. */
+function _observeJobTile(article: HTMLElement): void {
+  if (!_tileObserver) {
+    _tileObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        _tileObserver!.unobserve(entry.target);
+
+        if (entry.target.querySelector('[data-upapply-job]')) continue;
+        const link = entry.target.querySelector<HTMLAnchorElement>('a[href*="/jobs/~"]');
+        if (!link) continue;
+        const jobUrl = _normalizeJobUrl(link.href);
+        if (_scoredNotifUrls.has(jobUrl)) continue;
+
+        _scoredNotifUrls.add(jobUrl);
+        const title = link.textContent?.trim() || '';
+        const badge = _injectNotifBadge(entry.target, jobUrl);
+        _notifQueue.push({ badge, row: entry.target, jobUrl, title });
+        _notifTotal++;
+        _processNotifQueue(); // safe — _notifProcessing guard skips if running; re-trigger picks up remainder
+      }
+    }, { threshold: 0.1 });
+  }
+  _tileObserver.observe(article);
+}
+
+/** Called by MutationObserver — registers any new, unobserved job tiles with the viewport observer. */
+function _attachTileObservers(): void {
+  document.querySelectorAll<HTMLElement>('article[data-test="JobTile"]').forEach((article) => {
+    if (article.dataset.upapplyObserved === '1') return;
     if (article.querySelector('[data-upapply-job]')) return;
-    const link = article.querySelector<HTMLAnchorElement>('a[href*="/jobs/~"]');
-    if (!link) return;
-    const jobUrl = _normalizeJobUrl(link.href);
-    if (_scoredNotifUrls.has(jobUrl)) return;
-    _scoredNotifUrls.add(jobUrl);
-    const title = link.textContent?.trim() || '';
-    const badge = _injectNotifBadge(article, jobUrl);
-    _notifQueue.push({ badge, row: article, jobUrl, title });
-    _notifTotal++;
+    article.dataset.upapplyObserved = '1';
+    _observeJobTile(article);
   });
-  _processNotifQueue();
 }
 
 // ---------------------------------------------------------------------------
@@ -1727,29 +1752,7 @@ function _processSavedJobCards(): void {
 // ---------------------------------------------------------------------------
 
 let _scoreButtonInjected = false;
-let _savedBtnInjected = false;
 
-const _BTN_STYLE =
-  'position:fixed;bottom:80px;right:16px;z-index:2147483647;' +
-  'display:flex;align-items:center;gap:6px;' +
-  'padding:6px 14px;border-radius:20px;cursor:pointer;' +
-  'background:#1d4ed8;color:#fff;' +
-  'font-size:12px;font-weight:600;font-family:-apple-system,sans-serif;' +
-  'box-shadow:0 2px 8px rgba(0,0,0,0.25);white-space:nowrap;' +
-  'user-select:none;transition:background 0.15s;';
-
-function _makeScoreBtn(id: string, label: string, onClick: () => void): void {
-  document.getElementById(id)?.remove();
-  const btn = document.createElement('div');
-  btn.id = id;
-  btn.style.cssText = _BTN_STYLE;
-  btn.textContent = label;
-  btn.title = label;
-  btn.addEventListener('mouseenter', () => { btn.style.background = '#1e40af'; });
-  btn.addEventListener('mouseleave', () => { btn.style.background = '#1d4ed8'; });
-  btn.addEventListener('click', () => { btn.remove(); onClick(); });
-  document.body.appendChild(btn);
-}
 
 function _injectScoreButton(): void {
   if (_scoreButtonInjected) return;
@@ -1790,19 +1793,10 @@ function _injectScoreButton(): void {
   }
 }
 
-function _injectSavedJobsButton(): void {
-  if (_savedBtnInjected) return;
-  _savedBtnInjected = true;
-  _makeScoreBtn('ua-saved-score-btn', '⚡ Score saved jobs', () => {
-    _savedBtnInjected = false;
-    _processSavedJobCards();
-  });
-}
-
 // MutationObserver covers three cases:
 //   1. Bell dropdown: inject score button (user-triggered scoring)
 //   2. Full notifications page (/ab/notifications/): auto-score rows
-//   3. Saved jobs page (/nx/search/jobs/saved/): auto-score tiles
+//   3. Any page with article[data-test="JobTile"]: auto-score tiles via IntersectionObserver
 let _lastObservedPath = window.location.pathname;
 let _observerDebounce: ReturnType<typeof setTimeout> | undefined;
 
@@ -1816,7 +1810,6 @@ function _handleMutations(): void {
   }
 
   const isNotifPage = currentPath.includes('/notifications');
-  const isSavedPage = currentPath.includes('/nx/search/jobs');
   const hasRows     = !!document.querySelector('.notification-row a[href*="/jobs/~"]');
   const hasTiles    = !!document.querySelector('article[data-test="JobTile"]');
 
@@ -1829,12 +1822,10 @@ function _handleMutations(): void {
     _scoreButtonInjected = false;
   }
 
-  // Saved jobs button: show when tiles are present — never auto-score
-  if (isSavedPage && hasTiles && !_notifProcessing) {
-    _injectSavedJobsButton();
-  } else if (_savedBtnInjected && !_notifProcessing) {
-    document.getElementById('ua-saved-score-btn')?.remove();
-    _savedBtnInjected = false;
+  // Job tile pages (search, best-matches, most-recent, saved, find-work):
+  // auto-score each tile as it enters the viewport — no button needed.
+  if (hasTiles) {
+    _attachTileObservers();
   }
 
   // Contract import button: show on /nx/wm/freelancer/contracts (actual Upwork URL)
