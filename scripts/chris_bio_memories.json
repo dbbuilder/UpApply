@@ -1,7 +1,117 @@
 [
   {
+    "title": "Stratavault.ai \u2014 Private enterprise AI knowledge base with RAG and PII protection",
+    "content": "Built Stratavault.ai: a private, secure AI knowledge base platform for organizations. Architecture: four layers — AI discovery agents that crawl networks, code repos, and live data feeds; vector database with PII obfuscation, semantic embeddings, and HNSW indexing; conversational LLM layer (Claude / GPT-4o) with source-grounded reasoning; and a code-token protection layer for credential and API key management. Stack: Python, ChromaDB, Streamlit, Fly.io. Live integrations pull from Azure, GitHub, and Meraki. Every answer is traceable to a source document. Zero-PII API calls — sensitive data is stripped before any LLM processing. Per-organization data isolation with role-based access control. White-label/reseller program for MSPs and vCIOs. Pricing: $499/month flat — no per-seat charges. Competes with Glean, Guru, and Microsoft Copilot for M365. Target markets: healthcare, finance, legal, nonprofits, field services.",
+    "category": "project",
+    "skills_demonstrated": [
+      "Python",
+      "RAG",
+      "Vector Search",
+      "ChromaDB",
+      "LLM Integration",
+      "OpenAI API",
+      "Claude API",
+      "Embeddings",
+      "HNSW",
+      "Streamlit",
+      "Fly.io",
+      "Azure",
+      "GitHub API",
+      "RBAC",
+      "SaaS Architecture"
+    ],
+    "industry": "Enterprise AI / SaaS",
+    "project_type": "AI Product",
+    "outcome": "Production enterprise AI knowledge base; white-label reseller channel; competes with Glean and Guru",
+    "source": "chatgpt_corpus",
+    "importance_score": 1.0
+  },
+  {
+    "title": "AestheticIQ.ai \u2014 AI business intelligence SaaS for medical spas",
+    "content": "Built AestheticIQ.ai: a vertical BI and analytics SaaS for medical spas and aesthetic practices running on Aesthetic Record (medspa practice management software). Transforms raw Aesthetic Record data into actionable dashboards via automated overnight sync. Stack: Next.js, React, Tailwind CSS, cloud-hosted, AES-256 encryption, HIPAA compliant. Features: revenue analytics with trend lines, practitioner performance comparisons, service/product-level insights (top treatments, upsell opportunities), smart alerts for anomalies and milestones, multi-location support. No PHI exposed — aggregated business metrics only. 50+ medspa clients; 98% sync success rate. Setup in under 5 minutes. Pricing: $99–$199/month. This is a production AI-enhanced vertical SaaS built from scratch with a tight platform integration dependency and a real paying customer base.",
+    "category": "project",
+    "skills_demonstrated": [
+      "Next.js",
+      "React",
+      "Tailwind CSS",
+      "HIPAA Compliance",
+      "SaaS Architecture",
+      "Business Intelligence",
+      "Dashboard Development",
+      "Data Sync",
+      "Multi-tenant SaaS",
+      "AES-256",
+      "API Integration",
+      "Analytics"
+    ],
+    "industry": "Healthcare / MedSpa",
+    "project_type": "AI / BI SaaS",
+    "outcome": "50+ paying medspa clients; production vertical BI SaaS; HIPAA compliant",
+    "source": "chatgpt_corpus",
+    "importance_score": 1.0
+  },
+  {
+    "title": "AnalyzeMyCloud.com \u2014 AI-powered cloud cost optimization service",
+    "content": "Built AnalyzeMyCloud.com: an AI-powered cloud cost analysis service for AWS, Azure, and GCP. Connects via read-only CLI access, scans infrastructure with AI trained on millions of dollars in cloud spending patterns, and delivers actionable savings recommendations within 24 hours. Key results: $2.1M+ in total client savings, 1,600+ optimized resources, average 35% cost reduction. Differentiators: automated VM hibernation (claims 70% savings on idle resources), real-time cost spike alerts, money-back guarantee (save 2x the $999 fee or full refund). One-time $999 analysis. Target: mid-to-large enterprises spending $5,000–$100,000+/month on cloud. This demonstrates AI applied to real infrastructure cost problems with measurable, quantifiable outcomes.",
+    "category": "project",
+    "skills_demonstrated": [
+      "Azure",
+      "AWS",
+      "GCP",
+      "Cloud Cost Optimization",
+      "AI / ML",
+      "Infrastructure Analysis",
+      "Python",
+      "CLI Tooling",
+      "SaaS"
+    ],
+    "industry": "Cloud Infrastructure",
+    "project_type": "AI SaaS / Consulting Tool",
+    "outcome": "$2.1M+ in client savings; 35% average cloud cost reduction across 1,600+ resources",
+    "source": "chatgpt_corpus",
+    "importance_score": 1.0
+  },
+  {
+    "title": "Remote2Me.com \u2014 Enterprise zero-trust remote control platform",
+    "content": "Built Remote2Me.com: enterprise-grade remote control and remote access software differentiated by ultra-low latency and a zero-trust security architecture. Cross-platform: Windows, macOS, Linux, iOS, Android. Operates as Remote2Me, Inc. Positioned as an enterprise alternative to TeamViewer and AnyDesk with security-first architecture. 4.8-star rating across 150 reviews. Free trial available. This is a shipping, multi-platform enterprise product demonstrating the ability to build and operate a cross-platform SaaS with enterprise security requirements from founding through launch.",
+    "category": "project",
+    "skills_demonstrated": [
+      "Zero-Trust Security",
+      "Cross-Platform Development",
+      "Enterprise Security",
+      "SaaS Architecture",
+      "Network Protocols",
+      "Windows",
+      "macOS",
+      "Linux",
+      "Mobile"
+    ],
+    "industry": "Enterprise Software / Security",
+    "project_type": "SaaS Platform",
+    "outcome": "Shipping cross-platform enterprise remote access product; 4.8-star rating across 150 reviews",
+    "source": "chatgpt_corpus",
+    "importance_score": 0.95
+  },
+  {
+    "title": "FireProofApp.net \u2014 Fire extinguisher inspection and compliance SaaS",
+    "content": "Built FireProofApp.net: a SaaS platform for fire extinguisher inspection management. Handles tracking, scheduling, compliance documentation, and reporting for fire extinguisher inventories. Gated SaaS product built as a single-page application. Target market: fire safety companies, facility managers, property managers, and compliance officers. Demonstrates the ability to identify and serve niche compliance verticals with targeted SaaS products — the same pattern used across the portfolio (education compliance with FERPA, healthcare with HIPAA, fire safety with inspection mandates).",
+    "category": "project",
+    "skills_demonstrated": [
+      "SaaS Architecture",
+      "Compliance Software",
+      "Inspection Management",
+      "Single-Page Application",
+      "Vertical SaaS"
+    ],
+    "industry": "Fire Safety / Compliance",
+    "project_type": "SaaS Platform",
+    "outcome": "Production compliance SaaS for fire inspection management",
+    "source": "chatgpt_corpus",
+    "importance_score": 0.9
+  },
+  {
     "title": "Migrated 160-server datacenter to Azure hybrid cloud",
-    "content": "Led the migration of a 160-server on-premises datacenter for SchoolVision to Azure hybrid cloud. Migration included: SQL Server databases to Azure SQL, VB.NET APIs rewritten in C# ASP.NET Core deployed to Azure Container Apps (Linux), 300+ static web apps migrated to Azure Static Web Apps, Azure Front Door and API Gateway for security and routing, Azure VPN for private SQL access, Azure Key Vault for all secrets management, and Azure Functions for data ingestion pipelines. This is a signature enterprise achievement referenced in cloud/Azure proposals.",
+    "content": "Led the migration of a 160-server on-premises datacenter for a K-12 education SaaS platform to Azure hybrid cloud. Migration included: SQL Server databases to Azure SQL, VB.NET APIs rewritten in C# ASP.NET Core deployed to Azure Container Apps (Linux), 300+ static web apps migrated to Azure Static Web Apps, Azure Front Door and API Gateway for security and routing, Azure VPN for private SQL access, Azure Key Vault for all secrets management, and Azure Functions for data ingestion pipelines. This is a signature enterprise achievement referenced in cloud/Azure proposals.",
     "category": "achievement",
     "skills_demonstrated": [
       "Azure",
@@ -26,8 +136,8 @@
     "importance_score": 1.0
   },
   {
-    "title": "DBBuilder, Inc. \u2014 25+ years enterprise software and SaaS",
-    "content": "Chris Therriault is President & CEO of DBBuilder, Inc., an S-Corporation founded in June 2001 in Washington State. Over 25 years, built multiple SaaS products from founding to scale and exit. Core expertise: enterprise data architecture, compliance technology, multi-tenant SaaS platforms, and database-driven solutions for education, transportation, and healthcare clients. Professional email: chris@servicevision.net. Phone: (206) 580-3250. GitHub: github.com/dbbuilder. MBA credential.",
+    "title": "SaaS company founded 2001 \u2014 25+ years enterprise software",
+    "content": "President & CEO of an S-Corporation SaaS company founded in June 2001 in Washington State. Over 25 years, built multiple SaaS products from founding to scale and exit — including enterprise remote access, AI knowledge bases, cloud cost optimization, medical spa analytics, fire safety compliance, and K-12 education management. Core expertise: enterprise data architecture, compliance technology, multi-tenant SaaS platforms, and database-driven solutions. MBA credential. Professional email: chris@servicevision.net.",
     "category": "achievement",
     "skills_demonstrated": [
       "SQL Server",
@@ -35,19 +145,20 @@
       "C#",
       ".NET",
       "ASP.NET Core",
-      "VB.NET",
       "Multi-tenant SaaS",
-      "Enterprise Architecture"
+      "Enterprise Architecture",
+      "AI / ML",
+      "Python"
     ],
     "industry": "SaaS",
     "project_type": "Company / Entrepreneurship",
-    "outcome": "25+ years running DBBuilder, Inc.; multiple SaaS products from founding to sale",
+    "outcome": "25+ years running a SaaS company; portfolio spanning AI, cloud, compliance, and enterprise software",
     "source": "chatgpt_corpus",
     "importance_score": 1.0
   },
   {
-    "title": "SchoolVision \u2014 20+ years K-12 education SaaS platform",
-    "content": "SchoolVision.net is a K-12 campus management SaaS built and owned by DBBuilder, Inc. Serves 3,000+ corporate clients each with their own SQL Server database. Features: student information system, attendance tracking, cafeteria/lunch POS, compliance (FERPA). Architecture: Azure SQL, Azure App Service, Azure Front Door, Azure API Gateway, Azure Key Vault, Azure Static Web Apps, Azure VPN. Licensed to Newman Consulting, LLC in August 2024 for $5,000/month while DBBuilder retains IP ownership.",
+    "title": "K-12 education SaaS platform \u2014 20+ years operating, 3,000 clients",
+    "content": "Built and own a K-12 campus management SaaS platform operating for 20+ years. Serves 3,000+ corporate clients each with their own SQL Server database. Features: student information system, attendance tracking, cafeteria/lunch POS, FERPA compliance. Architecture: Azure SQL, Azure App Service, Azure Front Door, Azure API Gateway, Azure Key Vault, Azure Static Web Apps, Azure VPN. Licensed to a consulting firm in August 2024 for $5,000/month while the founding company retains IP ownership.",
     "category": "project",
     "skills_demonstrated": [
       "SQL Server",
@@ -62,13 +173,13 @@
     ],
     "industry": "Education",
     "project_type": "SaaS Platform",
-    "outcome": "3,000+ corporate clients; 20+ years of continuous operation",
+    "outcome": "3,000+ corporate clients; 20+ years of continuous operation; $5,000/month license",
     "source": "chatgpt_corpus",
     "importance_score": 1.0
   },
   {
     "title": "UpApply \u2014 AI-powered Upwork proposal automation",
-    "content": "UpApply is a self-built AI-powered Upwork proposal automation system. Stack: Chrome Extension (React + TypeScript + Vite + Manifest V3) + FastAPI backend on Render + PostgreSQL with pgvector + GPT-4o for cover letter generation. Demonstrates: AI/LLM integration, semantic search, vector databases, Chrome extension development, FastAPI, async Python, Render deployment, and product ownership.",
+    "content": "UpApply is a self-built AI-powered Upwork proposal automation system. Stack: Chrome Extension (React + TypeScript + Vite + Manifest V3) + FastAPI backend on Render + PostgreSQL with pgvector + GPT-4o for cover letter generation. Demonstrates: AI/LLM integration, semantic search (HNSW pgvector), vector databases, Chrome extension development, FastAPI, async Python, Render deployment, and product ownership.",
     "category": "project",
     "skills_demonstrated": [
       "Python",
@@ -155,7 +266,7 @@
   },
   {
     "title": "Azure cloud architect: App Service, Functions, Front Door, Key Vault, DevOps",
-    "content": "Extensive Azure architecture across all major services: Azure SQL, App Service, Functions, Front Door, API Gateway, Key Vault, Static Web Apps, VPN, DevOps, Container Apps, ARM templates. Cost optimization experience. PowerShell for all Azure automation.",
+    "content": "Extensive Azure architecture across all major services: Azure SQL, App Service, Functions, Front Door, API Gateway, Key Vault, Static Web Apps, VPN, DevOps, Container Apps, ARM templates. Cost optimization experience via AnalyzeMyCloud.com (achieved $2.1M+ in client savings). PowerShell for all Azure automation.",
     "category": "skill_demo",
     "skills_demonstrated": [
       "Azure",
@@ -179,7 +290,7 @@
   },
   {
     "title": "Upwork proposal style and tone preferences",
-    "content": "Proposal style: direct, confident, specific — never flowery. Always includes: MBA credential, 25+ years enterprise experience, SchoolVision 20+ years education SaaS, 160-server Azure migration, 300+ static web apps migration, 3,000-client distributed SQL Server network, founding-to-scale narrative, demo prototype URL matching the job spec, no-cost/no-commitment call offer before the close. Never uses: Dear Hiring Manager, generic closings, clichés, sentences starting with I. Target length: 300-450 words. Ends with Warm regards,. Portfolio: servicevisionai.com and mvpcreator.servicevision.io.",
+    "content": "Proposal style: direct, confident, specific — never flowery. Always includes: MBA credential, 25+ years enterprise experience, recent AI products (Stratavault.ai, AestheticIQ.ai, UpApply, AnalyzeMyCloud.com), 20+ years education SaaS platform, 160-server Azure migration, 3,000-client distributed SQL Server network, founding-to-scale narrative, demo prototype URL matching the job spec, no-cost/no-commitment call offer before the close. Never uses: Dear Hiring Manager, generic closings, clichés, sentences starting with I. Target length: 300-450 words. Ends with Warm regards,. Portfolio: servicevisionai.com and mvpcreator.servicevision.io.",
     "category": "lesson",
     "skills_demonstrated": [],
     "industry": "Freelancing",

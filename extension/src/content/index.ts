@@ -974,6 +974,7 @@ function _injectPreviewToggle(row: Element, jobUrl: string): void {
 
   toggle.addEventListener('click', async (e) => {
     e.stopPropagation();
+    e.preventDefault(); // prevent <a> navigation when toggle is inside the link
     open = !open;
 
     if (open) {
@@ -1011,10 +1012,10 @@ function _injectPreviewToggle(row: Element, jobUrl: string): void {
     }
   });
 
-  // Insert toggle inline right after the job link
-  link.after(toggle);
-  // Insert preview block right after toggle (collapses to 0 height until opened)
-  toggle.after(preview);
+  // Append toggle INSIDE the <a> so it stays on the same line as the link text
+  link.appendChild(toggle);
+  // Insert preview block right after the <a> element (collapses to 0 height until opened)
+  link.after(preview);
 }
 
 /** Small always-visible inline checkbox injected directly into the notification row. */
@@ -1465,7 +1466,8 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
     // 3. Fetch job description via Upwork GraphQL (content script context, 8s timeout)
     console.log(`[UpApply] score FETCH  ${uid}`);
     const jobData = await _fetchJobData(item.jobUrl);
-    const description = jobData.description || item.title;
+    const description = jobData.description || ''; // real description; don't fall back to title
+    const scoreText = description || item.title;   // scoring API needs something to analyze
     console.log(`[UpApply] score FETCH  ${uid} done — descLen=${description.length} budget=${jobData.budgetAmount} source=${jobData.description ? 'graphql' : 'title-fallback'}`);
 
     // 4. Score via API directly (no SW message channel — eliminates zombie channel accumulation)
@@ -1480,7 +1482,7 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
       },
       body: JSON.stringify({
         title: item.title || 'Job',
-        description: description || item.title,
+        description: scoreText,
         skills_required: jobData.skills.length > 0 ? jobData.skills : undefined,
         client_info: jobData.clientCountry ? { location: jobData.clientCountry } : undefined,
       }),
@@ -1492,7 +1494,7 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
     console.log(`[UpApply] score SCORE  ${uid} done — score=${data.match_score}`);
 
     // 5. Compute chips and cache result
-    const chips = detectNotifChips(item.title, description, jobData.budgetAmount, jobData.budgetType);
+    const chips = detectNotifChips(item.title, scoreText, jobData.budgetAmount, jobData.budgetType);
     const cacheValue = {
       score: data.match_score, chips, reason: data.reason,
       title: item.title, description, skills: jobData.skills,
@@ -1862,7 +1864,19 @@ function _handleMutations(): void {
   }
 }
 
+// Guard: only the NEWEST content script instance may score notifications.
+// When the extension is reloaded while a tab is open Chrome injects the new
+// script alongside the still-running old one. A monotonic generation counter
+// lets the newest script win: each instance increments the counter and checks
+// it on every mutation — if a newer instance has loaded, the old one yields.
+const _W = window as Window & { __upapply_gen?: number };
+const _MY_GEN = (_W.__upapply_gen ?? 0) + 1;
+_W.__upapply_gen = _MY_GEN;
+console.log(`[UpApply] scoring gen=${_MY_GEN}`);
+
 new MutationObserver(() => {
+  // Yield immediately if a newer instance has taken over
+  if (_W.__upapply_gen !== _MY_GEN) return;
   // Debounce: Upwork's SPA triggers bursts of mutations during navigation.
   // Running 5 querySelector calls on every mutation causes main-thread jank
   // that blocks header clicks. 200ms keeps responsiveness while still

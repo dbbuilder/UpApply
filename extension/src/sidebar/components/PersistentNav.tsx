@@ -1,18 +1,20 @@
 import { useAppStore } from '../store';
 
-type NavMode = 'me' | 'find' | 'apply' | 'track';
+type NavMode = 'me' | 'find' | 'apply' | 'queue' | 'track';
 
 type ViewType =
-  | 'auth' | 'setup' | 'generator' | 'me' | 'find' | 'track' | 'go'
+  | 'auth' | 'setup' | 'generator' | 'me' | 'find' | 'track' | 'queue' | 'go'
   | 'memories' | 'history' | 'analytics' | 'feedback' | 'skills' | 'profile';
 
 const ME_VIEWS: string[]    = ['me', 'profile', 'skills', 'memories', 'setup'];
 const FIND_VIEWS: string[]  = ['find', 'scored'];
+const QUEUE_VIEWS: string[] = ['queue'];
 const TRACK_VIEWS: string[] = ['track', 'history', 'analytics', 'feedback'];
 
 function getMode(view: string): NavMode {
   if (ME_VIEWS.includes(view))    return 'me';
   if (FIND_VIEWS.includes(view))  return 'find';
+  if (QUEUE_VIEWS.includes(view)) return 'queue';
   if (TRACK_VIEWS.includes(view)) return 'track';
   return 'apply';
 }
@@ -39,6 +41,7 @@ export default function PersistentNav({ goOpen, onGoToggle }: PersistentNavProps
     { mode: 'me',    icon: '👤', label: 'Me',    targetView: 'me' },
     { mode: 'find',  icon: '🔍', label: 'Find',  targetView: 'find' },
     { mode: 'apply', icon: '✍️', label: 'Apply', targetView: 'generator', dot: hasJob },
+    { mode: 'queue', icon: '📋', label: 'Queue', targetView: 'queue' },
     { mode: 'track', icon: '📊', label: 'Track', targetView: 'track' },
   ];
 

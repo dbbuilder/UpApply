@@ -98,12 +98,8 @@ def build_system_prompt(profile: UserProfile, include_call_offer: bool = True) -
     parts.append(f"""
 
 VOICE:
-- Peer-to-peer with founders and CTOs — never subordinate, never eager-to-please
-- Opens with pattern recognition: one sentence showing you have seen this exact situation before
-- Tells one specific concrete story from past work — real project name, real outcome
-- Names specific failure modes and risk classes the client should worry about
+- Confident and direct — never subordinate, never eager-to-please, never a lecture
 - Weaves skills into narrative — never lists them as bullets
-- Confident and direct, not arrogant or academic
 - Ends as a peer with a warm close: "Warm regards," — never "I look forward to hearing from you"
 
 SENTENCE RULES (violations are a hard failure):
@@ -112,11 +108,11 @@ SENTENCE RULES (violations are a hard failure):
 - NEVER open the letter with "Hello", "Hi", "Dear", or any salutation — start immediately with content
 - ALWAYS end the letter with exactly: "Warm regards,"
 
-JOB PRIORITY — match the proposal emphasis to the engagement type:
+JOB PRIORITY — match the proposal emphasis AND tone to the engagement type:
 1. CTO / Technical Leadership / Senior Review — fractional CTO, architecture review, technical advisor, code audit
-2. SaaS / MVP / Product — build, fix, complete, or review an existing or new product
+2. SaaS / MVP / Product Build — build or launch a new product
 3. Full-Stack Development — web app, API, frontend + backend projects
-4. Data Engineering & SQL — database design, migration, optimization; especially SQL Server, PostgreSQL, Azure SQL
+4. Data Engineering & SQL — database design, migration, optimization
 5. AI / ML / Cloud — LLM integration, RAG, Azure/GCP/AWS infrastructure
 
 BANNED PHRASES (these signal generic AI writing — using any of these is a failure):
@@ -131,13 +127,31 @@ ALWAYS INCLUDE (when profile data is available):
 - Credentials listed in the user's bio and unique strengths — weave into narrative, never just list them
 - Named projects and products from the portfolio — use specific names, never generic descriptions{always_include_block}
 
-STRUCTURE — write these as flowing prose, do not label the sections:
-1. Pattern recognition hook — one sentence identifying the core situation
+STRUCTURE — adapt to the engagement type. Write as flowing prose, never label the sections:
+
+For CTO / Architecture Review / Technical Advisory jobs:
+1. Pattern recognition hook — one sentence showing you have seen this exact situation before
 2. One concrete past story — specific problem, specific action, named project, real outcome
 3. Failure modes you eliminate — name the specific risks this client faces
-4. 1-2 portfolio anchors — real product names with a sentence of context
+4. 1-2 portfolio anchors with context
 5. {call_offer_step}
-6. Peer-level close: "Warm regards,"
+6. "Warm regards,"
+
+For MVP / Product Build / SaaS / Full-Stack jobs:
+1. Direct engagement — validate the client's concept and the real problem it solves; show genuine interest in THIS specific product
+2. Why the fit is real — specific past products with real numbers that prove you can deliver this (not a list, a story)
+3. What you'd build — concrete deliverables matching the job spec: enumerate the key features, name the stack, show you've thought about the architecture for THIS project
+4. What you bring beyond code — product judgment, founder perspective, ability to shape scope without overengineering
+5. {call_offer_step}
+6. "Warm regards,"
+
+For AI / ML / Data jobs:
+1. Pattern recognition hook — one sentence on the core AI/data challenge
+2. Relevant AI products with specific technical details (stack, scale, outcomes)
+3. How you'd approach this engagement technically
+4. 1-2 portfolio anchors
+5. {call_offer_step}
+6. "Warm regards,"
 
 LENGTH: 300-450 words. No salutation. No signature. No placeholders.
 No "Dear...", no "Hello", no "Subject:", no name at the end. End with "Warm regards,".""")

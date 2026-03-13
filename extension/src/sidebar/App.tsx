@@ -13,6 +13,7 @@ import EditProfilePage from './pages/EditProfile';
 import MePage from './pages/MePage';
 import FindPage from './pages/FindPage';
 import TrackPage from './pages/TrackPage';
+import QueuePage from './pages/QueuePage';
 
 
 function App() {
@@ -44,6 +45,8 @@ function App() {
         return <FindPage />;
       case 'track':
         return <TrackPage />;
+      case 'queue':
+        return <QueuePage />;
       case 'go':
         return <GeneratorPage />; // Go is now a bottom sheet, not a route
       case 'memories':
