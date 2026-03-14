@@ -8,8 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.core.embeddings import generate_embedding
 from app.models.user import User
 from app.models.job import Job
+from app.models.cover_letter import CoverLetter
+from app.models.proposal import Proposal
 from app.models.application import Application, ApplicationStatus
 from app.schemas.application import (
     ApplicationCreate,
@@ -273,7 +276,90 @@ async def record_outcome(
     await db.commit()
     await db.refresh(application)
 
+    # Auto-promote winning letter to the proposals corpus so future generation
+    # can use it as a high-weight few-shot example.
+    if outcome.status in [ApplicationStatus.HIRED, ApplicationStatus.OFFERED]:
+        await _promote_winning_letter(db, application, current_user.id)
+
     return application
+
+
+async def _promote_winning_letter(
+    db: AsyncSession,
+    application: Application,
+    user_id: str,
+) -> None:
+    """Upsert the winning cover letter into the proposals corpus (was_hired=True).
+
+    Uses submitted_text if available (captured when user clicked 'Mark as Submitted'),
+    otherwise falls back to the generated content.  Idempotent — safe to call
+    multiple times for the same application.
+    """
+    try:
+        # Resolve the text to promote
+        letter_text: Optional[str] = None
+        job_title: Optional[str] = None
+        job_skills: Optional[list] = None
+
+        # Load cover letter (may be linked or may need to be found by job_id)
+        if application.cover_letter_id:
+            cl_result = await db.execute(
+                select(CoverLetter).where(CoverLetter.id == application.cover_letter_id)
+            )
+            cl = cl_result.scalar_one_or_none()
+            if cl:
+                # Prefer submitted text over generated text
+                letter_text = getattr(cl, "submitted_text", None) or cl.content
+
+        # Load the associated job for context
+        job_result = await db.execute(select(Job).where(Job.id == application.job_id))
+        job = job_result.scalar_one_or_none()
+        if job:
+            job_title = job.title
+            job_skills = job.skills_required or []
+            # Last resort: if no cover letter linked, skip — nothing to promote
+            if not letter_text:
+                return
+
+        if not letter_text:
+            return
+
+        # Check if a promoted proposal already exists for this job
+        existing_result = await db.execute(
+            select(Proposal).where(
+                Proposal.user_id == user_id,
+                Proposal.job_id == application.job_id,
+                Proposal.source == "extension",
+            )
+        )
+        existing = existing_result.scalar_one_or_none()
+
+        if existing:
+            # Update existing proposal to mark as hired
+            existing.was_hired = True
+            existing.cover_letter_text = letter_text
+            if existing.embedding is None:
+                existing.embedding = await generate_embedding(letter_text)
+        else:
+            # Create new promoted proposal
+            embedding = await generate_embedding(letter_text)
+            proposal = Proposal(
+                user_id=user_id,
+                job_id=application.job_id,
+                cover_letter_text=letter_text,
+                job_title=job_title,
+                job_skills=job_skills,
+                was_hired=True,
+                source="extension",
+                submitted_at=application.submitted_at or application.outcome_recorded_at,
+                embedding=embedding,
+            )
+            db.add(proposal)
+
+        await db.commit()
+    except Exception:
+        # Promotion failure must never break the outcome update
+        pass
 
 
 @router.delete("/{application_id}", status_code=status.HTTP_204_NO_CONTENT)

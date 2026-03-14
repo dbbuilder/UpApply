@@ -48,6 +48,7 @@ interface AppState {
   setCurrentJob: (job: JobData | null) => void;
   setJobAnalysis: (analysis: JobAnalysisResponse | null) => void;
   setCoverLetter: (letter: string | null) => void;
+  setCoverLetterId: (id: string | null) => void;
   setCurrentView: (view: AppState['currentView']) => void;
   setSetupStep: (step: number) => void;
 
@@ -115,6 +116,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setJobAnalysis: (analysis) => set({ jobAnalysis: analysis }),
   setCoverLetter: (letter) => set({ coverLetter: letter }),
+  setCoverLetterId: (id) => set({ coverLetterId: id }),
   setCurrentView: (view) => set({ currentView: view }),
   setSetupStep: (step) => set({ setupStep: step }),
 

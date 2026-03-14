@@ -198,11 +198,16 @@ def format_past_proposals(proposals: List[Dict]) -> str:
 
     formatted = []
     for i, prop in enumerate(proposals, 1):
-        entry = f"Example {i}"
+        was_hired = prop.get("was_hired")
+        if was_hired is True:
+            tier = "[WON — This letter got hired ✓]"
+        elif was_hired is False:
+            tier = "[SUBMITTED — outcome unknown]"
+        else:
+            tier = "[PAST PROPOSAL]"
+        entry = f"Example {i} {tier}"
         if prop.get("job_title"):
             entry += f" - For: {prop['job_title']}"
-        if prop.get("was_hired"):
-            entry += " [SUCCESSFUL - Got Hired]"
 
         cover_letter = prop.get("cover_letter_text", "")
         # Full proposals are the primary voice calibration signal; truncate only at 2000
@@ -262,8 +267,9 @@ def build_user_prompt(
         past_proposals_text = format_past_proposals(past_proposals)
         if past_proposals_text:
             parts.append(
-                f"\n\nPAST WINNING PROPOSALS (calibrate voice and structure from these — "
-                f"especially the ones marked SUCCESSFUL):\n{past_proposals_text}"
+                f"\n\nPAST PROPOSALS — ordered by outcome, most successful first:\n"
+                f"WON letters are ground truth. SUBMITTED letters show voice. Learn from both:\n"
+                f"{past_proposals_text}"
             )
 
     # Skills to highlight
@@ -306,10 +312,8 @@ def build_user_prompt(
         else ""
     )
     parts.append(
-        "\n\nNow write the proposal. Start with the pattern recognition hook — "
-        "identify what situation this client is in and show you've been here before. "
-        "Pick the most relevant portfolio story and tell it specifically. "
-        f"Name the failure modes. Anchor with portfolio products. "
+        "\n\nNow write the proposal. Follow the structure for this job type as described above. "
+        "Be specific to this posting — reference actual details from it by name. "
         f"{call_offer_reminder}"
         "Remember: the letter must NOT open with 'I' as its first word. End with 'Warm regards,'"
     )
@@ -463,3 +467,90 @@ Please revise the cover letter based on this feedback while maintaining personal
     raw_content = response.content[0].text.strip()
     cleaned = clean_cover_letter(raw_content)
     return append_closing(cleaned, profile.preferred_closing)
+
+
+@retry(
+    stop=stop_after_attempt(2),
+    wait=wait_exponential(multiplier=1, min=2, max=8),
+)
+async def improve_cover_letter(
+    generated_letter: str,
+    job_title: str,
+    job_description: str,
+    hired_proposals: List[Dict],
+    profile: UserProfile,
+    model: Optional[str] = None,
+) -> tuple[str, List[str]]:
+    """Compare a generated letter against past winning letters and produce an improved version.
+
+    Returns (improved_content, improvement_notes).
+    """
+    import json as _json
+
+    client = _get_anthropic_client()
+
+    # Format the won letters for comparison
+    won_examples = []
+    for i, prop in enumerate(hired_proposals, 1):
+        text = prop.get("cover_letter_text", "")
+        title = prop.get("job_title", "unknown role")
+        won_examples.append(f"WON LETTER {i} (For: {title}):\n{text[:2000]}")
+    won_block = "\n\n---\n\n".join(won_examples)
+
+    system = (
+        "You are a writing coach analyzing Upwork cover letters. "
+        "You give concrete, specific feedback — not generic advice. "
+        "You respond only with valid JSON."
+    )
+
+    user = f"""A cover letter was generated for a job. Compare it against past letters that won jobs.
+
+JOB: {job_title}
+{job_description[:800]}
+
+GENERATED LETTER (to improve):
+{generated_letter}
+
+PAST LETTERS THAT WON JOBS:
+{won_block}
+
+Task:
+1. Identify 2-4 SPECIFIC differences between the generated letter and the winning letters.
+   Be concrete: name the exact sentence or section that differs, and say what makes the winners better.
+   Do NOT give generic advice like "be more specific" — point to the actual words.
+
+2. Rewrite the generated letter incorporating those improvements.
+   Keep the same voice, same factual claims, same length range (300-450 words).
+   Do NOT add facts that weren't in the generated letter.
+
+Respond with JSON only, no markdown:
+{{"improvement_notes": ["note 1", "note 2", ...], "improved_content": "the full rewritten letter"}}"""
+
+    response = await client.messages.create(
+        model=model or settings.cover_letter_model,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+        max_tokens=1500,
+        temperature=0.4,  # Lower temp — this is an analytical + editing task
+    )
+
+    raw = response.content[0].text.strip()
+
+    # Strip markdown code fences if present
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+        if raw.endswith("```"):
+            raw = raw[:-3].strip()
+
+    try:
+        parsed = _json.loads(raw)
+        improved = clean_cover_letter(parsed["improved_content"])
+        improved = append_closing(improved, profile.preferred_closing)
+        notes = parsed.get("improvement_notes", [])
+        if not isinstance(notes, list):
+            notes = [str(notes)]
+        return improved, notes
+    except (_json.JSONDecodeError, KeyError):
+        # If JSON parse fails, return the raw text as the improved content with no notes
+        cleaned = clean_cover_letter(raw)
+        return append_closing(cleaned, profile.preferred_closing), ["Improvement applied (notes unavailable)"]

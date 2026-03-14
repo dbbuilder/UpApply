@@ -276,6 +276,22 @@ class ApiClient {
     });
   }
 
+  async submitCoverLetter(id: string, submittedText: string) {
+    return this.request<CoverLetter>(`/api/v1/jobs/cover-letters/${id}/submit`, {
+      method: 'PUT',
+      body: { submitted_text: submittedText },
+    });
+  }
+
+  async improveCoverLetter(id: string) {
+    return this.request<{
+      cover_letter_id: string;
+      improved_content: string;
+      improvement_notes: string[];
+      hired_examples_used: number;
+    }>(`/api/v1/jobs/cover-letters/${id}/improve`, { method: 'POST' });
+  }
+
   // Applications
   async createApplication(data: ApplicationCreate) {
     return this.request<Application>('/api/v1/applications', {

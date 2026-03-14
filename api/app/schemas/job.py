@@ -166,6 +166,21 @@ class CoverLetterRegenerateRequest(BaseModel):
     include_call_offer: bool = True
 
 
+class CoverLetterSubmitRequest(BaseModel):
+    """Mark a cover letter as submitted and capture the final text."""
+
+    submitted_text: str  # What was actually sent (may differ from generated)
+
+
+class CoverLetterImproveResponse(BaseModel):
+    """Response from the self-improvement endpoint."""
+
+    cover_letter_id: str       # New version id
+    improved_content: str
+    improvement_notes: List[str]
+    hired_examples_used: int   # How many won letters were compared against
+
+
 # Attachment extraction schemas
 
 class AttachmentData(BaseModel):

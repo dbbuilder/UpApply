@@ -23,6 +23,8 @@ from app.schemas.job import (
     CoverLetterGenerateRequest,
     CoverLetterResponse,
     CoverLetterRegenerateRequest,
+    CoverLetterSubmitRequest,
+    CoverLetterImproveResponse,
     ExtractAttachmentsRequest,
     ExtractAttachmentsResponse,
     AttachmentMetadata,
@@ -33,6 +35,7 @@ from app.schemas.job import (
     SuggestMilestonesResponse,
     MilestoneSuggestion,
 )
+from app.models.proposal import Proposal
 from app.services.job_analysis import (
     find_relevant_proposals,
     run_full_analysis,
@@ -40,6 +43,7 @@ from app.services.job_analysis import (
 from app.services.cover_letter import (
     generate_cover_letter,
     regenerate_cover_letter,
+    improve_cover_letter,
 )
 
 router = APIRouter()
@@ -929,6 +933,166 @@ async def regenerate_cover_letter_endpoint(
         is_final=False,
         created_at=new_letter.created_at,
         match_score=job.match_score,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cover letter feedback loop endpoints
+# ---------------------------------------------------------------------------
+
+@router.put("/cover-letters/{letter_id}/submit", response_model=CoverLetterResponse)
+async def submit_cover_letter(
+    letter_id: str,
+    request: CoverLetterSubmitRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a cover letter as submitted and capture the final (possibly edited) text.
+
+    Creates a Proposal record so the submitted letter enters the corpus immediately
+    as a voice calibration example even before the outcome is known.
+    """
+    result = await db.execute(
+        select(CoverLetter).where(
+            CoverLetter.id == letter_id,
+            CoverLetter.user_id == current_user.id,
+        )
+    )
+    letter = result.scalar_one_or_none()
+    if not letter:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover letter not found")
+
+    letter.submitted_text = request.submitted_text
+    letter.was_submitted = True
+    letter.submitted_at = datetime.now(timezone.utc)
+    await db.flush()
+
+    # Load job for context
+    job_result = await db.execute(select(Job).where(Job.id == letter.job_id))
+    job = job_result.scalar_one_or_none()
+
+    # Upsert into proposals corpus — source='extension', was_hired=None until outcome known
+    if job:
+        existing_prop = await db.execute(
+            select(Proposal).where(
+                Proposal.user_id == current_user.id,
+                Proposal.job_id == letter.job_id,
+                Proposal.source == "extension",
+            )
+        )
+        prop = existing_prop.scalar_one_or_none()
+        if prop:
+            prop.cover_letter_text = request.submitted_text
+            prop.embedding = await generate_embedding(request.submitted_text)
+        else:
+            embedding = await generate_embedding(request.submitted_text)
+            prop = Proposal(
+                user_id=current_user.id,
+                job_id=letter.job_id,
+                cover_letter_text=request.submitted_text,
+                job_title=job.title,
+                job_skills=job.skills_required or [],
+                was_hired=None,
+                source="extension",
+                submitted_at=datetime.now(timezone.utc),
+                embedding=embedding,
+            )
+            db.add(prop)
+
+    await db.commit()
+    await db.refresh(letter)
+
+    return CoverLetterResponse(
+        id=letter.id,
+        user_id=letter.user_id,
+        job_id=letter.job_id,
+        content=letter.content,
+        model_used=letter.model_used,
+        memories_used=letter.memories_used,
+        word_count=len(letter.content.split()),
+        version=letter.version,
+        is_final=letter.is_final,
+        created_at=letter.created_at,
+    )
+
+
+@router.post("/cover-letters/{letter_id}/improve", response_model=CoverLetterImproveResponse)
+async def improve_cover_letter_endpoint(
+    letter_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Compare a generated cover letter against past winning letters and produce an improved version.
+
+    Requires at least 2 hired proposals in the corpus for meaningful comparison.
+    Stores the improved letter as a new version and returns both the content and
+    a list of specific improvement notes.
+    """
+    # Load the letter to improve
+    result = await db.execute(
+        select(CoverLetter).where(
+            CoverLetter.id == letter_id,
+            CoverLetter.user_id == current_user.id,
+        )
+    )
+    letter = result.scalar_one_or_none()
+    if not letter:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover letter not found")
+
+    # Load associated job
+    job_result = await db.execute(select(Job).where(Job.id == letter.job_id))
+    job = job_result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Associated job not found")
+
+    # Load user profile
+    profile = await get_user_profile(current_user, db)
+
+    # Find hired proposals semantically similar to this job
+    hired_proposals = await find_relevant_proposals(
+        db=db,
+        user_id=current_user.id,
+        job_description=job.description or job.title,
+        job_skills=job.skills_required or [],
+        limit=3,
+        successful_only=True,
+    )
+
+    if len(hired_proposals) < 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Need at least 1 won proposal in your corpus to improve letters. "
+                   "Apply to jobs and mark outcomes as you go.",
+        )
+
+    # Call the improvement service
+    improved_content, improvement_notes = await improve_cover_letter(
+        generated_letter=letter.content,
+        job_title=job.title,
+        job_description=job.description or "",
+        hired_proposals=hired_proposals,
+        profile=profile,
+    )
+
+    # Store as a new version
+    new_letter = CoverLetter(
+        user_id=current_user.id,
+        job_id=letter.job_id,
+        content=improved_content,
+        model_used=settings.cover_letter_model,
+        version=letter.version + 1,
+        is_final=True,
+        memories_used=letter.memories_used,
+    )
+    db.add(new_letter)
+    await db.commit()
+    await db.refresh(new_letter)
+
+    return CoverLetterImproveResponse(
+        cover_letter_id=new_letter.id,
+        improved_content=improved_content,
+        improvement_notes=improvement_notes,
+        hired_examples_used=len(hired_proposals),
     )
 
 

@@ -50,6 +50,11 @@ class CoverLetter(Base):
     token_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     word_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
+    # Submission tracking — captures what was actually sent and when
+    submitted_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    was_submitted: Mapped[bool] = mapped_column(Boolean, default=False)
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Versioning
     version: Mapped[int] = mapped_column(Integer, default=1)
     is_final: Mapped[bool] = mapped_column(Boolean, default=False)

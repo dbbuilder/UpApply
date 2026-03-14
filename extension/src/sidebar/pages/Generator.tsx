@@ -68,6 +68,13 @@ export default function GeneratorPage() {
   const [showAppliedPrompt, setShowAppliedPrompt] = useState(false);
   const [markingApplied, setMarkingApplied] = useState(false);
 
+  // State for submit + improve feedback loop
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [improving, setImproving] = useState(false);
+  const [improvementNotes, setImprovementNotes] = useState<string[] | null>(null);
+  const [showImprovementNotes, setShowImprovementNotes] = useState(false);
+
   // State for adding skills from missing list
   const [addingSkill, setAddingSkill] = useState<string | null>(null);
   const [addedSkills, setAddedSkills] = useState<Set<string>>(new Set());
@@ -135,12 +142,20 @@ export default function GeneratorPage() {
     analyzeCurrentJob();
   };
 
+  const _resetFeedbackLoopState = () => {
+    setSubmitted(false);
+    setImprovementNotes(null);
+    setShowImprovementNotes(false);
+  };
+
   const handleGenerate = () => {
+    _resetFeedbackLoopState();
     generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
   };
 
   const handleRegenerate = () => {
     if (showFeedbackInput && feedbackText.trim()) {
+      _resetFeedbackLoopState();
       regenerateCoverLetter(feedbackText.trim(), includeCallOffer);
       setFeedbackText('');
       setShowFeedbackInput(false);
@@ -150,6 +165,7 @@ export default function GeneratorPage() {
   };
 
   const handleRegenerateFresh = () => {
+    _resetFeedbackLoopState();
     setShowFeedbackInput(false);
     setFeedbackText('');
     generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
@@ -174,6 +190,42 @@ export default function GeneratorPage() {
   const handleCopy = () => {
     if (coverLetter) {
       navigator.clipboard.writeText(coverLetter);
+    }
+  };
+
+  const handleMarkSubmitted = async () => {
+    const { coverLetterId } = useAppStore.getState();
+    if (!coverLetterId || !coverLetter) return;
+    setSubmitting(true);
+    try {
+      await apiClient.submitCoverLetter(coverLetterId, coverLetter);
+      setSubmitted(true);
+    } catch {
+      // silent — non-critical action
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleImprove = async () => {
+    const { coverLetterId } = useAppStore.getState();
+    if (!coverLetterId) return;
+    setImproving(true);
+    setImprovementNotes(null);
+    try {
+      const result = await apiClient.improveCoverLetter(coverLetterId);
+      useAppStore.getState().setCoverLetter(result.improved_content);
+      useAppStore.getState().setCoverLetterId(result.cover_letter_id);
+      setImprovementNotes(result.improvement_notes);
+      setShowImprovementNotes(true);
+      setSubmitted(false); // improved version not yet submitted
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('422') || msg.includes('Need at least')) {
+        alert('Need at least 1 won proposal in your corpus. Apply to jobs and mark outcomes to build your winning letter library.');
+      }
+    } finally {
+      setImproving(false);
     }
   };
 
@@ -906,6 +958,53 @@ export default function GeneratorPage() {
                 >
                   Fill in Upwork Form
                 </button>
+
+                {/* Improvement notes collapsible */}
+                {improvementNotes && improvementNotes.length > 0 && (
+                  <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setShowImprovementNotes(v => !v)}
+                      className="w-full flex items-center justify-between px-3 py-2 text-amber-800 font-medium"
+                    >
+                      <span>✨ {improvementNotes.length} improvement{improvementNotes.length !== 1 ? 's' : ''} applied</span>
+                      <span>{showImprovementNotes ? '▲' : '▼'}</span>
+                    </button>
+                    {showImprovementNotes && (
+                      <ul className="px-3 pb-2 space-y-1 text-amber-700">
+                        {improvementNotes.map((note, i) => (
+                          <li key={i} className="leading-snug">• {note}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
+                {/* Feedback loop actions */}
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleImprove}
+                    disabled={improving}
+                    title="Compare against your won proposals and improve this letter"
+                    className="flex-1 btn-outline text-xs py-1.5 disabled:opacity-50"
+                  >
+                    {improving ? '✨ Comparing…' : '✨ Improve'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleMarkSubmitted}
+                    disabled={submitting || submitted}
+                    title="Save this letter to your corpus as submitted"
+                    className={`flex-1 text-xs py-1.5 rounded border font-medium transition-colors ${
+                      submitted
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700 cursor-default'
+                        : 'btn-outline'
+                    }`}
+                  >
+                    {submitted ? '✓ Submitted' : submitting ? 'Saving…' : 'Mark Submitted'}
+                  </button>
+                </div>
 
                 {/* Mark as Applied prompt */}
                 {showAppliedPrompt && !applicationId && (
