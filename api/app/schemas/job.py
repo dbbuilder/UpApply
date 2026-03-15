@@ -75,7 +75,7 @@ class JobResponse(BaseModel):
     search_query_id: Optional[str] = None
 
     posted_date: Optional[datetime] = None
-    scraped_at: datetime
+    scraped_at: Optional[datetime] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
