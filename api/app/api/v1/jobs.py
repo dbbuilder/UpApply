@@ -186,6 +186,29 @@ async def create_job(
     return job
 
 
+@router.get("/debug-error")
+async def debug_jobs_error(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Temporary debug: run list_jobs query and return any error as text."""
+    import traceback as _tb
+    try:
+        from datetime import datetime, timezone as _tz
+        q = select(Job).where(Job.user_id == current_user.id).limit(1)
+        q = q.where((Job.expires_at == None) | (Job.expires_at > datetime.now(_tz.utc)))  # noqa
+        result = await db.execute(q)
+        jobs = result.scalars().all()
+        if not jobs:
+            return {"ok": True, "count": 0}
+        j = jobs[0]
+        # Try pydantic serialization
+        r = JobResponse.model_validate(j)
+        return {"ok": True, "count": 1, "sample_id": r.id}
+    except Exception as e:
+        return {"error": str(e), "traceback": _tb.format_exc()}
+
+
 @router.get("", response_model=List[JobResponse])
 async def list_jobs(
     limit: int = 50,
