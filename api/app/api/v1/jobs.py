@@ -191,20 +191,22 @@ async def debug_jobs_error(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Temporary debug: run list_jobs query and return any error as text."""
+    """Temporary debug: replicate list_jobs exactly and return any error as text."""
     import traceback as _tb
     try:
-        from datetime import datetime, timezone as _tz
-        q = select(Job).where(Job.user_id == current_user.id).limit(1)
-        q = q.where((Job.expires_at == None) | (Job.expires_at > datetime.now(_tz.utc)))  # noqa
+        q = select(Job).where(Job.user_id == current_user.id)
+        q = q.where((Job.expires_at == None) | (Job.expires_at > datetime.now(timezone.utc)))  # noqa
+        q = q.order_by(Job.match_score.desc(), Job.created_at.desc()).limit(50)
         result = await db.execute(q)
         jobs = result.scalars().all()
-        if not jobs:
-            return {"ok": True, "count": 0}
-        j = jobs[0]
-        # Try pydantic serialization
-        r = JobResponse.model_validate(j)
-        return {"ok": True, "count": 1, "sample_id": r.id}
+        validated = []
+        for j in jobs:
+            try:
+                r = JobResponse.model_validate(j)
+                validated.append(r.id)
+            except Exception as e2:
+                return {"error": f"Pydantic fail on job {j.id}: {e2}", "traceback": _tb.format_exc()}
+        return {"ok": True, "count": len(validated), "ids": validated[:5]}
     except Exception as e:
         return {"error": str(e), "traceback": _tb.format_exc()}
 
