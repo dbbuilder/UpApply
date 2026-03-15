@@ -3,7 +3,7 @@
 Captures what was actually submitted (may differ from generated) and
 whether the letter was marked as submitted from the extension.
 
-Revision ID: 013_add_cover_letter_submission_tracking
+Revision ID: 013_cl_submission_tracking
 Revises: 012_add_proposal_anchors
 Create Date: 2026-03-14
 """
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = '013_add_cover_letter_submission_tracking'
+revision = '013_cl_submission_tracking'
 down_revision = '012_add_proposal_anchors'
 branch_labels = None
 depends_on = None
