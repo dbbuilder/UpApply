@@ -362,6 +362,94 @@ async def _promote_winning_letter(
         pass
 
 
+@router.post("/backfill-proposals", response_model=dict)
+async def backfill_proposals_corpus(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Backfill proposals corpus from historical applications.
+
+    Scans all non-draft applications that have a cover letter and creates a
+    proposals corpus entry for each one that doesn't already have one.
+    Sets was_hired=True for HIRED/OFFERED, was_hired=False for DECLINED/WITHDRAWN,
+    was_hired=None for in-progress statuses.
+
+    Safe to call multiple times — never downgrades an existing was_hired=True entry.
+    """
+    result = await db.execute(
+        select(Application, CoverLetter, Job)
+        .join(CoverLetter, Application.cover_letter_id == CoverLetter.id)
+        .join(Job, Application.job_id == Job.id)
+        .where(Application.user_id == current_user.id)
+        .where(Application.status != ApplicationStatus.DRAFT)
+        .where(Application.cover_letter_id.isnot(None))
+    )
+    rows = result.all()
+
+    created = 0
+    updated = 0
+    skipped = 0
+
+    for app, letter, job in rows:
+        if app.status in [ApplicationStatus.HIRED, ApplicationStatus.OFFERED]:
+            was_hired = True
+        elif app.status in [ApplicationStatus.DECLINED, ApplicationStatus.WITHDRAWN]:
+            was_hired = False
+        else:
+            was_hired = None  # SUBMITTED, VIEWED, RESPONDED, INTERVIEWED
+
+        text = letter.submitted_text if letter.submitted_text else letter.content
+        if not text:
+            skipped += 1
+            continue
+
+        # Check for existing proposal by job_id + source
+        existing_result = await db.execute(
+            select(Proposal).where(
+                Proposal.user_id == current_user.id,
+                Proposal.job_id == job.id,
+                Proposal.source == "extension",
+            )
+        )
+        existing = existing_result.scalar_one_or_none()
+
+        if existing:
+            # Only upgrade was_hired, never downgrade
+            if existing.was_hired is not True and was_hired is True:
+                existing.was_hired = True
+                updated += 1
+            else:
+                skipped += 1
+            continue
+
+        snippet = (job.description or "")[:500]
+        proposal = Proposal(
+            user_id=current_user.id,
+            job_id=job.id,
+            cover_letter_text=text,
+            job_title=job.title,
+            job_description_snippet=snippet,
+            job_skills=job.skills_required,
+            upwork_job_url=job.upwork_url,
+            was_hired=was_hired,
+            status=app.status.value,
+            source="extension",
+            submitted_at=app.submitted_at or app.created_at,
+        )
+        db.add(proposal)
+
+        try:
+            embedding_text = f"Job: {job.title}\n\n{snippet}\n\nProposal:\n{text}"
+            proposal.embedding = await generate_embedding(embedding_text)
+        except Exception:
+            pass  # proceed without embedding
+
+        created += 1
+
+    await db.commit()
+    return {"created": created, "updated": updated, "skipped": skipped, "total": len(rows)}
+
+
 @router.delete("/{application_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_application(
     application_id: str,
