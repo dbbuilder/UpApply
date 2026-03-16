@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../store';
-import { apiClient, Proposal, Job, JobImportItem, SearchQuery } from '../../lib/api-client';
+import { apiClient, Proposal, Job, JobImportItem, SearchQuery, SearchLabResult, SuggestedQuery } from '../../lib/api-client';
 
 type TabType = 'proposals' | 'jobs' | 'search';
 
@@ -468,6 +468,11 @@ export default function HistoryPage() {
   const [importingSavedSearches, setImportingSavedSearches] = useState(false);
   const [queriesStatus, setQueriesStatus] = useState<string | null>(null);
 
+  // Search Lab state
+  const [labResult, setLabResult] = useState<SearchLabResult | null>(null);
+  const [labLoading, setLabLoading] = useState(false);
+  const [addingQueryId, setAddingQueryId] = useState<string | null>(null);
+
   const handleImportSavedJobs = async () => {
     setSavedImporting(true);
     setSavedImportStatus('Opening saved jobs page...');
@@ -683,6 +688,31 @@ export default function HistoryPage() {
     } finally {
       setImportingSavedSearches(false);
       setTimeout(() => setQueriesStatus(null), 5000);
+    }
+  };
+
+  const handleRunLab = async () => {
+    setLabLoading(true);
+    try {
+      const result = await apiClient.evaluateSearchLab();
+      setLabResult(result);
+    } catch {
+      setLabResult(null);
+    } finally {
+      setLabLoading(false);
+    }
+  };
+
+  const handleAddSuggestion = async (suggestion: SuggestedQuery) => {
+    const key = suggestion.query;
+    setAddingQueryId(key);
+    try {
+      await apiClient.createSearchQuery(suggestion.query, suggestion.url_params, 'ai_generated');
+      await loadSearchQueries();
+    } catch {
+      // duplicate — ignore
+    } finally {
+      setAddingQueryId(null);
     }
   };
 
@@ -1071,6 +1101,124 @@ export default function HistoryPage() {
                   </div>
                 );
               })}
+            </div>
+
+            {/* Search Lab — coverage analysis + gap query suggestions */}
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Search Lab</p>
+                <button
+                  type="button"
+                  onClick={handleRunLab}
+                  disabled={labLoading || !!runAllProgress}
+                  className="text-xs px-2 py-1 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 disabled:opacity-60 font-medium"
+                >
+                  {labLoading ? 'Analyzing…' : labResult ? '↻ Re-evaluate' : '⚗ Evaluate Coverage'}
+                </button>
+              </div>
+
+              {labLoading && (
+                <div className="text-xs text-gray-400 animate-pulse text-center py-3">
+                  Comparing searches against your winning jobs…
+                </div>
+              )}
+
+              {!labLoading && labResult && (
+                <div className="space-y-3">
+                  {/* Overall coverage summary */}
+                  <div className={`rounded-lg p-2.5 text-xs ${labResult.coverage_pct >= 80 ? 'bg-emerald-50 text-emerald-800' : labResult.coverage_pct >= 50 ? 'bg-amber-50 text-amber-800' : 'bg-red-50 text-red-800'}`}>
+                    <span className="font-semibold">{labResult.coverage_pct}% covered</span>
+                    {' '}— {labResult.covered_count}/{labResult.total_target_jobs} winning jobs matched by current searches
+                  </div>
+
+                  {/* Per-query coverage bars (only show queries with >0 coverage or top 5) */}
+                  {labResult.query_coverage.filter(c => c.coverage_count > 0).length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Query Coverage</p>
+                      <div className="space-y-1">
+                        {labResult.query_coverage.filter(c => c.coverage_count > 0).slice(0, 6).map((cov) => (
+                          <div key={cov.query_id} className="flex items-center gap-2">
+                            <span className="text-[10px] text-gray-600 w-28 truncate flex-shrink-0" title={cov.query}>{cov.query}</span>
+                            <div className="flex-1 h-2 bg-gray-100 rounded-sm overflow-hidden">
+                              <div
+                                className="h-full bg-violet-400 rounded-sm"
+                                style={{ width: `${Math.min(cov.coverage_pct, 100)}%` }}
+                              />
+                            </div>
+                            <span className="text-[10px] text-gray-500 w-8 text-right flex-shrink-0">{cov.coverage_pct}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Gap jobs */}
+                  {labResult.gap_jobs.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                        Uncovered Wins ({labResult.gap_jobs.length})
+                      </p>
+                      <div className="space-y-0.5">
+                        {labResult.gap_jobs.slice(0, 5).map((title) => (
+                          <p key={title} className="text-[10px] text-gray-500 truncate pl-1 border-l-2 border-red-200" title={title}>
+                            {title}
+                          </p>
+                        ))}
+                        {labResult.gap_jobs.length > 5 && (
+                          <p className="text-[10px] text-gray-400 pl-1">+{labResult.gap_jobs.length - 5} more</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Suggested queries */}
+                  {labResult.suggestions.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Suggested Queries</p>
+                      <div className="space-y-2">
+                        {labResult.suggestions.map((s) => {
+                          const alreadyAdded = searchQueries.some(
+                            (q) => q.query.toLowerCase() === s.query.toLowerCase()
+                          );
+                          return (
+                            <div key={s.query} className="rounded-lg border border-violet-100 bg-violet-50 p-2 space-y-1">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="text-xs font-medium text-violet-900">{s.query}</p>
+                                  {s.url_params && (
+                                    <p className="text-[9px] text-violet-500 font-mono truncate">{s.url_params}</p>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={alreadyAdded || addingQueryId === s.query}
+                                  onClick={() => handleAddSuggestion(s)}
+                                  className="shrink-0 text-[10px] px-2 py-0.5 rounded-full font-medium transition-colors disabled:opacity-50 bg-violet-600 text-white hover:bg-violet-700"
+                                >
+                                  {alreadyAdded ? '✓' : addingQueryId === s.query ? '…' : '+ Add'}
+                                </button>
+                              </div>
+                              <p className="text-[10px] text-violet-700 leading-snug">{s.reasoning}</p>
+                              {s.gap_jobs_targeted.length > 0 && (
+                                <p className="text-[9px] text-violet-500">
+                                  Targets: {s.gap_jobs_targeted.slice(0, 2).join(', ')}
+                                  {s.gap_jobs_targeted.length > 2 ? ` +${s.gap_jobs_targeted.length - 2} more` : ''}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {labResult.gap_jobs.length === 0 && labResult.suggestions.length === 0 && (
+                    <p className="text-xs text-emerald-600 text-center py-2">
+                      ✓ All winning jobs are covered by existing searches
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* One-shot search fallback */}

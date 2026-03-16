@@ -142,7 +142,10 @@ async function runSavedJobs(
     jobType?: string; experienceLevel?: string; postedDateRaw?: string;
     clientInfo?: Record<string, unknown>;
   }>;
-  const items = rawCards.map((c) => ({
+  const SAVED_JOBS_MAX_AGE_DAYS = 14;
+  const recentCards = rawCards.filter((c) => parseDaysAgo(c.postedDateRaw) <= SAVED_JOBS_MAX_AGE_DAYS);
+  const skipped = rawCards.length - recentCards.length;
+  const items = recentCards.map((c) => ({
     upwork_job_id: c.upworkJobId,
     upwork_url: c.upworkUrl,
     title: c.title,
@@ -153,7 +156,8 @@ async function runSavedJobs(
     client_info: c.clientInfo,
   }));
   const imported = await apiClient.importBulkJobs(items, 'saved');
-  return `${imported.length} new jobs added to Queue`;
+  const skipNote = skipped > 0 ? ` · ${skipped} older than 14d skipped` : '';
+  return `${imported.length} new jobs added to Queue${skipNote}`;
 }
 
 async function runSavedSearches(
@@ -177,6 +181,22 @@ async function runSavedSearches(
   }));
   const imported = await apiClient.bulkImportSearchQueries(toImport);
   return `${imported.length} searches imported`;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Parse relative date strings to approximate days ago
+function parseDaysAgo(raw: string | undefined): number {
+  if (!raw) return 0;
+  const s = raw.toLowerCase();
+  if (s.includes('just now') || s.includes('minute') || s.includes('hour')) return 0;
+  if (s.includes('yesterday')) return 1;
+  const daysMatch = s.match(/(\d+)\s*day/);
+  if (daysMatch) return parseInt(daysMatch[1], 10);
+  const weeksMatch = s.match(/(\d+)\s*week/);
+  if (weeksMatch) return parseInt(weeksMatch[1], 10) * 7;
+  if (s.includes('month') || s.includes('year')) return 999;
+  return 0;
 }
 
 // ── Import definitions ────────────────────────────────────────────────────────

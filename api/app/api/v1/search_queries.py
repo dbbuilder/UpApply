@@ -19,11 +19,15 @@ from app.core.security import get_current_user
 from app.models.user import User, UserProfile
 from app.models.job import Job
 from app.models.search_query import SearchQuery
+from app.models.proposal import Proposal
 from app.schemas.search_query import (
     SearchQueryCreate,
     SearchQueryResponse,
     RunRecordRequest,
     BulkImportSearchQueriesRequest,
+    QueryCoverage,
+    SuggestedQuery,
+    SearchLabResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -485,6 +489,249 @@ async def record_query_run(
     await db.flush()
     await db.refresh(sq)
     return _to_response(sq)
+
+
+# ---------------------------------------------------------------------------
+# Search Lab — evaluate coverage and suggest improvements
+# ---------------------------------------------------------------------------
+
+# Default URL params appended to all generated suggestions (Upwork advanced search)
+# contractor_tier=2,3: Intermediate + Expert only
+# t=0,1: hourly and fixed-price
+# Standard rate filter commented — let AI choose per query type
+_LAB_BASE_PARAMS = "contractor_tier=2,3&t=0,1"
+
+
+def _tokenize_query(query: str) -> list[str]:
+    """Split query into meaningful tokens, strip noise words."""
+    stop = {"a", "an", "the", "and", "or", "for", "in", "of", "to", "with", "is", "on", "at"}
+    tokens = [w.lower().strip("\"'()") for w in query.split()]
+    return [t for t in tokens if t and t not in stop and len(t) > 1]
+
+
+def _job_matches_query(title: str, description: str, tokens: list[str]) -> bool:
+    """Return True if any token appears in the job title or description."""
+    text = (title + " " + (description or "")).lower()
+    return any(t in text for t in tokens)
+
+
+@router.post("/evaluate", response_model=SearchLabResult)
+async def evaluate_search_lab(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Evaluate how well current search queries cover the user's winning jobs.
+
+    Winning jobs = contract imports (strongest signal) + jobs from responded proposals.
+    Returns per-query coverage scores, uncovered gap jobs, and GPT-generated
+    replacement/supplement queries with proper Upwork URL params.
+    """
+    from datetime import timedelta
+
+    # ── 1. Collect "target" winning jobs ─────────────────────────────────────
+    # Contract import jobs (confirmed wins)
+    contract_result = await db.execute(
+        select(Job)
+        .where(Job.user_id == current_user.id, Job.source == "contract_import")
+        .order_by(Job.created_at.desc())
+        .limit(100)
+    )
+    contract_jobs: list[Job] = contract_result.scalars().all()
+
+    # Proposals with positive outcomes (responded / hired / active post-submission)
+    proposal_result = await db.execute(
+        select(Proposal)
+        .where(
+            Proposal.user_id == current_user.id,
+            Proposal.status.in_(["responded", "hired", "active"]),
+        )
+        .limit(200)
+    )
+    proposals: list[Proposal] = proposal_result.scalars().all()
+
+    # Build target set: {title: str, description: str}
+    class TargetJob:
+        def __init__(self, title: str, description: str = ""):
+            self.title = title
+            self.description = description
+
+    target_jobs: list[TargetJob] = []
+    seen_titles: set[str] = set()
+
+    for j in contract_jobs:
+        t = (j.title or "").strip()
+        if t and t not in seen_titles:
+            seen_titles.add(t)
+            target_jobs.append(TargetJob(t, j.description or ""))
+
+    for p in proposals:
+        t = (p.job_title or "").strip()
+        if t and t not in seen_titles:
+            seen_titles.add(t)
+            target_jobs.append(TargetJob(t, p.cover_letter_text or ""))
+
+    if not target_jobs:
+        return SearchLabResult(
+            total_target_jobs=0,
+            covered_count=0,
+            coverage_pct=0.0,
+            query_coverage=[],
+            gap_jobs=[],
+            suggestions=[],
+            evaluated_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    # ── 2. Score each existing search query against target jobs ───────────────
+    queries_result = await db.execute(
+        select(SearchQuery).where(
+            SearchQuery.user_id == current_user.id,
+            SearchQuery.active.is_(True),
+        )
+    )
+    active_queries: list[SearchQuery] = queries_result.scalars().all()
+
+    # For each target job, track whether ANY query covers it
+    job_covered_by: dict[str, set[str]] = {tj.title: set() for tj in target_jobs}
+
+    coverage_items: list[QueryCoverage] = []
+    for sq in active_queries:
+        tokens = _tokenize_query(sq.query)
+        if not tokens:
+            continue
+        matches: list[str] = []
+        for tj in target_jobs:
+            if _job_matches_query(tj.title, tj.description, tokens):
+                matches.append(tj.title)
+                job_covered_by[tj.title].add(sq.id)
+
+        pct = round(len(matches) / len(target_jobs) * 100, 1)
+        coverage_items.append(QueryCoverage(
+            query_id=sq.id,
+            query=sq.query,
+            url_params=sq.url_params,
+            coverage_count=len(matches),
+            coverage_pct=pct,
+            sample_matches=matches[:3],
+        ))
+
+    # Sort by coverage descending
+    coverage_items.sort(key=lambda c: c.coverage_count, reverse=True)
+
+    # ── 3. Find gap jobs (not covered by any existing query) ──────────────────
+    gap_titles = [title for title, covered_by in job_covered_by.items() if not covered_by]
+    covered_count = len(target_jobs) - len(gap_titles)
+    coverage_pct = round(covered_count / len(target_jobs) * 100, 1)
+
+    # ── 4. GPT: generate new queries targeting the gaps ───────────────────────
+    suggestions: list[SuggestedQuery] = []
+    if gap_titles:
+        profile = await _get_profile(db, current_user.id)
+        try:
+            suggestions = await _generate_lab_suggestions(
+                gap_titles=gap_titles[:20],
+                all_target_titles=[tj.title for tj in target_jobs],
+                existing_queries=[sq.query for sq in active_queries],
+                profile=profile,
+            )
+        except Exception as e:
+            logger.warning("Search Lab GPT call failed: %s", e)
+
+    return SearchLabResult(
+        total_target_jobs=len(target_jobs),
+        covered_count=covered_count,
+        coverage_pct=coverage_pct,
+        query_coverage=coverage_items,
+        gap_jobs=gap_titles[:20],
+        suggestions=suggestions,
+        evaluated_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+async def _generate_lab_suggestions(
+    gap_titles: list[str],
+    all_target_titles: list[str],
+    existing_queries: list[str],
+    profile,
+) -> list[SuggestedQuery]:
+    """Call GPT to generate new Upwork search queries covering the gap jobs."""
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+    gap_block = "\n".join(f"  • {t}" for t in gap_titles)
+    all_block = "\n".join(f"  • {t}" for t in all_target_titles[:30])
+    existing_block = "\n".join(f"  • {q}" for q in existing_queries[:30])
+
+    skills_str = ", ".join(
+        s["name"] for s in (profile.skills or []) if s.get("level") in ("expert", "intermediate")
+    ) if profile else "not specified"
+    rate = getattr(profile, "hourly_rate", None) if profile else None
+    rate_str = f"${rate}/hr" if rate else "not set"
+
+    prompt = f"""You are an expert Upwork search strategist for a senior freelancer.
+
+FREELANCER PROFILE:
+- Skills: {skills_str}
+- Hourly rate: {rate_str}
+- Title: {getattr(profile, 'professional_title', 'Senior Developer') if profile else 'Senior Developer'}
+
+ALL WINNING JOB TITLES (contracts won + proposals that got responses):
+{all_block}
+
+UNCOVERED GAP JOBS (winning jobs that no current search would find):
+{gap_block}
+
+EXISTING SEARCH QUERIES (do not duplicate):
+{existing_block}
+
+UPWORK ADVANCED SEARCH URL PARAMS REFERENCE:
+- q=KEYWORDS           — "All of these words" (AND logic) — main search term
+- t=0,1                — job type: 0=hourly, 1=fixed-price (use both unless job-type-specific)
+- contractor_tier=2,3  — Intermediate + Expert only (always include)
+- hourly_rate=MIN-MAX  — hourly rate range (e.g. hourly_rate=100- for $100+/hr min)
+- amount=MIN-MAX       — fixed price budget (e.g. amount=1000- for $1k+ min)
+- skills=SKILL         — filter by specific Upwork skill tag
+
+TASK: Generate 5 targeted search queries that would find the uncovered gap jobs.
+
+For each query, output EXACTLY this JSON format (one object per line, no array wrapper):
+{{"query": "keyword phrase here", "url_params": "contractor_tier=2,3&t=0,1&hourly_rate=100-", "reasoning": "one sentence why this covers the gap", "gap_jobs_targeted": ["Gap Job Title 1", "Gap Job Title 2"]}}
+
+Rules:
+- query: 2-5 words, what a CLIENT would search for (not just skill names)
+- url_params: always include contractor_tier=2,3; add appropriate rate filters based on job type
+- For CTO/advisory/strategy work: no strict rate filter (fixed-price projects vary widely)
+- For technical implementation: hourly_rate=100- is appropriate
+- reasoning: be specific about which gap jobs this captures and why
+- gap_jobs_targeted: list the exact gap job titles this query would likely surface
+- Think about the SEMANTIC match: "AI automation" might cover "Machine Learning Pipeline" jobs
+- Include role-framing queries ("fractional CTO", "technical advisor") for strategic gap jobs"""
+
+    response = await client.chat.completions.create(
+        model=settings.default_model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.4,
+        max_tokens=800,
+    )
+
+    raw = response.choices[0].message.content or ""
+    suggestions: list[SuggestedQuery] = []
+    import json as _json
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or not line.startswith("{"):
+            continue
+        try:
+            obj = _json.loads(line)
+            if obj.get("query") and obj.get("url_params"):
+                suggestions.append(SuggestedQuery(
+                    query=obj["query"],
+                    url_params=obj.get("url_params", _LAB_BASE_PARAMS),
+                    reasoning=obj.get("reasoning", ""),
+                    gap_jobs_targeted=obj.get("gap_jobs_targeted", []),
+                ))
+        except Exception:
+            continue
+
+    return suggestions[:6]  # cap at 6 suggestions
 
 
 @router.post("/bulk-import", response_model=List[SearchQueryResponse])

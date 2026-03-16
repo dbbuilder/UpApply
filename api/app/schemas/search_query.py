@@ -62,3 +62,32 @@ class BulkImportSearchQueriesRequest(BaseModel):
     """Body for POST /search-queries/bulk-import."""
 
     queries: list[dict]  # [{query, url_params?, source?}]
+
+
+class QueryCoverage(BaseModel):
+    """Coverage of a single existing query against the winning job set."""
+    query_id: str
+    query: str
+    url_params: Optional[str] = None
+    coverage_count: int        # how many target jobs this query's keywords match
+    coverage_pct: float        # percentage of target jobs covered
+    sample_matches: list[str]  # up to 3 matched job titles
+
+
+class SuggestedQuery(BaseModel):
+    """A new search query suggested by the Search Lab."""
+    query: str
+    url_params: str            # full Upwork search params
+    reasoning: str             # why this covers gaps
+    gap_jobs_targeted: list[str]   # which uncovered job titles this addresses
+
+
+class SearchLabResult(BaseModel):
+    """Full output of POST /search-queries/evaluate."""
+    total_target_jobs: int
+    covered_count: int
+    coverage_pct: float
+    query_coverage: list[QueryCoverage]
+    gap_jobs: list[str]           # titles of target jobs not covered by any query
+    suggestions: list[SuggestedQuery]
+    evaluated_at: str             # ISO datetime string

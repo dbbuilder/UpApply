@@ -496,6 +496,10 @@ class ApiClient {
     });
   }
 
+  async evaluateSearchLab() {
+    return this.request<SearchLabResult>('/api/v1/search-queries/evaluate', { method: 'POST' });
+  }
+
   // Job Reviews
   async upsertJobReview(data: {
     upwork_job_url: string;
@@ -1019,6 +1023,32 @@ export interface SearchQuery {
   is_stale: boolean;
   is_low_performer: boolean;
   created_at: string;
+}
+
+export interface QueryCoverage {
+  query_id: string;
+  query: string;
+  url_params?: string;
+  coverage_count: number;
+  coverage_pct: number;
+  sample_matches: string[];
+}
+
+export interface SuggestedQuery {
+  query: string;
+  url_params: string;
+  reasoning: string;
+  gap_jobs_targeted: string[];
+}
+
+export interface SearchLabResult {
+  total_target_jobs: number;
+  covered_count: number;
+  coverage_pct: number;
+  query_coverage: QueryCoverage[];
+  gap_jobs: string[];
+  suggestions: SuggestedQuery[];
+  evaluated_at: string;
 }
 
 // Job Review Types
