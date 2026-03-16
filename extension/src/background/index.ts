@@ -591,21 +591,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
               // DOM fallback via content script (already injected by manifest — no re-inject)
               let domCoverLetter: string | null = null;
-              let domJobTitle: string | null = null;
               if (!nuxtCoverLetter) {
                 await waitForContentScript(propTab.id, 5_000);
-                const domResult = await new Promise<{ coverLetter?: string | null; jobTitle?: string | null }>((resolve) => {
+                const domResult = await new Promise<{ coverLetter?: string | null }>((resolve) => {
                   chrome.tabs.sendMessage(propTab.id!, { type: 'SCRAPE_PROPOSAL_DETAIL' }, (resp) => {
                     if (chrome.runtime.lastError || !resp?.success) resolve({});
                     else resolve(resp);
                   });
                 });
                 domCoverLetter = domResult.coverLetter || null;
-                domJobTitle = domResult.jobTitle || null;
               }
 
               const coverLetter = nuxtCoverLetter || domCoverLetter || null;
-              const jobTitle = nuxtJobTitle || domJobTitle || proposal.jobTitle;
+              // domJobTitle is unreliable (generic h3 may say "Hiring activity"); prefer list-page title
+              const jobTitle = nuxtJobTitle || proposal.jobTitle;
 
               // Determine was_hired: active proposals = null, archived = false unless confirmed hired
               let wasHired: boolean | null = null;

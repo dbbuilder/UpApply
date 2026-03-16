@@ -2297,7 +2297,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // Extract cover letter and metadata from a single /nx/proposals/{id} detail page.
       // Called by the background IMPORT_PROPOSALS deep-scraper for each detail URL.
       const coverLetter = _scrapeProposalPageText();
-      const titleEl = document.querySelector<HTMLElement>('h3, [data-test="job-title"]');
+      // Use a specific selector; avoid generic h3 which can match section headers like "Hiring activity"
+      const titleEl = document.querySelector<HTMLElement>('[data-test="job-title"], h2.job-title, .job-title');
       const jobTitle = titleEl?.textContent?.trim() || null;
       sendResponse({ success: true, coverLetter, jobTitle });
       break;
