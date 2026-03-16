@@ -755,14 +755,14 @@ export default function HistoryPage() {
                 disabled={importing}
                 className="btn-outline text-xs py-1 px-3 disabled:opacity-60"
               >
-                {importing ? 'Importing...' : '↓ Import from Upwork'}
+                {importing ? 'Syncing…' : '↻ Sync'}
               </button>
               {importStatus && (
                 <p className="text-xs text-gray-500 flex-1">{importStatus}</p>
               )}
               {!importStatus && (
                 <p className="text-xs text-gray-400 flex-1">
-                  Go to upwork.com/nx/find-work/proposals, then click Import
+                  For first-time setup use Track → ↓ Import
                 </p>
               )}
             </div>
@@ -880,7 +880,7 @@ export default function HistoryPage() {
                 disabled={savedImporting}
                 className="btn-outline text-xs py-1 px-3 disabled:opacity-60 shrink-0"
               >
-                {savedImporting ? 'Importing...' : '↓ Import Saved'}
+                {savedImporting ? 'Syncing…' : '↻ Sync'}
               </button>
               {savedImportStatus ? (
                 <p className="text-xs text-gray-500 flex-1">{savedImportStatus}</p>
