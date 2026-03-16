@@ -57,15 +57,21 @@ async function runProposals(
   setMsg: (m: string) => void,
 ): Promise<string> {
   chrome.storage.local.remove('proposalImportProgress');
+  chrome.storage.local.remove('proposalListProgress');
 
   // Poll progress storage for live updates
   const interval = setInterval(() => {
-    chrome.storage.local.get('proposalImportProgress', (r) => {
+    chrome.storage.local.get(['proposalImportProgress', 'proposalListProgress'], (r) => {
       const p = r.proposalImportProgress as Record<string, unknown> | undefined;
+      const lp = r.proposalListProgress as { page: number; totalPages: number | null } | undefined;
       if (!p) return;
-      if (p.stage === 'scraping_active') setMsg('Scraping active proposals…');
-      else if (p.stage === 'scraping_archived') setMsg('Scraping archived proposals…');
-      else if (p.stage === 'detail') {
+      if (p.stage === 'scraping_active' || p.stage === 'scraping_archived') {
+        const label = p.stage === 'scraping_active' ? 'active' : 'archived';
+        const pageInfo = lp
+          ? ` — Page ${lp.page}${lp.totalPages ? ` of ${lp.totalPages}` : ''}`
+          : '';
+        setMsg(`Scraping ${label} proposals${pageInfo}…`);
+      } else if (p.stage === 'detail') {
         const cur = p.current as number;
         const tot = p.total as number;
         const grand = p.grandTotal as number | undefined;
@@ -93,6 +99,7 @@ async function runProposals(
     return `Imported ${imported.length} new · ${withLetters} with cover letters`;
   } finally {
     clearInterval(interval);
+    chrome.storage.local.remove('proposalListProgress');
   }
 }
 

@@ -464,6 +464,7 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
     };
 
     // Page 1 is already loaded
+    chrome.storage.local.set({ proposalListProgress: { page: 1, totalPages } });
     addPage(extractProposals());
 
     // Paginate until no next button — don't rely on totalPages being accurate
@@ -480,6 +481,7 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
       }
 
       console.log('UpApply: Clicking to page', pageNum, totalPages ? `of ${totalPages}` : '(unknown total)');
+      chrome.storage.local.set({ proposalListProgress: { page: pageNum, totalPages } });
       nextBtn.click();
 
       // Wait for page indicator to update (primary) or first link href to change (fallback).
