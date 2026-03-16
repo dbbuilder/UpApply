@@ -361,10 +361,29 @@ const SCRAPE_KEY = '__upapplyScrapingPromise';
  * The button is briefly disabled during page transitions.
  */
 function waitForNextButton(timeoutMs = 2000): Promise<HTMLButtonElement | null> {
-  const findNext = (): HTMLButtonElement | null =>
-    document.querySelector<HTMLButtonElement>(
-      'button[data-test="next-page"], button[aria-label="Next page"], [data-test="pagination-next-btn"]'
+  // The proposals page has multiple sections, each with its own next-page button.
+  // Find the next-page button that comes AFTER the last proposal link — that's the one
+  // for the proposals section, not for invitations/offers above it.
+  const findNext = (): HTMLButtonElement | null => {
+    const allNextBtns = document.querySelectorAll<HTMLButtonElement>(
+      'button[data-test="next-page"], button[aria-label="Next page"]'
     );
+    if (allNextBtns.length === 0) return null;
+    if (allNextBtns.length === 1) return allNextBtns[0];
+
+    // Prefer the button that comes after the last proposal link
+    const links = document.querySelectorAll('a[data-ev-label="jpn_list_details_link"]');
+    const lastLink = links[links.length - 1];
+    if (lastLink) {
+      for (const btn of allNextBtns) {
+        // btn comes after lastLink in DOM
+        if (lastLink.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING) {
+          return btn;
+        }
+      }
+    }
+    return allNextBtns[allNextBtns.length - 1]; // fallback: last button
+  };
   return new Promise((resolve) => {
     const deadline = Date.now() + timeoutMs;
     const check = () => {
@@ -379,22 +398,29 @@ function waitForNextButton(timeoutMs = 2000): Promise<HTMLButtonElement | null> 
 }
 
 /**
- * Wait for new proposal links to appear after a page navigation click.
- * Resolves when the first proposal link's href changes or a timeout occurs.
+ * Wait for proposal pagination to advance to targetPage.
+ * Primary signal: active page button's data-ev-page_index matches targetPage (works in background tabs).
+ * Fallback: first proposal link href changes.
+ * Returns true if page actually changed, false if timeout (click didn't work).
  */
-function waitForProposalPageChange(previousFirstId: string | null, timeoutMs = 2500): Promise<void> {
+function waitForProposalPageChange(previousFirstHref: string | null, targetPage: number, timeoutMs = 6000): Promise<boolean> {
   return new Promise((resolve) => {
     const deadline = Date.now() + timeoutMs;
     const check = () => {
+      // Primary: active pagination button (in proposals section) shows the target page number.
+      // Use the last active pagination button — proposals section is always last on the page.
+      const activeBtns = document.querySelectorAll<HTMLElement>('.air3-pagination-nr-btn.is-active');
+      const activeBtn = activeBtns[activeBtns.length - 1];
+      const activePage = parseInt(activeBtn?.getAttribute('data-ev-page_index') || '0', 10);
+      if (activePage === targetPage) { resolve(true); return; }
+
+      // Fallback: first proposal link href changed
       const first = document.querySelector<HTMLAnchorElement>('a[data-ev-label="jpn_list_details_link"]');
-      const firstId = first?.getAttribute('href') || null;
-      if (firstId && firstId !== previousFirstId) {
-        resolve();
-      } else if (Date.now() >= deadline) {
-        resolve(); // timeout — extract whatever's there
-      } else {
-        setTimeout(check, 150);
-      }
+      const firstHref = first?.getAttribute('href') || null;
+      if (firstHref && firstHref !== previousFirstHref) { resolve(true); return; }
+
+      if (Date.now() >= deadline) { resolve(false); return; } // timed out — click didn't work
+      setTimeout(check, 150);
     };
     setTimeout(check, 150);
   });
@@ -455,7 +481,14 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
 
       console.log('UpApply: Clicking to page', pageNum, totalPages ? `of ${totalPages}` : '(unknown total)');
       nextBtn.click();
-      await waitForProposalPageChange(previousFirstHref);
+
+      // Wait for page indicator to update (primary) or first link href to change (fallback).
+      // Returns false if the click didn't trigger navigation (background tab click issue).
+      const changed = await waitForProposalPageChange(previousFirstHref, pageNum);
+      if (!changed) {
+        console.log('UpApply: Page did not advance to', pageNum, '— stopping pagination');
+        break;
+      }
 
       addPage(extractProposals());
       pageNum++;
