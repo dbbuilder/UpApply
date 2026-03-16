@@ -62,8 +62,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'GET_AUTH_TOKEN': {
       // Content script may not have chrome.storage access — delegate to SW
       chrome.storage.local.get('authToken').then((stored) => {
-        sendResponse({ token: (stored['authToken'] as string) || null });
-      }).catch(() => sendResponse({ token: null }));
+        try { sendResponse({ token: (stored['authToken'] as string) || null }); } catch { /* channel closed */ }
+      }).catch(() => { try { sendResponse({ token: null }); } catch { /* channel closed */ } });
       return true;
     }
 
@@ -77,8 +77,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'GET_NOTIF_CACHE': {
       const { key: cacheKey } = message as { key: string };
       chrome.storage.local.get(cacheKey).then((stored) => {
-        sendResponse({ value: stored[cacheKey] ?? null });
-      }).catch(() => sendResponse({ value: null }));
+        try { sendResponse({ value: stored[cacheKey] ?? null }); } catch { /* channel closed */ }
+      }).catch(() => { try { sendResponse({ value: null }); } catch { /* channel closed */ } });
       return true;
     }
 
@@ -474,8 +474,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         const scrapeListPage = (tabId: number): Promise<import('../types').ScrapedProposal[]> =>
           new Promise((resolve) => {
-            // 45s timeout — extractAllProposals paginates and may take a while
-            const timeout = setTimeout(() => resolve([]), 45_000);
+            // 120s timeout — extractAllProposals paginates up to many pages (each page ~8s)
+            const timeout = setTimeout(() => resolve([]), 120_000);
             chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_PROPOSALS' }, (resp) => {
               clearTimeout(timeout);
               if (chrome.runtime.lastError || !resp?.success) resolve([]);

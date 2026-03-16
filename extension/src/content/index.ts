@@ -2296,7 +2296,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'FILL_MILESTONES': {
       (async () => {
         const result = await fillMilestones(message.milestones);
-        sendResponse(result);
+        try { sendResponse(result); } catch { /* channel closed */ }
       })();
       return true;
     }
@@ -2327,9 +2327,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         (async () => {
           try {
             const proposals = await extractAllProposals();
-            sendResponse({ success: true, data: proposals, url: window.location.href, debug: debugHits });
+            try { sendResponse({ success: true, data: proposals, url: window.location.href, debug: debugHits }); } catch { /* channel closed */ }
           } catch (err) {
-            sendResponse({ success: false, error: String(err), debug: debugHits });
+            try { sendResponse({ success: false, error: String(err), debug: debugHits }); } catch { /* channel closed */ }
           }
         })();
         return true; // keep message channel open for async sendResponse
@@ -2355,9 +2355,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         (async () => {
           try {
             const cards = await extractAllJobCards();
-            sendResponse({ success: true, data: cards, url: window.location.href });
+            try { sendResponse({ success: true, data: cards, url: window.location.href }); } catch { /* channel closed */ }
           } catch (err) {
-            sendResponse({ success: false, error: String(err) });
+            try { sendResponse({ success: false, error: String(err) }); } catch { /* channel closed */ }
           }
         })();
         return true;
@@ -2379,9 +2379,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       (async () => {
         try {
           const data = await _scrapeAllContracts();
-          sendResponse({ success: true, data, url: window.location.href });
+          try { sendResponse({ success: true, data, url: window.location.href }); } catch { /* channel closed */ }
         } catch (err) {
-          sendResponse({ success: false, error: String(err) });
+          try { sendResponse({ success: false, error: String(err) }); } catch { /* channel closed */ }
         }
       })();
       return true; // async — keep message channel open
