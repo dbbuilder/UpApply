@@ -403,7 +403,7 @@ function waitForNextButton(timeoutMs = 2000): Promise<HTMLButtonElement | null> 
  * Fallback: first proposal link href changes.
  * Returns true if page actually changed, false if timeout (click didn't work).
  */
-function waitForProposalPageChange(previousFirstHref: string | null, targetPage: number, timeoutMs = 6000): Promise<boolean> {
+function waitForProposalPageChange(previousFirstHref: string | null, targetPage: number, timeoutMs = 15000): Promise<boolean> {
   return new Promise((resolve) => {
     const deadline = Date.now() + timeoutMs;
     const check = () => {
@@ -420,9 +420,12 @@ function waitForProposalPageChange(previousFirstHref: string | null, targetPage:
       if (firstHref && firstHref !== previousFirstHref) { resolve(true); return; }
 
       if (Date.now() >= deadline) { resolve(false); return; } // timed out — click didn't work
-      setTimeout(check, 150);
+      setTimeout(check, 200);
     };
-    setTimeout(check, 150);
+    // Initial delay after click — Vue needs time to process the click before DOM updates
+    // Background tabs have rAF throttled to ~1fps, so the first meaningful update
+    // may not appear for 1–2s after the click.
+    setTimeout(check, 1000);
   });
 }
 

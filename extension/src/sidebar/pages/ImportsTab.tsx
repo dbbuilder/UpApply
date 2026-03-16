@@ -91,12 +91,13 @@ async function runProposals(
       throw new Error(scrapeResult?.error || 'No proposals found.');
     }
 
-    setMsg(`Saving ${scrapeResult.data.length} proposals…`);
+    const total = scrapeResult.data.length;
+    setMsg(`Saving ${total} proposals…`);
     const imported = await apiClient.importProposalsFromUpwork(
       scrapeResult.data as Record<string, unknown>[]
     );
     const withLetters = (scrapeResult.data as Record<string, unknown>[]).filter(p => p.coverLetter).length;
-    return `Imported ${imported.length} new · ${withLetters} with cover letters`;
+    return `${total} scraped · ${imported.length} new · ${withLetters} with cover letters`;
   } finally {
     clearInterval(interval);
     chrome.storage.local.remove('proposalListProgress');
