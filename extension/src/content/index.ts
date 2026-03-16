@@ -2370,7 +2370,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ success: false, error: 'Unknown message type' });
   }
 
-  return true; // Keep message channel open for async response
+  // Do NOT return true here — async cases already return true from inside their
+  // case block. Returning true unconditionally for sync cases (PING, EXTRACT_JOB_DATA,
+  // etc.) causes "message channel closed" errors because Chrome waits for a second
+  // async sendResponse that never comes.
 });
 
 /**
