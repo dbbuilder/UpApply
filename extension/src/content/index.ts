@@ -2178,6 +2178,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   console.log('UpApply: Received message', message.type, message);
 
   switch (message.type) {
+    case 'PING':
+      sendResponse({ pong: true });
+      break;
+
     case 'EXTRACT_JOB_DATA':
       console.log('UpApply: EXTRACT_JOB_DATA received, isJobPage:', isJobPage(), 'URL:', window.location.href);
       if (!isJobPage()) {

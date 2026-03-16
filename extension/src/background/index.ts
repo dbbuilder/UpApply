@@ -423,6 +423,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'IMPORT_PROPOSALS':
       // Deep scrape: active list + archived list + detail pages for cover letters.
+      // Manifest auto-injects the content script on all upwork.com pages — we never
+      // re-inject manually (that creates duplicate instances causing "message channel
+      // closed" errors). We use a ping-wait instead to confirm the CS is ready.
       (async () => {
         const setProgress = (p: Record<string, unknown>) =>
           chrome.storage.local.set({ proposalImportProgress: p });
@@ -430,19 +433,51 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         _startKeepAlive();
         _activeScoringCount++;
 
-        const manifest = chrome.runtime.getManifest();
-        const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0] || null;
+        // Wait for the manifest-injected content script to respond to a PING.
+        const waitForContentScript = (tabId: number, maxMs = 12_000): Promise<boolean> =>
+          new Promise((resolve) => {
+            const deadline = Date.now() + maxMs;
+            const tryPing = () => {
+              chrome.tabs.sendMessage(tabId, { type: 'PING' }, (resp) => {
+                if (!chrome.runtime.lastError && resp?.pong) { resolve(true); return; }
+                if (Date.now() < deadline) setTimeout(tryPing, 400);
+                else resolve(false);
+              });
+            };
+            tryPing();
+          });
 
-        const injectScript = async (tabId: number) => {
-          if (contentScriptPath) {
-            try { await chrome.scripting.executeScript({ target: { tabId }, files: [contentScriptPath] }); }
-            catch (e) { /* already loaded */ }
-          }
+        // Navigate and wait — listener registered BEFORE update to avoid race condition
+        // where the page completes before the listener is added.
+        const navigateAndWait = async (tabId: number, url: string, timeoutMs = 20_000): Promise<void> => {
+          await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              chrome.tabs.onUpdated.removeListener(listener);
+              reject(new Error('Tab load timeout'));
+            }, timeoutMs);
+            const listener = (id: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+              if (id === tabId && changeInfo.status === 'complete') {
+                chrome.tabs.onUpdated.removeListener(listener);
+                clearTimeout(timeout);
+                resolve();
+              }
+            };
+            // Register listener synchronously BEFORE the awaited update call
+            chrome.tabs.onUpdated.addListener(listener);
+            chrome.tabs.update(tabId, { url }).catch((e) => {
+              chrome.tabs.onUpdated.removeListener(listener);
+              clearTimeout(timeout);
+              reject(e);
+            });
+          });
         };
 
         const scrapeListPage = (tabId: number): Promise<import('../types').ScrapedProposal[]> =>
           new Promise((resolve) => {
+            // 45s timeout — extractAllProposals paginates and may take a while
+            const timeout = setTimeout(() => resolve([]), 45_000);
             chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_PROPOSALS' }, (resp) => {
+              clearTimeout(timeout);
               if (chrome.runtime.lastError || !resp?.success) resolve([]);
               else resolve((resp.data as import('../types').ScrapedProposal[]) || []);
             });
@@ -457,19 +492,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // 1. Scrape active proposals list
             await setProgress({ stage: 'scraping_active' });
             await waitForTabLoad(propTab.id);
-            await new Promise(r => setTimeout(r, 2500));
-            await injectScript(propTab.id);
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 2000));
+            await waitForContentScript(propTab.id);
             const activeProposals = await scrapeListPage(propTab.id);
             console.log('UpApply: Active proposals found:', activeProposals.length);
 
             // 2. Scrape archived proposals list
             await setProgress({ stage: 'scraping_archived' });
-            await chrome.tabs.update(propTab.id, { url: 'https://www.upwork.com/nx/proposals/archived' });
-            await waitForTabLoad(propTab.id);
-            await new Promise(r => setTimeout(r, 2500));
-            await injectScript(propTab.id);
-            await new Promise(r => setTimeout(r, 500));
+            await navigateAndWait(propTab.id, 'https://www.upwork.com/nx/proposals/archived');
+            await new Promise(r => setTimeout(r, 2000));
+            await waitForContentScript(propTab.id);
             const archivedProposals = await scrapeListPage(propTab.id);
             console.log('UpApply: Archived proposals found:', archivedProposals.length);
 
@@ -506,9 +538,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
 
               const detailUrl = `https://www.upwork.com/nx/proposals/${proposal.proposalId}`;
-              await chrome.tabs.update(propTab.id, { url: detailUrl });
               try {
-                await waitForTabLoad(propTab.id, 15_000);
+                await navigateAndWait(propTab.id, detailUrl, 15_000);
               } catch {
                 console.log('UpApply: Timeout loading detail for proposal', proposal.proposalId);
                 results.push({ ...proposal, coverLetter: null });
@@ -552,12 +583,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 console.log('UpApply: NUXT read failed for proposal', proposal.proposalId, String(e));
               }
 
-              // DOM fallback — inject content script and call SCRAPE_PROPOSAL_DETAIL
+              // DOM fallback via content script (already injected by manifest — no re-inject)
               let domCoverLetter: string | null = null;
               let domJobTitle: string | null = null;
               if (!nuxtCoverLetter) {
-                await injectScript(propTab.id);
-                await new Promise(r => setTimeout(r, 300));
+                await waitForContentScript(propTab.id, 5_000);
                 const domResult = await new Promise<{ coverLetter?: string | null; jobTitle?: string | null }>((resolve) => {
                   chrome.tabs.sendMessage(propTab.id!, { type: 'SCRAPE_PROPOSAL_DETAIL' }, (resp) => {
                     if (chrome.runtime.lastError || !resp?.success) resolve({});
