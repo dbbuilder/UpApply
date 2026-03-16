@@ -376,19 +376,15 @@ async def backfill_proposals_corpus(
 
     Safe to call multiple times — never downgrades an existing was_hired=True entry.
     """
-    import traceback as _tb
-    try:
-      result = await db.execute(
-          select(Application, CoverLetter, Job)
-          .join(CoverLetter, Application.cover_letter_id == CoverLetter.id)
-          .join(Job, Application.job_id == Job.id)
-          .where(Application.user_id == current_user.id)
-          .where(cast(Application.status, String) != ApplicationStatus.DRAFT.value)
-          .where(Application.cover_letter_id.isnot(None))
-      )
-      rows = result.all()
-    except Exception as _e:
-      raise HTTPException(status_code=500, detail=f"{_e}\n{_tb.format_exc()}")
+    result = await db.execute(
+        select(Application, CoverLetter, Job)
+        .join(CoverLetter, Application.cover_letter_id == CoverLetter.id)
+        .join(Job, Application.job_id == Job.id)
+        .where(Application.user_id == current_user.id)
+        .where(cast(Application.status, String) != ApplicationStatus.DRAFT.value)
+        .where(Application.cover_letter_id.isnot(None))
+    )
+    rows = result.all()
 
     created = 0
     updated = 0
