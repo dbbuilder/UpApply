@@ -337,8 +337,11 @@ export default function HistoryPage() {
         if (p.stage === 'scraping_active') setImportStatus('Scraping active proposals...');
         else if (p.stage === 'scraping_archived') setImportStatus('Scraping archived proposals...');
         else if (p.stage === 'detail') {
-          const suffix = p.grandTotal && p.grandTotal > p.total ? ` of ${p.grandTotal} total` : '';
-          setImportStatus(`Fetching cover letters... (${p.current}/${p.total}${suffix})`);
+          const cur = p.current as number;
+          const tot = p.total as number;
+          const grand = p.grandTotal as number | undefined;
+          const suffix = grand && grand > tot ? ` of ${grand} total` : '';
+          setImportStatus(`Fetching cover letters... (${cur}/${tot}${suffix})`);
         }
         else if (p.stage === 'done') clearInterval(progressInterval);
         else if (p.stage === 'error') clearInterval(progressInterval);
