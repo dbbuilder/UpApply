@@ -2289,6 +2289,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       break;
     }
 
+    case 'SCRAPE_PROPOSAL_DETAIL': {
+      // Extract cover letter and metadata from a single /nx/proposals/{id} detail page.
+      // Called by the background IMPORT_PROPOSALS deep-scraper for each detail URL.
+      const coverLetter = _scrapeProposalPageText();
+      const titleEl = document.querySelector<HTMLElement>('h3, [data-test="job-title"]');
+      const jobTitle = titleEl?.textContent?.trim() || null;
+      sendResponse({ success: true, coverLetter, jobTitle });
+      break;
+    }
+
     case 'SCRAPE_JOB_CARDS': {
       if (!isJobCardPage()) {
         sendResponse({ success: false, error: 'Not on a job listings page', url: window.location.href });

@@ -526,7 +526,13 @@ async def import_proposals_from_upwork(
         embedding = await generate_embedding(text_for_embedding) if text_for_embedding else None
 
         client_responded = status_str in ("responded", "interviewed", "hired")
-        was_hired = status_str == "hired"
+        # Allow explicit wasHired override from the scraper (e.g. archived proposals
+        # whose status string doesn't say "hired" but the scraper detected a contract)
+        was_hired_override = raw_data.get("wasHired")
+        if was_hired_override is not None:
+            was_hired = bool(was_hired_override)
+        else:
+            was_hired = status_str == "hired"
 
         proposal = Proposal(
             user_id=current_user.id,

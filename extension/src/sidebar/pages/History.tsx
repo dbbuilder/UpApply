@@ -325,29 +325,47 @@ export default function HistoryPage() {
 
   const handleImportFromUpwork = async () => {
     setImporting(true);
-    setImportStatus('Opening proposals page...');
+    setImportStatus('Opening proposals pages...');
+
+    // Poll progress storage so the user sees real-time feedback during the
+    // multi-page deep scrape (active list → archived list → each detail page)
+    chrome.storage.local.remove('proposalImportProgress');
+    const progressInterval = setInterval(() => {
+      chrome.storage.local.get('proposalImportProgress', (result) => {
+        const p = result.proposalImportProgress as Record<string, unknown> | undefined;
+        if (!p) return;
+        if (p.stage === 'scraping_active') setImportStatus('Scraping active proposals...');
+        else if (p.stage === 'scraping_archived') setImportStatus('Scraping archived proposals...');
+        else if (p.stage === 'detail') setImportStatus(`Fetching cover letters... (${p.current}/${p.total})`);
+        else if (p.stage === 'done') clearInterval(progressInterval);
+        else if (p.stage === 'error') clearInterval(progressInterval);
+      });
+    }, 800);
+
     try {
-      // Open proposals page in background tab, scrape, close automatically
       const scrapeResult = await new Promise<{ success: boolean; data?: unknown[]; error?: string }>(
         (resolve) => chrome.runtime.sendMessage({ type: 'IMPORT_PROPOSALS' }, resolve)
       );
+      clearInterval(progressInterval);
 
       if (!scrapeResult?.success || !scrapeResult.data?.length) {
         setImportStatus(`Nothing found. ${scrapeResult?.error || 'No proposals found.'}`);
         return;
       }
 
-      setImportStatus(`Importing ${scrapeResult.data.length} proposals...`);
+      setImportStatus(`Saving ${scrapeResult.data.length} proposals...`);
       const imported = await apiClient.importProposalsFromUpwork(
         scrapeResult.data as Record<string, unknown>[]
       );
-      setImportStatus(`Imported ${imported.length} new proposals.`);
+      const withLetters = (scrapeResult.data as Record<string, unknown>[]).filter(p => p.coverLetter).length;
+      setImportStatus(`Imported ${imported.length} new proposals (${withLetters} with cover letters).`);
       await loadProposals();
     } catch {
+      clearInterval(progressInterval);
       setImportStatus('Import failed. Try again.');
     } finally {
       setImporting(false);
-      setTimeout(() => setImportStatus(null), 5000);
+      setTimeout(() => setImportStatus(null), 6000);
     }
   };
 

@@ -422,34 +422,193 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'IMPORT_PROPOSALS':
-      // Navigate to proposals page in background tab, scrape all proposals, close, return
+      // Deep scrape: active list + archived list + detail pages for cover letters.
       (async () => {
-        const proposalsUrl = 'https://www.upwork.com/nx/find-work/proposals';
-        console.log('UpApply Background: Opening proposals tab:', proposalsUrl);
-        const propTab = await chrome.tabs.create({ url: proposalsUrl, active: false });
-        if (!propTab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }
-        try {
-          await waitForTabLoad(propTab.id);
-          await new Promise(resolve => setTimeout(resolve, 2500));
-          const manifest = chrome.runtime.getManifest();
-          const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+        const setProgress = (p: Record<string, unknown>) =>
+          chrome.storage.local.set({ proposalImportProgress: p });
+
+        _startKeepAlive();
+        _activeScoringCount++;
+
+        const manifest = chrome.runtime.getManifest();
+        const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0] || null;
+
+        const injectScript = async (tabId: number) => {
           if (contentScriptPath) {
-            try { await chrome.scripting.executeScript({ target: { tabId: propTab.id }, files: [contentScriptPath] }); }
+            try { await chrome.scripting.executeScript({ target: { tabId }, files: [contentScriptPath] }); }
             catch (e) { /* already loaded */ }
           }
-          await new Promise(resolve => setTimeout(resolve, 500));
-          const response = await new Promise<{ success: boolean; data?: unknown; error?: string; debug?: string[] }>((resolve) => {
-            chrome.tabs.sendMessage(propTab.id!, { type: 'SCRAPE_PROPOSALS' }, (resp) => {
-              if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
-              else resolve(resp || { success: false, error: 'No response' });
+        };
+
+        const scrapeListPage = (tabId: number): Promise<import('../types').ScrapedProposal[]> =>
+          new Promise((resolve) => {
+            chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_PROPOSALS' }, (resp) => {
+              if (chrome.runtime.lastError || !resp?.success) resolve([]);
+              else resolve((resp.data as import('../types').ScrapedProposal[]) || []);
             });
           });
-          if (response?.debug?.length) {
-            console.log('UpApply Proposals debug:', response.debug.join(' | '));
+
+        try {
+          await setProgress({ stage: 'opening' });
+          const propTab = await chrome.tabs.create({ url: 'https://www.upwork.com/nx/proposals/', active: false });
+          if (!propTab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }
+
+          try {
+            // 1. Scrape active proposals list
+            await setProgress({ stage: 'scraping_active' });
+            await waitForTabLoad(propTab.id);
+            await new Promise(r => setTimeout(r, 2500));
+            await injectScript(propTab.id);
+            await new Promise(r => setTimeout(r, 500));
+            const activeProposals = await scrapeListPage(propTab.id);
+            console.log('UpApply: Active proposals found:', activeProposals.length);
+
+            // 2. Scrape archived proposals list
+            await setProgress({ stage: 'scraping_archived' });
+            await chrome.tabs.update(propTab.id, { url: 'https://www.upwork.com/nx/proposals/archived' });
+            await waitForTabLoad(propTab.id);
+            await new Promise(r => setTimeout(r, 2500));
+            await injectScript(propTab.id);
+            await new Promise(r => setTimeout(r, 500));
+            const archivedProposals = await scrapeListPage(propTab.id);
+            console.log('UpApply: Archived proposals found:', archivedProposals.length);
+
+            // Merge — active first, archived fills in gaps; track which list each came from
+            type ProposalWithSource = import('../types').ScrapedProposal & { _isArchived: boolean };
+            const proposalMap = new Map<string, ProposalWithSource>();
+            for (const p of activeProposals) {
+              if (p.proposalId) proposalMap.set(p.proposalId, { ...p, _isArchived: false });
+            }
+            for (const p of archivedProposals) {
+              if (p.proposalId && !proposalMap.has(p.proposalId)) {
+                proposalMap.set(p.proposalId, { ...p, _isArchived: true });
+              }
+            }
+            const allProposals = Array.from(proposalMap.values());
+            console.log('UpApply: Total unique proposals:', allProposals.length);
+
+            if (allProposals.length === 0) {
+              sendResponse({ success: false, error: 'No proposals found on active or archived pages.' });
+              return;
+            }
+
+            // 3. Visit each detail page to extract cover letter and was_hired status
+            const results: import('../types').ScrapedProposal[] = [];
+            const total = allProposals.length;
+
+            for (let i = 0; i < allProposals.length; i++) {
+              const proposal = allProposals[i];
+              await setProgress({ stage: 'detail', current: i + 1, total });
+
+              if (!proposal.proposalId) {
+                results.push(proposal);
+                continue;
+              }
+
+              const detailUrl = `https://www.upwork.com/nx/proposals/${proposal.proposalId}`;
+              await chrome.tabs.update(propTab.id, { url: detailUrl });
+              try {
+                await waitForTabLoad(propTab.id, 15_000);
+              } catch {
+                console.log('UpApply: Timeout loading detail for proposal', proposal.proposalId);
+                results.push({ ...proposal, coverLetter: null });
+                continue;
+              }
+              await new Promise(r => setTimeout(r, 1500));
+
+              // Read window.__NUXT__ from the page's main world
+              let nuxtCoverLetter: string | null = null;
+              let nuxtStatus: string | null = null;
+              let nuxtBidAmount: string | null = null;
+              let nuxtJobTitle: string | null = null;
+              try {
+                const [nuxtResult] = await chrome.scripting.executeScript({
+                  target: { tabId: propTab.id },
+                  world: 'MAIN',
+                  func: () => {
+                    try {
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      const n = (window as any).__NUXT__;
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      const state = n?.state as Record<string, any> | undefined;
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      const app = state?.application as Record<string, any> | undefined;
+                      return {
+                        coverLetter: (app?.coverLetter as string) || null,
+                        status: (app?.status as string) || null,
+                        bidAmount: String(app?.terms?.chargeRate?.amount || '') || null,
+                        jobTitle: (app?.job?.title as string) || null,
+                      };
+                    } catch { return { coverLetter: null, status: null, bidAmount: null, jobTitle: null }; }
+                  },
+                });
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const r = nuxtResult?.result as Record<string, any> | null;
+                nuxtCoverLetter = r?.coverLetter || null;
+                nuxtStatus = r?.status || null;
+                nuxtBidAmount = r?.bidAmount || null;
+                nuxtJobTitle = r?.jobTitle || null;
+              } catch (e) {
+                console.log('UpApply: NUXT read failed for proposal', proposal.proposalId, String(e));
+              }
+
+              // DOM fallback — inject content script and call SCRAPE_PROPOSAL_DETAIL
+              let domCoverLetter: string | null = null;
+              let domJobTitle: string | null = null;
+              if (!nuxtCoverLetter) {
+                await injectScript(propTab.id);
+                await new Promise(r => setTimeout(r, 300));
+                const domResult = await new Promise<{ coverLetter?: string | null; jobTitle?: string | null }>((resolve) => {
+                  chrome.tabs.sendMessage(propTab.id!, { type: 'SCRAPE_PROPOSAL_DETAIL' }, (resp) => {
+                    if (chrome.runtime.lastError || !resp?.success) resolve({});
+                    else resolve(resp);
+                  });
+                });
+                domCoverLetter = domResult.coverLetter || null;
+                domJobTitle = domResult.jobTitle || null;
+              }
+
+              const coverLetter = nuxtCoverLetter || domCoverLetter || null;
+              const jobTitle = nuxtJobTitle || domJobTitle || proposal.jobTitle;
+
+              // Determine was_hired: active proposals = null, archived = false unless confirmed hired
+              let wasHired: boolean | null = null;
+              if (nuxtStatus) {
+                const s = nuxtStatus.toLowerCase();
+                if (s.includes('hired') || s.includes('contract') || s === 'accepted') {
+                  wasHired = true;
+                } else if (proposal._isArchived) {
+                  wasHired = false;
+                }
+              } else if (proposal._isArchived) {
+                wasHired = false;
+              }
+
+              results.push({
+                proposalId: proposal.proposalId,
+                jobTitle,
+                jobUrl: detailUrl,
+                coverLetter,
+                bidAmount: nuxtBidAmount ? parseFloat(nuxtBidAmount) : null,
+                bidType: null,
+                status: nuxtStatus || (proposal._isArchived ? 'archived' : (proposal.status || 'submitted')),
+                submittedAt: proposal.submittedAt,
+                wasHired,
+              });
+            }
+
+            await setProgress({ stage: 'done', current: total, total });
+            console.log('UpApply: Proposal deep-scrape complete —', results.length, 'proposals,', results.filter(r => r.coverLetter).length, 'with cover letters');
+            sendResponse({ success: true, data: results });
+          } finally {
+            try { await chrome.tabs.remove(propTab.id); } catch (e) { /* ignore */ }
           }
-          sendResponse(response);
+        } catch (err) {
+          await setProgress({ stage: 'error', error: String(err) });
+          sendResponse({ success: false, error: String(err) });
         } finally {
-          try { await chrome.tabs.remove(propTab.id); } catch (e) { /* ignore */ }
+          _activeScoringCount = Math.max(0, _activeScoringCount - 1);
+          if (_activeScoringCount === 0) _stopKeepAlive();
         }
       })();
       return true;

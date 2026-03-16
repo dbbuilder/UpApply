@@ -35,6 +35,7 @@ export interface ScrapedProposal {
   bidType: string | null;
   status: string | null;
   submittedAt: string | null;
+  wasHired?: boolean | null;
 }
 
 export interface AttachmentInfo {
