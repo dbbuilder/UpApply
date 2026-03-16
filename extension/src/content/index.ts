@@ -361,10 +361,14 @@ const SCRAPE_KEY = '__upapplyScrapingPromise';
  * The button is briefly disabled during page transitions.
  */
 function waitForNextButton(timeoutMs = 2000): Promise<HTMLButtonElement | null> {
+  const findNext = (): HTMLButtonElement | null =>
+    document.querySelector<HTMLButtonElement>(
+      'button[data-test="next-page"], button[aria-label="Next page"], [data-test="pagination-next-btn"]'
+    );
   return new Promise((resolve) => {
     const deadline = Date.now() + timeoutMs;
     const check = () => {
-      const btn = document.querySelector<HTMLButtonElement>('button[data-test="next-page"]');
+      const btn = findNext();
       if (!btn) { resolve(null); return; }
       if (!btn.disabled) { resolve(btn); return; }
       if (Date.now() >= deadline) { resolve(null); return; }
@@ -412,12 +416,14 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
 
   // Become the leader — store the promise so other instances join it
   const scrapePromise = (async (): Promise<ScrapedProposal[]> => {
+    // data-ev-max_page_count may not exist on proposals pages — treat as optional hint only.
+    // We paginate by clicking "next" until no next button exists (safer than trusting totalPages).
     const paginationDiv = document.querySelector('[data-ev-max_page_count]');
     const totalPages = paginationDiv
       ? parseInt(paginationDiv.getAttribute('data-ev-max_page_count') || '1', 10)
-      : 1;
+      : null;
 
-    console.log('UpApply: Proposals pagination — total pages:', totalPages);
+    console.log('UpApply: Proposals pagination — total pages:', totalPages ?? 'unknown (will paginate until no next button)');
 
     const all: ScrapedProposal[] = [];
     const seenIds = new Set<string>();
@@ -434,22 +440,25 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
     // Page 1 is already loaded
     addPage(extractProposals());
 
-    for (let page = 2; page <= totalPages; page++) {
+    // Paginate until no next button — don't rely on totalPages being accurate
+    let pageNum = 2;
+    while (totalPages === null || pageNum <= totalPages) {
       const firstLink = document.querySelector<HTMLAnchorElement>('a[data-ev-label="jpn_list_details_link"]');
       const previousFirstHref = firstLink?.getAttribute('href') || null;
 
       // Wait for next button to be enabled (it's briefly disabled during transitions)
       const nextBtn = await waitForNextButton();
       if (!nextBtn) {
-        console.log('UpApply: No enabled next button found at page', page - 1, '— stopping');
+        console.log('UpApply: No enabled next button found at page', pageNum - 1, '— stopping');
         break;
       }
 
-      console.log('UpApply: Clicking to page', page, 'of', totalPages);
+      console.log('UpApply: Clicking to page', pageNum, totalPages ? `of ${totalPages}` : '(unknown total)');
       nextBtn.click();
       await waitForProposalPageChange(previousFirstHref);
 
       addPage(extractProposals());
+      pageNum++;
     }
 
     console.log('UpApply: Total proposals across all pages:', all.length);
