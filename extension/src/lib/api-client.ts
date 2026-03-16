@@ -500,6 +500,13 @@ class ApiClient {
     return this.request<SearchLabResult>('/api/v1/search-queries/evaluate', { method: 'POST' });
   }
 
+  async optimizeSearchLab(experiments: QueryExperimentData[]) {
+    return this.request<OptimizeResult>('/api/v1/search-queries/optimize', {
+      method: 'POST',
+      body: { experiments },
+    });
+  }
+
   // Job Reviews
   async upsertJobReview(data: {
     upwork_job_url: string;
@@ -1048,6 +1055,37 @@ export interface SearchLabResult {
   query_coverage: QueryCoverage[];
   gap_jobs: string[];
   suggestions: SuggestedQuery[];
+  evaluated_at: string;
+}
+
+export interface QueryExperimentData {
+  query_id: string;
+  query: string;
+  url_params?: string;
+  jobs_returned: number;
+  avg_score: number;
+  high_score_count: number;
+  sample_good_titles?: string[];
+  sample_bad_titles?: string[];
+}
+
+export interface QueryVariant {
+  query: string;
+  url_params: string;
+  reasoning: string;
+  change_type: string;  // "broader" | "narrower" | "reframe"
+}
+
+export interface QueryOptimization {
+  query_id: string;
+  original_query: string;
+  grade: string;  // "strong" | "low_volume" | "low_quality" | "both"
+  inclusive_score: number;
+  variants: QueryVariant[];
+}
+
+export interface OptimizeResult {
+  optimizations: QueryOptimization[];
   evaluated_at: string;
 }
 

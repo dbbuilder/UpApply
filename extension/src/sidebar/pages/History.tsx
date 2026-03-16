@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../store';
-import { apiClient, Proposal, Job, JobImportItem, SearchQuery, SearchLabResult, SuggestedQuery } from '../../lib/api-client';
+import { apiClient, Proposal, Job, JobImportItem, SearchQuery, SearchLabResult, SuggestedQuery, QueryExperimentData, OptimizeResult, QueryVariant } from '../../lib/api-client';
 
 type TabType = 'proposals' | 'jobs' | 'search';
 
@@ -473,6 +473,14 @@ export default function HistoryPage() {
   const [labLoading, setLabLoading] = useState(false);
   const [addingQueryId, setAddingQueryId] = useState<string | null>(null);
 
+  // Experiment runner state
+  const [experimentsRunning, setExperimentsRunning] = useState(false);
+  const [experimentProgress, setExperimentProgress] = useState<{ current: number; total: number } | null>(null);
+  const [experimentResults, setExperimentResults] = useState<QueryExperimentData[] | null>(null);
+  const [optimizeLoading, setOptimizeLoading] = useState(false);
+  const [optimizeResult, setOptimizeResult] = useState<OptimizeResult | null>(null);
+  const [replacingQueryId, setReplacingQueryId] = useState<string | null>(null);
+
   const handleImportSavedJobs = async () => {
     setSavedImporting(true);
     setSavedImportStatus('Opening saved jobs page...');
@@ -708,6 +716,108 @@ export default function HistoryPage() {
     setAddingQueryId(key);
     try {
       await apiClient.createSearchQuery(suggestion.query, suggestion.url_params, 'ai_generated');
+      await loadSearchQueries();
+    } catch {
+      // duplicate — ignore
+    } finally {
+      setAddingQueryId(null);
+    }
+  };
+
+  // ── Experiment runner ────────────────────────────────────────────────────────
+
+  const handleRunExperiments = async () => {
+    const active = searchQueries.filter((sq) => sq.active);
+    if (!active.length) return;
+    setExperimentsRunning(true);
+    setExperimentProgress({ current: 0, total: active.length });
+    setExperimentResults(null);
+    setOptimizeResult(null);
+
+    const results: QueryExperimentData[] = [];
+
+    for (let i = 0; i < active.length; i++) {
+      const sq = active[i];
+      setExperimentProgress({ current: i + 1, total: active.length });
+      try {
+        const scrapeResult = await new Promise<{ success: boolean; data?: unknown[]; error?: string }>(
+          (resolve) => chrome.runtime.sendMessage(
+            { type: 'SEARCH_UPWORK_JOBS', query: sq.query, urlParams: sq.url_params },
+            resolve
+          )
+        );
+
+        if (!scrapeResult?.success || !scrapeResult.data?.length) {
+          await apiClient.recordQueryRun(sq.id, { jobs_found: 0, avg_score: 0, high_score_count: 0 });
+          results.push({ query_id: sq.id, query: sq.query, url_params: sq.url_params ?? undefined, jobs_returned: 0, avg_score: 0, high_score_count: 0 });
+        } else {
+          const rawCards = scrapeResult.data as Array<{
+            upworkJobId: string; upworkUrl: string; title: string; description: string;
+            jobType?: string; experienceLevel?: string; postedDateRaw?: string; clientInfo?: Record<string, unknown>;
+          }>;
+          const items: JobImportItem[] = rawCards.map((c) => ({
+            upwork_job_id: c.upworkJobId, upwork_url: c.upworkUrl, title: c.title, description: c.description,
+            job_type: c.jobType, experience_level: c.experienceLevel, posted_date_raw: c.postedDateRaw, client_info: c.clientInfo,
+          }));
+          const imported = await apiClient.importBulkJobs(items, 'search', sq.query, sq.id);
+          const avgScore = imported.length > 0 ? imported.reduce((s, j) => s + (j.match_score ?? 0), 0) / imported.length : 0;
+          const highJobs = imported.filter((j) => (j.match_score ?? 0) >= 70);
+          const lowJobs = imported.filter((j) => (j.match_score ?? 0) < 50);
+          await apiClient.recordQueryRun(sq.id, { jobs_found: imported.length, avg_score: avgScore, high_score_count: highJobs.length });
+          results.push({
+            query_id: sq.id, query: sq.query, url_params: sq.url_params ?? undefined,
+            jobs_returned: imported.length, avg_score: avgScore, high_score_count: highJobs.length,
+            sample_good_titles: highJobs.slice(0, 3).map((j) => j.title),
+            sample_bad_titles: lowJobs.slice(0, 3).map((j) => j.title),
+          });
+        }
+      } catch {
+        // skip failed queries silently
+      }
+      if (i < active.length - 1) await new Promise((r) => setTimeout(r, 1500));
+    }
+
+    setExperimentResults(results);
+    setExperimentsRunning(false);
+    setExperimentProgress(null);
+    await loadSearchQueries();
+    await loadJobs();
+  };
+
+  const handleOptimize = async () => {
+    if (!experimentResults) return;
+    setOptimizeLoading(true);
+    try {
+      const result = await apiClient.optimizeSearchLab(experimentResults);
+      setOptimizeResult(result);
+    } catch {
+      // silently fail
+    } finally {
+      setOptimizeLoading(false);
+    }
+  };
+
+  const handleReplaceQuery = async (queryId: string, variant: QueryVariant) => {
+    setReplacingQueryId(queryId);
+    try {
+      await apiClient.deleteSearchQuery(queryId);
+      await apiClient.createSearchQuery(variant.query, variant.url_params, 'ai_generated');
+      await loadSearchQueries();
+      setOptimizeResult((prev) => prev
+        ? { ...prev, optimizations: prev.optimizations.filter((o) => o.query_id !== queryId) }
+        : null
+      );
+    } catch {
+      // silently fail
+    } finally {
+      setReplacingQueryId(null);
+    }
+  };
+
+  const handleAddVariant = async (variant: QueryVariant) => {
+    setAddingQueryId(variant.query);
+    try {
+      await apiClient.createSearchQuery(variant.query, variant.url_params, 'ai_generated');
       await loadSearchQueries();
     } catch {
       // duplicate — ignore
@@ -1103,20 +1213,142 @@ export default function HistoryPage() {
               })}
             </div>
 
-            {/* Search Lab — coverage analysis + gap query suggestions */}
-            <div className="mt-3 pt-3 border-t border-gray-100">
-              <div className="flex items-center justify-between mb-2">
+            {/* Search Lab — experiment runner + coverage analysis */}
+            <div className="mt-3 pt-3 border-t border-gray-100 space-y-3">
+              {/* Header row */}
+              <div className="flex items-center justify-between">
                 <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Search Lab</p>
-                <button
-                  type="button"
-                  onClick={handleRunLab}
-                  disabled={labLoading || !!runAllProgress}
-                  className="text-xs px-2 py-1 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 disabled:opacity-60 font-medium"
-                >
-                  {labLoading ? 'Analyzing…' : labResult ? '↻ Re-evaluate' : '⚗ Evaluate Coverage'}
-                </button>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={handleRunExperiments}
+                    disabled={experimentsRunning || !!runAllProgress || searchQueries.filter(q => q.active).length === 0}
+                    className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 disabled:opacity-60 font-medium"
+                  >
+                    {experimentsRunning
+                      ? experimentProgress ? `${experimentProgress.current}/${experimentProgress.total}` : '…'
+                      : experimentResults ? '↻ Re-run' : '▶ Run'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRunLab}
+                    disabled={labLoading || !!runAllProgress || experimentsRunning}
+                    className="text-xs px-2 py-1 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 disabled:opacity-60 font-medium"
+                  >
+                    {labLoading ? 'Analyzing…' : labResult ? '↻ Coverage' : '⚗ Coverage'}
+                  </button>
+                </div>
               </div>
 
+              {/* Experiment progress */}
+              {experimentsRunning && experimentProgress && (
+                <div className="text-xs text-blue-500 animate-pulse text-center py-2">
+                  Running query {experimentProgress.current} of {experimentProgress.total}…
+                </div>
+              )}
+
+              {/* Experiment grades table */}
+              {!experimentsRunning && experimentResults && experimentResults.length > 0 && (() => {
+                const weakCount = experimentResults.filter((e) => {
+                  const hr = e.jobs_returned > 0 ? e.high_score_count / e.jobs_returned : 0;
+                  return e.jobs_returned < 5 || hr < 0.30;
+                }).length;
+                return (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
+                        Experiment Results
+                      </p>
+                      {weakCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleOptimize}
+                          disabled={optimizeLoading}
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 hover:bg-orange-200 disabled:opacity-60 font-medium"
+                        >
+                          {optimizeLoading ? 'Optimizing…' : `⚙ Optimize ${weakCount} weak`}
+                        </button>
+                      )}
+                    </div>
+                    <div className="space-y-0.5">
+                      {experimentResults.map((e) => {
+                        const hitRate = e.jobs_returned > 0 ? e.high_score_count / e.jobs_returned : 0;
+                        const lowVol = e.jobs_returned < 5;
+                        const lowQual = hitRate < 0.30;
+                        const gradeLabel = lowVol && lowQual ? 'weak' : lowVol ? 'low vol' : lowQual ? 'low qual' : 'strong';
+                        const gradeCls = lowVol && lowQual
+                          ? 'text-red-600 bg-red-50'
+                          : lowVol
+                          ? 'text-amber-600 bg-amber-50'
+                          : lowQual
+                          ? 'text-orange-600 bg-orange-50'
+                          : 'text-emerald-600 bg-emerald-50';
+                        return (
+                          <div key={e.query_id} className="flex items-center gap-2 text-[10px]">
+                            <span className="flex-1 truncate text-gray-600" title={e.query}>{e.query}</span>
+                            <span className="shrink-0 text-gray-400">{e.jobs_returned}j</span>
+                            <span className="shrink-0 text-gray-400">{e.high_score_count}↑</span>
+                            <span className={`shrink-0 px-1.5 py-0.5 rounded-full font-medium ${gradeCls}`}>{gradeLabel}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Optimize results — per-weak-query variants */}
+              {!optimizeLoading && optimizeResult && optimizeResult.optimizations.filter(o => o.variants.length > 0).length > 0 && (
+                <div>
+                  <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Optimization Suggestions</p>
+                  <div className="space-y-2">
+                    {optimizeResult.optimizations.filter((o) => o.variants.length > 0).map((opt) => (
+                      <div key={opt.query_id} className="rounded-lg border border-orange-100 bg-orange-50 p-2 space-y-1.5">
+                        <p className="text-[10px] text-orange-500 font-mono truncate" title={opt.original_query}>
+                          was: {opt.original_query}
+                        </p>
+                        {opt.variants.map((v) => {
+                          const alreadyAdded = searchQueries.some((q) => q.query.toLowerCase() === v.query.toLowerCase());
+                          const isReplacing = replacingQueryId === opt.query_id;
+                          const isAdding = addingQueryId === v.query;
+                          return (
+                            <div key={v.query} className="rounded bg-white border border-orange-100 p-1.5 space-y-1">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="text-xs font-medium text-gray-800">{v.query}</p>
+                                  <p className="text-[9px] text-gray-400 font-mono truncate">{v.url_params}</p>
+                                </div>
+                                <div className="flex gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    disabled={isReplacing || alreadyAdded}
+                                    onClick={() => handleReplaceQuery(opt.query_id, v)}
+                                    className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
+                                    title="Replace original with this query"
+                                  >
+                                    {isReplacing ? '…' : 'Replace'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={alreadyAdded || isAdding}
+                                    onClick={() => handleAddVariant(v)}
+                                    className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50"
+                                  >
+                                    {alreadyAdded ? '✓' : isAdding ? '…' : '+ Add'}
+                                  </button>
+                                </div>
+                              </div>
+                              <p className="text-[9px] text-gray-500 leading-snug">{v.reasoning}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Coverage analysis result */}
               {labLoading && (
                 <div className="text-xs text-gray-400 animate-pulse text-center py-3">
                   Comparing searches against your winning jobs…
@@ -1125,13 +1357,11 @@ export default function HistoryPage() {
 
               {!labLoading && labResult && (
                 <div className="space-y-3">
-                  {/* Overall coverage summary */}
                   <div className={`rounded-lg p-2.5 text-xs ${labResult.coverage_pct >= 80 ? 'bg-emerald-50 text-emerald-800' : labResult.coverage_pct >= 50 ? 'bg-amber-50 text-amber-800' : 'bg-red-50 text-red-800'}`}>
                     <span className="font-semibold">{labResult.coverage_pct}% covered</span>
                     {' '}— {labResult.covered_count}/{labResult.total_target_jobs} winning jobs matched by current searches
                   </div>
 
-                  {/* Per-query coverage bars (only show queries with >0 coverage or top 5) */}
                   {labResult.query_coverage.filter(c => c.coverage_count > 0).length > 0 && (
                     <div>
                       <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Query Coverage</p>
@@ -1140,10 +1370,7 @@ export default function HistoryPage() {
                           <div key={cov.query_id} className="flex items-center gap-2">
                             <span className="text-[10px] text-gray-600 w-28 truncate flex-shrink-0" title={cov.query}>{cov.query}</span>
                             <div className="flex-1 h-2 bg-gray-100 rounded-sm overflow-hidden">
-                              <div
-                                className="h-full bg-violet-400 rounded-sm"
-                                style={{ width: `${Math.min(cov.coverage_pct, 100)}%` }}
-                              />
+                              <div className="h-full bg-violet-400 rounded-sm" style={{ width: `${Math.min(cov.coverage_pct, 100)}%` }} />
                             </div>
                             <span className="text-[10px] text-gray-500 w-8 text-right flex-shrink-0">{cov.coverage_pct}%</span>
                           </div>
@@ -1152,7 +1379,6 @@ export default function HistoryPage() {
                     </div>
                   )}
 
-                  {/* Gap jobs */}
                   {labResult.gap_jobs.length > 0 && (
                     <div>
                       <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
@@ -1160,9 +1386,7 @@ export default function HistoryPage() {
                       </p>
                       <div className="space-y-0.5">
                         {labResult.gap_jobs.slice(0, 5).map((title) => (
-                          <p key={title} className="text-[10px] text-gray-500 truncate pl-1 border-l-2 border-red-200" title={title}>
-                            {title}
-                          </p>
+                          <p key={title} className="text-[10px] text-gray-500 truncate pl-1 border-l-2 border-red-200" title={title}>{title}</p>
                         ))}
                         {labResult.gap_jobs.length > 5 && (
                           <p className="text-[10px] text-gray-400 pl-1">+{labResult.gap_jobs.length - 5} more</p>
@@ -1171,23 +1395,18 @@ export default function HistoryPage() {
                     </div>
                   )}
 
-                  {/* Suggested queries */}
                   {labResult.suggestions.length > 0 && (
                     <div>
                       <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Suggested Queries</p>
                       <div className="space-y-2">
                         {labResult.suggestions.map((s) => {
-                          const alreadyAdded = searchQueries.some(
-                            (q) => q.query.toLowerCase() === s.query.toLowerCase()
-                          );
+                          const alreadyAdded = searchQueries.some((q) => q.query.toLowerCase() === s.query.toLowerCase());
                           return (
                             <div key={s.query} className="rounded-lg border border-violet-100 bg-violet-50 p-2 space-y-1">
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
                                   <p className="text-xs font-medium text-violet-900">{s.query}</p>
-                                  {s.url_params && (
-                                    <p className="text-[9px] text-violet-500 font-mono truncate">{s.url_params}</p>
-                                  )}
+                                  {s.url_params && <p className="text-[9px] text-violet-500 font-mono truncate">{s.url_params}</p>}
                                 </div>
                                 <button
                                   type="button"

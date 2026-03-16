@@ -28,6 +28,11 @@ from app.schemas.search_query import (
     QueryCoverage,
     SuggestedQuery,
     SearchLabResult,
+    QueryExperimentResult,
+    OptimizeRequest,
+    QueryVariant,
+    QueryOptimization,
+    OptimizeResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -732,6 +737,166 @@ Rules:
             continue
 
     return suggestions[:6]  # cap at 6 suggestions
+
+
+# ---------------------------------------------------------------------------
+# Search Lab — optimize weak queries with AI variants
+# ---------------------------------------------------------------------------
+
+_OPT_LOW_VOLUME = 5        # fewer jobs than this = low volume
+_OPT_LOW_QUALITY = 0.30    # hit-rate below this = low quality
+
+
+async def _generate_optimize_variants(
+    weak_experiments: list[QueryExperimentResult],
+    profile,
+) -> dict[str, list[QueryVariant]]:
+    """Call GPT to generate improved variants for underperforming queries.
+
+    Returns a dict mapping query_id → list of QueryVariant objects.
+    """
+    import json as _json
+
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+    skills_str = ", ".join(
+        s["name"] for s in (profile.skills or []) if s.get("level") in ("expert", "intermediate")
+    ) if profile else "not specified"
+    title_str = getattr(profile, "professional_title", "Senior Developer") if profile else "Senior Developer"
+
+    weak_block = ""
+    for exp in weak_experiments:
+        hit_rate = exp.high_score_count / max(exp.jobs_returned, 1) * 100
+        low_vol = exp.jobs_returned < _OPT_LOW_VOLUME
+        low_qual = hit_rate < _OPT_LOW_QUALITY * 100
+        if low_vol and low_qual:
+            problem = "BOTH — too narrow AND low quality"
+        elif low_vol:
+            problem = "TOO NARROW (found too few jobs)"
+        else:
+            problem = "LOW QUALITY (too many irrelevant results)"
+        good_ex = ", ".join(exp.sample_good_titles[:2]) or "none"
+        bad_ex = ", ".join(exp.sample_bad_titles[:2]) or "none"
+        weak_block += (
+            f'Query: "{exp.query}" | url_params: {exp.url_params or "none"}\n'
+            f"  Problem: {problem} — {exp.jobs_returned} jobs found, "
+            f"{exp.high_score_count} high-score ({hit_rate:.0f}% hit rate)\n"
+            f"  Good matches: {good_ex}\n"
+            f"  Irrelevant matches: {bad_ex}\n"
+            f"  query_id: {exp.query_id}\n\n"
+        )
+
+    prompt = f"""You are an expert Upwork search optimizer for a senior freelancer.
+
+FREELANCER TITLE: {title_str}
+FREELANCER SKILLS: {skills_str}
+
+UNDERPERFORMING SEARCH QUERIES:
+{weak_block}
+UPWORK SEARCH URL PARAMS:
+- q=KEYWORDS — all-words AND search (main term)
+- t=0,1 — hourly + fixed-price (use both unless job-type-specific)
+- contractor_tier=2,3 — Intermediate + Expert only (always include)
+- hourly_rate=MIN- — e.g. hourly_rate=75- for $75+/hr minimum
+- amount=MIN- — fixed-price budget minimum
+
+For each query above, generate 2-3 IMPROVED VARIANTS.
+
+RULES:
+- TOO NARROW: make the query BROADER (fewer required words, more general terms, or drop modifiers)
+- LOW QUALITY: make it MORE SPECIFIC (add domain context, role framing, niche terms that filter noise)
+- BOTH: try completely different angle (different client phrasing, different role framing)
+- ALWAYS prefer INCLUSIVE queries — optimise for finding MORE good jobs, not perfect precision
+- change_type must be one of: "broader", "narrower", "reframe"
+
+Output EXACTLY this JSON format, one object per line, nothing else:
+{{"query_id": "the_query_id", "query": "new keyword phrase", "url_params": "contractor_tier=2,3&t=0,1", "reasoning": "one sentence why this improves recall", "change_type": "broader"}}"""
+
+    response = await client.chat.completions.create(
+        model=settings.default_model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.4,
+        max_tokens=900,
+    )
+
+    raw = response.choices[0].message.content or ""
+    result: dict[str, list[QueryVariant]] = {}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or not line.startswith("{"):
+            continue
+        try:
+            obj = _json.loads(line)
+            qid = obj.get("query_id", "")
+            if qid and obj.get("query") and obj.get("url_params"):
+                if qid not in result:
+                    result[qid] = []
+                if len(result[qid]) < 3:
+                    result[qid].append(QueryVariant(
+                        query=obj["query"],
+                        url_params=obj["url_params"],
+                        reasoning=obj.get("reasoning", ""),
+                        change_type=obj.get("change_type", "broader"),
+                    ))
+        except Exception:
+            continue
+
+    return result
+
+
+@router.post("/optimize", response_model=OptimizeResult)
+async def optimize_search_lab(
+    request: OptimizeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Grade experiment results and generate AI variants for weak queries.
+
+    Grades each experiment by volume (jobs found) and quality (% high-score).
+    Weak queries get 2-3 optimised variants from GPT, biased toward inclusivity.
+    """
+    optimizations: list[QueryOptimization] = []
+    weak_exps: list[QueryExperimentResult] = []
+
+    for exp in request.experiments:
+        hit_rate = exp.high_score_count / max(exp.jobs_returned, 1)
+        inclusive_score = float(exp.high_score_count)
+        low_vol = exp.jobs_returned < _OPT_LOW_VOLUME
+        low_qual = hit_rate < _OPT_LOW_QUALITY
+
+        if low_vol and low_qual:
+            grade = "both"
+        elif low_vol:
+            grade = "low_volume"
+        elif low_qual:
+            grade = "low_quality"
+        else:
+            grade = "strong"
+
+        optimizations.append(QueryOptimization(
+            query_id=exp.query_id,
+            original_query=exp.query,
+            grade=grade,
+            inclusive_score=inclusive_score,
+            variants=[],
+        ))
+        if grade != "strong":
+            weak_exps.append(exp)
+
+    if weak_exps:
+        profile = await _get_profile(db, current_user.id)
+        try:
+            variants_map = await _generate_optimize_variants(weak_exps, profile)
+            for opt in optimizations:
+                if opt.query_id in variants_map:
+                    opt.variants = variants_map[opt.query_id]
+        except Exception as e:
+            logger.warning("Search Lab optimize GPT call failed: %s", e)
+
+    return OptimizeResult(
+        optimizations=optimizations,
+        evaluated_at=datetime.now(timezone.utc).isoformat(),
+    )
 
 
 @router.post("/bulk-import", response_model=List[SearchQueryResponse])

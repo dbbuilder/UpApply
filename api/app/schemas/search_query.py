@@ -91,3 +91,43 @@ class SearchLabResult(BaseModel):
     gap_jobs: list[str]           # titles of target jobs not covered by any query
     suggestions: list[SuggestedQuery]
     evaluated_at: str             # ISO datetime string
+
+
+class QueryExperimentResult(BaseModel):
+    """Per-query live experiment data from running a search on Upwork."""
+    query_id: str
+    query: str
+    url_params: Optional[str] = None
+    jobs_returned: int
+    avg_score: float
+    high_score_count: int
+    sample_good_titles: list[str] = []
+    sample_bad_titles: list[str] = []
+
+
+class OptimizeRequest(BaseModel):
+    """Body for POST /search-queries/optimize."""
+    experiments: list[QueryExperimentResult]
+
+
+class QueryVariant(BaseModel):
+    """A suggested replacement or supplement for a weak search query."""
+    query: str
+    url_params: str
+    reasoning: str
+    change_type: str   # "broader" | "narrower" | "reframe"
+
+
+class QueryOptimization(BaseModel):
+    """Grade + variants for one search query."""
+    query_id: str
+    original_query: str
+    grade: str          # "strong" | "low_volume" | "low_quality" | "both"
+    inclusive_score: float   # high_score_count from this experiment run
+    variants: list[QueryVariant]
+
+
+class OptimizeResult(BaseModel):
+    """Full output of POST /search-queries/optimize."""
+    optimizations: list[QueryOptimization]
+    evaluated_at: str
