@@ -524,13 +524,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               return;
             }
 
-            // 3. Visit each detail page to extract cover letter and was_hired status
+            // 3. Visit detail pages to extract cover letters.
+            // Cap at 150 most recent — the list is newest-first so we take the head.
+            // Visiting 900+ detail pages would take ~45 min; 150 takes ~8 min and
+            // covers all the corpus-relevant recent work.
+            const MAX_DETAIL_PAGES = 150;
+            const detailCandidates = allProposals.slice(0, MAX_DETAIL_PAGES);
             const results: import('../types').ScrapedProposal[] = [];
-            const total = allProposals.length;
+            const total = detailCandidates.length;
+            console.log(`UpApply: Visiting ${total} detail pages (${allProposals.length} total proposals — capped at ${MAX_DETAIL_PAGES})`);
 
-            for (let i = 0; i < allProposals.length; i++) {
-              const proposal = allProposals[i];
-              await setProgress({ stage: 'detail', current: i + 1, total });
+            for (let i = 0; i < detailCandidates.length; i++) {
+              const proposal = detailCandidates[i];
+              await setProgress({ stage: 'detail', current: i + 1, total, grandTotal: allProposals.length });
 
               if (!proposal.proposalId) {
                 results.push(proposal);

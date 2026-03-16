@@ -336,7 +336,10 @@ export default function HistoryPage() {
         if (!p) return;
         if (p.stage === 'scraping_active') setImportStatus('Scraping active proposals...');
         else if (p.stage === 'scraping_archived') setImportStatus('Scraping archived proposals...');
-        else if (p.stage === 'detail') setImportStatus(`Fetching cover letters... (${p.current}/${p.total})`);
+        else if (p.stage === 'detail') {
+          const suffix = p.grandTotal && p.grandTotal > p.total ? ` of ${p.grandTotal} total` : '';
+          setImportStatus(`Fetching cover letters... (${p.current}/${p.total}${suffix})`);
+        }
         else if (p.stage === 'done') clearInterval(progressInterval);
         else if (p.stage === 'error') clearInterval(progressInterval);
       });
