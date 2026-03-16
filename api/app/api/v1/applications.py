@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, func
+from sqlalchemy import select, func, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -383,7 +383,7 @@ async def backfill_proposals_corpus(
           .join(CoverLetter, Application.cover_letter_id == CoverLetter.id)
           .join(Job, Application.job_id == Job.id)
           .where(Application.user_id == current_user.id)
-          .where(Application.status != ApplicationStatus.DRAFT.value)
+          .where(cast(Application.status, String) != ApplicationStatus.DRAFT.value)
           .where(Application.cover_letter_id.isnot(None))
       )
       rows = result.all()
