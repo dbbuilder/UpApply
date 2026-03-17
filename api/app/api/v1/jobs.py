@@ -336,6 +336,41 @@ async def import_bulk_jobs(
     return created_jobs
 
 
+@router.get("/cover-letters", response_model=List[CoverLetterResponse])
+async def list_cover_letters(
+    job_id: Optional[str] = None,
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List user's cover letters."""
+    query = select(CoverLetter).where(CoverLetter.user_id == current_user.id)
+
+    if job_id:
+        query = query.where(CoverLetter.job_id == job_id)
+
+    query = query.order_by(CoverLetter.created_at.desc()).limit(limit)
+
+    result = await db.execute(query)
+    letters = result.scalars().all()
+
+    return [
+        CoverLetterResponse(
+            id=cl.id,
+            user_id=cl.user_id,
+            job_id=cl.job_id,
+            content=cl.content,
+            model_used=cl.model_used,
+            memories_used=cl.memories_used,
+            word_count=len(cl.content.split()),
+            version=cl.version,
+            is_final=False,
+            created_at=cl.created_at,
+        )
+        for cl in letters
+    ]
+
+
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(
     job_id: str,
@@ -793,41 +828,6 @@ async def generate_cover_letter_endpoint(
         match_score=match_score,
         highlighted_skills=[m.skill for m in skill_matches if m.match_type == "exact"],
     )
-
-
-@router.get("/cover-letters", response_model=List[CoverLetterResponse])
-async def list_cover_letters(
-    job_id: Optional[str] = None,
-    limit: int = 50,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """List user's cover letters."""
-    query = select(CoverLetter).where(CoverLetter.user_id == current_user.id)
-
-    if job_id:
-        query = query.where(CoverLetter.job_id == job_id)
-
-    query = query.order_by(CoverLetter.created_at.desc()).limit(limit)
-
-    result = await db.execute(query)
-    letters = result.scalars().all()
-
-    return [
-        CoverLetterResponse(
-            id=cl.id,
-            user_id=cl.user_id,
-            job_id=cl.job_id,
-            content=cl.content,
-            model_used=cl.model_used,
-            memories_used=cl.memories_used,
-            word_count=len(cl.content.split()),
-            version=cl.version,
-            is_final=False,
-            created_at=cl.created_at,
-        )
-        for cl in letters
-    ]
 
 
 @router.post("/cover-letters/{letter_id}/regenerate", response_model=CoverLetterResponse)

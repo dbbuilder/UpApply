@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { apiClient, Job, Application, CoverLetter } from '../../lib/api-client';
+import { apiClient, ApiError, Job, Application, CoverLetter } from '../../lib/api-client';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -208,8 +208,17 @@ export default function QueuePage() {
       });
 
       setItems(merged);
-    } catch {
-      setError('Failed to load queue.');
+    } catch (err) {
+      console.error('[UpApply] Queue load failed:', err);
+      if (err instanceof ApiError) {
+        if (err.status === 401) {
+          setError('Session expired — please re-login.');
+        } else {
+          setError(`Server error ${err.status}: ${err.message}`);
+        }
+      } else {
+        setError(`Failed to load queue: ${String(err)}`);
+      }
     } finally {
       setLoading(false);
     }
