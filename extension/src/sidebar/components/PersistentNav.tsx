@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useAppStore } from '../store';
 
 type NavMode = 'me' | 'find' | 'apply' | 'queue' | 'track' | 'insights' | 'import';
@@ -8,24 +7,24 @@ type ViewType =
   | 'memories' | 'history' | 'analytics' | 'feedback' | 'skills' | 'profile'
   | 'insights' | 'import';
 
-const ME_VIEWS: string[]      = ['me', 'profile', 'skills', 'memories', 'setup'];
-const FIND_VIEWS: string[]    = ['find', 'scored'];
-const QUEUE_VIEWS: string[]   = ['queue'];
-const TRACK_VIEWS: string[]   = ['track', 'history', 'analytics', 'feedback'];
+const ME_VIEWS: string[]       = ['me', 'profile', 'skills', 'memories', 'setup'];
+const FIND_VIEWS: string[]     = ['find', 'scored'];
+const QUEUE_VIEWS: string[]    = ['queue'];
+const TRACK_VIEWS: string[]    = ['track', 'history', 'analytics', 'feedback'];
 const INSIGHTS_VIEWS: string[] = ['insights'];
-const IMPORT_VIEWS: string[]  = ['import'];
+const IMPORT_VIEWS: string[]   = ['import'];
 
-function getMode(view: string): NavMode {
-  if (ME_VIEWS.includes(view))      return 'me';
-  if (FIND_VIEWS.includes(view))    return 'find';
-  if (QUEUE_VIEWS.includes(view))   return 'queue';
-  if (TRACK_VIEWS.includes(view))   return 'track';
+export function getNavMode(view: string): NavMode {
+  if (ME_VIEWS.includes(view))       return 'me';
+  if (FIND_VIEWS.includes(view))     return 'find';
+  if (QUEUE_VIEWS.includes(view))    return 'queue';
+  if (TRACK_VIEWS.includes(view))    return 'track';
   if (INSIGHTS_VIEWS.includes(view)) return 'insights';
-  if (IMPORT_VIEWS.includes(view))  return 'import';
+  if (IMPORT_VIEWS.includes(view))   return 'import';
   return 'apply';
 }
 
-const HELP_CONTENT: Record<NavMode | 'apply', string> = {
+export const HELP_CONTENT: Record<NavMode, string> = {
   me:       'Edit your profile, skills, and memories that AI uses to write cover letters.',
   find:     'Browse scored jobs. Stars = match strength. Rate jobs to train your profile.',
   apply:    'Score the current Upwork job and generate a tailored cover letter.',
@@ -45,36 +44,25 @@ interface NavItem {
 
 interface PersistentNavProps {
   goOpen: boolean;
-  onGoToggle: () => void;
 }
 
-export default function PersistentNav({ goOpen, onGoToggle }: PersistentNavProps) {
+export default function PersistentNav({ goOpen }: PersistentNavProps) {
   const { currentView, setCurrentView, currentJob } = useAppStore();
-  const activeMode = getMode(currentView);
+  const activeMode = getNavMode(currentView);
   const hasJob = !!currentJob?.title;
-  const [helpOpen, setHelpOpen] = useState(false);
 
   const items: NavItem[] = [
-    { mode: 'me',       icon: '👤', label: 'Me',     targetView: 'me' },
-    { mode: 'find',     icon: '🔍', label: 'Find',   targetView: 'find' },
-    { mode: 'apply',    icon: '✍️', label: 'Apply',  targetView: 'generator', dot: hasJob },
-    { mode: 'queue',    icon: '📋', label: 'Queue',  targetView: 'queue' },
-    { mode: 'track',    icon: '📊', label: 'Track',  targetView: 'track' },
+    { mode: 'me',       icon: '👤', label: 'Me',      targetView: 'me' },
+    { mode: 'find',     icon: '🔍', label: 'Find',    targetView: 'find' },
+    { mode: 'apply',    icon: '✍️', label: 'Apply',   targetView: 'generator', dot: hasJob },
+    { mode: 'queue',    icon: '📋', label: 'Queue',   targetView: 'queue' },
+    { mode: 'track',    icon: '📊', label: 'Track',   targetView: 'track' },
     { mode: 'insights', icon: '💡', label: 'Insight', targetView: 'insights' },
-    { mode: 'import',   icon: '⇅',  label: 'Sync',   targetView: 'import' },
+    { mode: 'import',   icon: '⇅',  label: 'Sync',    targetView: 'import' },
   ];
 
-  const helpText = HELP_CONTENT[activeMode];
-
   return (
-    <div className="flex-shrink-0 relative">
-      {/* Contextual help — renders as a strip inside the nav bar, never overlays content */}
-      {helpOpen && (
-        <div className="absolute inset-x-0 top-0 bottom-0 flex items-center px-3 bg-gray-900 rounded-none z-10">
-          <span className="text-white text-[10px] leading-snug">{helpText}</span>
-        </div>
-      )}
-
+    <div className="flex-shrink-0">
       <nav className="flex border-t border-gray-200 bg-white" style={{ height: '52px' }}>
         {items.map(({ mode, icon, label, targetView, dot }) => {
           const active = activeMode === mode && !goOpen;
@@ -101,28 +89,6 @@ export default function PersistentNav({ goOpen, onGoToggle }: PersistentNavProps
             </button>
           );
         })}
-
-        {/* Go — visually distinct */}
-        <button
-          type="button"
-          onClick={onGoToggle}
-          className={`flex items-center justify-center px-2 transition-colors border-t-2 ${
-            goOpen
-              ? 'text-emerald-700 border-emerald-600 bg-emerald-50'
-              : 'text-emerald-500 border-transparent hover:text-emerald-600'
-          }`}
-        >
-          <span className="text-sm leading-none">{goOpen ? '✕' : '↗'}</span>
-        </button>
-
-        {/* Help ? button */}
-        <button
-          type="button"
-          onClick={() => setHelpOpen(o => !o)}
-          className="flex items-center justify-center px-2 text-gray-300 hover:text-gray-500 border-t-2 border-transparent transition-colors"
-        >
-          <span className="text-sm leading-none">?</span>
-        </button>
       </nav>
     </div>
   );
