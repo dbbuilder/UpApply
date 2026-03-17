@@ -14,6 +14,8 @@ import MePage from './pages/MePage';
 import FindPage from './pages/FindPage';
 import TrackPage from './pages/TrackPage';
 import QueuePage from './pages/QueuePage';
+import InsightsPage from './pages/InsightsPage';
+import ImportPage from './pages/ImportPage';
 
 
 function App() {
@@ -61,6 +63,10 @@ function App() {
         return <SkillsPage />;
       case 'profile':
         return <EditProfilePage />;
+      case 'insights':
+        return <InsightsPage />;
+      case 'import':
+        return <ImportPage />;
       default:
         return <GeneratorPage />;
     }

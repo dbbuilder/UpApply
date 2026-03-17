@@ -2,9 +2,8 @@ import { useState, useEffect } from 'react';
 import { apiClient, ProposalStats, AnalyticsDashboard } from '../../lib/api-client';
 import HistoryPage from './History';
 import WorkTab from './WorkTab';
-import ImportsTab from './ImportsTab';
 
-type TrackTab = 'pipeline' | 'work' | 'history' | 'trends' | 'imports';
+type TrackTab = 'pipeline' | 'work' | 'history' | 'trends';
 
 // ── Pipeline tab ─────────────────────────────────────────────────────────────
 
@@ -245,7 +244,6 @@ export default function TrackPage() {
             { id: 'work' as const, label: 'Work' },
             { id: 'history' as const, label: 'History' },
             { id: 'trends' as const, label: 'Trends' },
-            { id: 'imports' as const, label: '↓ Import' },
           ]).map(tab => (
             <button
               key={tab.id}
@@ -271,7 +269,6 @@ export default function TrackPage() {
           </div>
         )}
         {activeTab === 'trends' && <TrendsTab />}
-        {activeTab === 'imports' && <ImportsTab />}
       </div>
     </div>
   );

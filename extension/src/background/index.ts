@@ -579,13 +579,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                       const n = (window as any).__NUXT__;
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       const state = n?.state as Record<string, any> | undefined;
+                      // Correct path: __NUXT__.state['proposal-details'].proposalDetailsV3Response.application
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      const app = state?.application as Record<string, any> | undefined;
+                      const v3 = state?.['proposal-details']?.proposalDetailsV3Response as Record<string, any> | undefined;
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      const app = v3?.application as Record<string, any> | undefined;
+                      // status may be a number (Upwork internal enum) — convert to string
+                      const rawStatus = app?.status;
+                      const statusStr = rawStatus != null ? String(rawStatus) : null;
                       return {
                         coverLetter: (app?.coverLetter as string) || null,
-                        status: (app?.status as string) || null,
+                        status: statusStr,
                         bidAmount: String(app?.terms?.chargeRate?.amount || '') || null,
-                        jobTitle: (app?.job?.title as string) || null,
+                        jobTitle: (v3?.jobDetails?.opening?.job?.info?.title as string) || null,
                       };
                     } catch { return { coverLetter: null, status: null, bidAmount: null, jobTitle: null }; }
                   },
@@ -617,15 +623,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               // domJobTitle is unreliable (generic h3 may say "Hiring activity"); prefer list-page title
               const jobTitle = nuxtJobTitle || proposal.jobTitle;
 
-              // Determine was_hired: active proposals = null, archived = false unless confirmed hired
+              // Determine was_hired from multiple signals:
+              // 1. List-page status text (most reliable for won state)
+              // 2. Nuxt detail-page status (may be numeric enum or string)
               let wasHired: boolean | null = null;
-              if (nuxtStatus) {
-                const s = nuxtStatus.toLowerCase();
-                if (s.includes('hired') || s.includes('contract') || s === 'accepted') {
-                  wasHired = true;
-                } else if (proposal._isArchived) {
-                  wasHired = false;
-                }
+              const listStatus = (proposal.status || '').toLowerCase();
+              const detailStatus = (nuxtStatus || '').toLowerCase();
+              const hiredKeywords = ['hired', 'contract', 'working', 'active contract'];
+              const isHiredByList = hiredKeywords.some(k => listStatus.includes(k));
+              const isHiredByDetail = hiredKeywords.some(k => detailStatus.includes(k));
+              if (isHiredByList || isHiredByDetail) {
+                wasHired = true;
               } else if (proposal._isArchived) {
                 wasHired = false;
               }
