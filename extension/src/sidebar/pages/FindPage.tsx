@@ -148,10 +148,9 @@ export default function FindPage() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
+      {/* Filters */}
       <div className="bg-white border-b px-4 pt-3 pb-2 space-y-2">
         <div className="flex items-center justify-between">
-          <h1 className="font-bold text-gray-900 text-sm">Scored Jobs</h1>
           <span className="text-xs text-gray-400">{filtered.length} jobs</span>
         </div>
 

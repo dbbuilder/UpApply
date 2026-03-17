@@ -43,7 +43,6 @@ export default function GeneratorPage() {
     fillScreeningQuestion,
     saveCurrentJob,
     createApplication,
-    logout,
     addSkillToProfile,
   } = useAppStore();
 
@@ -554,43 +553,6 @@ export default function GeneratorPage() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Header */}
-      <header className="bg-white border-b px-4 py-2 flex items-center justify-between flex-shrink-0">
-        <h1 className="font-bold text-gray-900 text-sm">✍️ Apply</h1>
-        <div className="flex items-center gap-3">
-          {jobAnalysis && (
-            <span
-              className="text-xs font-bold px-2 py-0.5 rounded-full text-white"
-              style={{
-                background:
-                  jobAnalysis.match_score >= 70
-                    ? '#16a34a'
-                    : jobAnalysis.match_score >= 50
-                    ? '#ca8a04'
-                    : '#dc2626',
-              }}
-            >
-              {Math.round(jobAnalysis.match_score)}%
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={handleRefreshJob}
-            className="text-gray-400 hover:text-gray-700 text-sm"
-            title="Sync job from current page"
-          >
-            ⟳
-          </button>
-          <button
-            type="button"
-            onClick={logout}
-            className="text-gray-400 hover:text-gray-600 text-xs"
-          >
-            Logout
-          </button>
-        </div>
-      </header>
-
       {/* Content */}
       <div className="flex-1 overflow-auto p-4 space-y-4">
         {!currentJob || !currentJob.title ? (
@@ -612,7 +574,34 @@ export default function GeneratorPage() {
           <>
             {/* Job Info */}
             <div className="card">
-              <h3 className="font-medium text-gray-900 line-clamp-2">{currentJob.title}</h3>
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="font-medium text-gray-900 line-clamp-2 flex-1">{currentJob.title}</h3>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {jobAnalysis && (
+                    <span
+                      className="text-xs font-bold px-2 py-0.5 rounded-full text-white"
+                      style={{
+                        background:
+                          jobAnalysis.match_score >= 70
+                            ? '#16a34a'
+                            : jobAnalysis.match_score >= 50
+                            ? '#ca8a04'
+                            : '#dc2626',
+                      }}
+                    >
+                      {Math.round(jobAnalysis.match_score)}%
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleRefreshJob}
+                    className="text-gray-400 hover:text-gray-700 text-sm"
+                    title="Sync job from current page"
+                  >
+                    ⟳
+                  </button>
+                </div>
+              </div>
               <div className="flex flex-wrap gap-2 mt-2">
                 {currentJob.budgetAmount && (
                   <span className="badge badge-green">{currentJob.budgetAmount}</span>

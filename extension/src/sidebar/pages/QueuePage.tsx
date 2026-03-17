@@ -274,8 +274,7 @@ export default function QueuePage() {
   return (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b px-4 pt-3 pb-2 flex-shrink-0">
-        <div className="flex items-center justify-between mb-2">
-          <h1 className="font-bold text-gray-900 text-sm">Queue</h1>
+        <div className="flex items-center justify-end mb-2">
           <button
             type="button"
             onClick={load}

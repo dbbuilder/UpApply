@@ -7,8 +7,25 @@ interface AppShellProps {
   children: ReactNode;
 }
 
+const PAGE_TITLES: Record<string, string> = {
+  generator: '✍️ Apply',
+  me: '👤 Me',
+  profile: '👤 Me',
+  skills: '👤 Me',
+  memories: '👤 Me',
+  find: '🔍 Find',
+  scored: '🔍 Find',
+  queue: '📋 Queue',
+  track: '📊 Track',
+  history: '📊 Track',
+  analytics: '📊 Track',
+  feedback: '📊 Track',
+  insights: '💡 Insights',
+  import: '⇅ Sync',
+};
+
 export default function AppShell({ children }: AppShellProps) {
-  const { currentView } = useAppStore();
+  const { currentView, logout } = useAppStore();
   const hideNav = currentView === 'auth' || currentView === 'setup';
   const [goOpen, setGoOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -48,34 +65,30 @@ export default function AppShell({ children }: AppShellProps) {
         <GoPage onClose={() => setGoOpen(false)} />
       </div>
 
-      {/* Top action strip — Go + Help, always at the top of every tab */}
+      {/* Unified top bar — page title + Help/Go/Logout */}
       {!hideNav && (
-        <div className="flex-shrink-0 flex items-center justify-end gap-1 px-2 py-1 bg-white border-b border-gray-100">
-          {helpOpen && (
-            <p className="flex-1 text-[10px] text-gray-500 leading-snug px-1 mr-1">{helpText}</p>
-          )}
-          <button
-            type="button"
-            onClick={() => setHelpOpen(o => !o)}
-            className={`text-[11px] px-2 py-0.5 rounded-full transition-colors ${
-              helpOpen
-                ? 'bg-gray-100 text-gray-700'
-                : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            ?
-          </button>
-          <button
-            type="button"
-            onClick={() => { setGoOpen(o => !o); setHelpOpen(false); }}
-            className={`text-[11px] px-2 py-0.5 rounded-full transition-colors font-medium ${
-              goOpen
-                ? 'bg-emerald-100 text-emerald-700'
-                : 'text-emerald-600 hover:bg-emerald-50'
-            }`}
-          >
-            {goOpen ? '✕' : '↗ Go'}
-          </button>
+        <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 bg-white border-b border-gray-100">
+          <h1 className="font-bold text-gray-900 text-sm">{PAGE_TITLES[currentView] ?? '✍️ Apply'}</h1>
+          <div className="flex items-center gap-2">
+            {helpOpen && (
+              <span className="text-[10px] text-gray-500 leading-snug max-w-[160px] text-right">{helpText}</span>
+            )}
+            <button
+              type="button"
+              onClick={() => setHelpOpen(o => !o)}
+              className={`text-xs px-1.5 py-0.5 rounded-full transition-colors ${helpOpen ? 'bg-gray-100 text-gray-700' : 'text-gray-400 hover:text-gray-600'}`}
+            >?</button>
+            <button
+              type="button"
+              onClick={() => { setGoOpen(o => !o); setHelpOpen(false); }}
+              className={`text-xs px-2 py-0.5 rounded-full font-medium transition-colors ${goOpen ? 'bg-emerald-100 text-emerald-700' : 'text-emerald-600 hover:bg-emerald-50'}`}
+            >{goOpen ? '✕' : '↗ Go'}</button>
+            <button
+              type="button"
+              onClick={logout}
+              className="text-gray-400 hover:text-gray-600 text-xs"
+            >Logout</button>
+          </div>
         </div>
       )}
 

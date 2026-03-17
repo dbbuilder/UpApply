@@ -38,14 +38,13 @@ export default function InsightsPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="bg-white border-b px-4 py-3 flex-shrink-0 flex items-center justify-between">
-        <h1 className="font-bold text-gray-900 text-sm">AI Insights</h1>
-        {data?.proposal_count != null && (
+      {data?.proposal_count != null && (
+        <div className="bg-white border-b px-4 py-2 flex-shrink-0 flex justify-end">
           <span className="text-[10px] text-gray-400">
             {data.proposal_count} proposals · {data.response_rate?.toFixed(0)}% response
           </span>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto p-4 space-y-3">
         {!data && !loading && (

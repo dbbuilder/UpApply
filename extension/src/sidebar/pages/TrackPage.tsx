@@ -237,7 +237,6 @@ export default function TrackPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b px-4 pt-3 flex-shrink-0">
-        <h1 className="font-bold text-gray-900 text-sm mb-2">Track</h1>
         <div className="flex gap-1 pb-2">
           {([
             { id: 'pipeline' as const, label: 'Pipeline' },
