@@ -106,27 +106,22 @@ export default function PersistentNav({ goOpen, onGoToggle }: PersistentNavProps
         <button
           type="button"
           onClick={onGoToggle}
-          className={`flex flex-col items-center justify-center gap-0 px-2 transition-colors border-t-2 ${
+          className={`flex items-center justify-center px-2.5 transition-colors border-t-2 ${
             goOpen
               ? 'text-emerald-700 border-emerald-600 bg-emerald-50'
               : 'text-emerald-500 border-transparent hover:text-emerald-600'
           }`}
         >
           <span className="text-base leading-none">{goOpen ? '✕' : '↗'}</span>
-          <span className="text-[9px] font-medium">Go</span>
         </button>
 
         {/* Help ? button */}
         <button
           type="button"
-          onMouseEnter={() => setHelpOpen(true)}
-          onMouseLeave={() => setHelpOpen(false)}
           onClick={() => setHelpOpen(o => !o)}
-          className="flex flex-col items-center justify-center gap-0 px-2 text-gray-300 hover:text-gray-500 border-t-2 border-transparent transition-colors"
-          title={helpText}
+          className="flex items-center justify-center px-2.5 text-gray-300 hover:text-gray-500 border-t-2 border-transparent transition-colors"
         >
           <span className="text-base leading-none">?</span>
-          <span className="text-[9px] font-medium">Help</span>
         </button>
       </nav>
     </div>
