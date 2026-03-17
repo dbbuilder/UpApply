@@ -361,9 +361,13 @@ const SCRAPE_KEY = '__upapplyScrapingPromise';
  * The button is briefly disabled during page transitions.
  */
 function waitForNextButton(timeoutMs = 2000): Promise<HTMLButtonElement | null> {
-  // The proposals page has multiple sections, each with its own next-page button.
-  // Find the next-page button that comes AFTER the last proposal link — that's the one
-  // for the proposals section, not for invitations/offers above it.
+  // The proposals page has multiple sections, each with its own next-page button:
+  //   - invitations/offers section MAY appear above proposals
+  //   - proposals section (what we want to paginate)
+  //   - interviews section MAY appear below proposals
+  // Strategy: find the last proposal link with a NUMERIC proposal ID (excludes
+  // interview/uid/ links below and offer links above), then return the first
+  // next-page button that comes after it in document order — that's the proposals btn.
   const findNext = (): HTMLButtonElement | null => {
     const allNextBtns = document.querySelectorAll<HTMLButtonElement>(
       'button[data-test="next-page"], button[aria-label="Next page"]'
@@ -371,18 +375,19 @@ function waitForNextButton(timeoutMs = 2000): Promise<HTMLButtonElement | null> 
     if (allNextBtns.length === 0) return null;
     if (allNextBtns.length === 1) return allNextBtns[0];
 
-    // Prefer the button that comes after the last proposal link
-    const links = document.querySelectorAll('a[data-ev-label="jpn_list_details_link"]');
-    const lastLink = links[links.length - 1];
-    if (lastLink) {
+    // Find the last link that points to a numeric proposal ID (not interview/uid/)
+    const proposalLinks = Array.from(
+      document.querySelectorAll<HTMLAnchorElement>('a[data-ev-label="jpn_list_details_link"]')
+    ).filter(a => /\/nx\/proposals\/\d+/.test(a.href));
+    const lastProposalLink = proposalLinks[proposalLinks.length - 1];
+    if (lastProposalLink) {
       for (const btn of allNextBtns) {
-        // btn comes after lastLink in DOM
-        if (lastLink.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING) {
+        if (lastProposalLink.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING) {
           return btn;
         }
       }
     }
-    return allNextBtns[allNextBtns.length - 1]; // fallback: last button
+    return allNextBtns[0]; // fallback: first button (document order)
   };
   return new Promise((resolve) => {
     const deadline = Date.now() + timeoutMs;
@@ -407,17 +412,20 @@ function waitForProposalPageChange(previousFirstHref: string | null, targetPage:
   return new Promise((resolve) => {
     const deadline = Date.now() + timeoutMs;
     const check = () => {
-      // Primary: active pagination button (in proposals section) shows the target page number.
-      // Use the last active pagination button — proposals section is always last on the page.
+      // Primary: first PROPOSAL link href changed (numeric ID only — excludes interview links
+      // below proposals section whose pagination we must not accidentally trigger).
+      const proposalLinks = Array.from(
+        document.querySelectorAll<HTMLAnchorElement>('a[data-ev-label="jpn_list_details_link"]')
+      ).filter(a => /\/nx\/proposals\/\d+/.test(a.href));
+      const firstProposalHref = proposalLinks[0]?.getAttribute('href') || null;
+      if (firstProposalHref && firstProposalHref !== previousFirstHref) { resolve(true); return; }
+
+      // Fallback: active pagination button in proposals section shows target page.
+      // Use the FIRST active pagination button (proposals section comes before interviews).
       const activeBtns = document.querySelectorAll<HTMLElement>('.air3-pagination-nr-btn.is-active');
-      const activeBtn = activeBtns[activeBtns.length - 1];
+      const activeBtn = activeBtns[0];
       const activePage = parseInt(activeBtn?.getAttribute('data-ev-page_index') || '0', 10);
       if (activePage === targetPage) { resolve(true); return; }
-
-      // Fallback: first proposal link href changed
-      const first = document.querySelector<HTMLAnchorElement>('a[data-ev-label="jpn_list_details_link"]');
-      const firstHref = first?.getAttribute('href') || null;
-      if (firstHref && firstHref !== previousFirstHref) { resolve(true); return; }
 
       if (Date.now() >= deadline) { resolve(false); return; } // timed out — click didn't work
       setTimeout(check, 200);
@@ -471,7 +479,21 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
     // list (800+ proposals = 50+ pages) from running 100s+ and hitting the 120s timeout.
     const MAX_LIST_PROPOSALS = 150;
 
-    // Page 1 is already loaded
+    // Wait for at least one proposal link to appear (Vue may still be rendering,
+    // especially on /archived which takes longer to hydrate than the active tab).
+    await new Promise<void>((resolve) => {
+      const deadline = Date.now() + 8000;
+      const check = () => {
+        const hasLink = Array.from(
+          document.querySelectorAll<HTMLAnchorElement>('a[data-ev-label="jpn_list_details_link"]')
+        ).some(a => /\/nx\/proposals\/\d+/.test(a.href));
+        if (hasLink || Date.now() >= deadline) resolve();
+        else setTimeout(check, 200);
+      };
+      setTimeout(check, 200);
+    });
+
+    // Page 1 is now loaded
     chrome.storage.local.set({ proposalListProgress: { page: 1, totalPages } });
     addPage(extractProposals());
 
@@ -482,8 +504,11 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
         console.log(`UpApply: Reached ${MAX_LIST_PROPOSALS}-proposal cap — stopping list pagination`);
         break;
       }
-      const firstLink = document.querySelector<HTMLAnchorElement>('a[data-ev-label="jpn_list_details_link"]');
-      const previousFirstHref = firstLink?.getAttribute('href') || null;
+      // Capture the first PROPOSAL link href (numeric ID — excludes interview/uid/ links)
+      const firstProposalLink = Array.from(
+        document.querySelectorAll<HTMLAnchorElement>('a[data-ev-label="jpn_list_details_link"]')
+      ).find(a => /\/nx\/proposals\/\d+/.test(a.href));
+      const previousFirstHref = firstProposalLink?.getAttribute('href') || null;
 
       // Wait for next button to be enabled (it's briefly disabled during transitions)
       const nextBtn = await waitForNextButton();
