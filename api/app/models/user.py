@@ -133,6 +133,10 @@ class UserProfile(Base):
     availability_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     currently_accepting_work: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # AI profile optimization cache
+    optimization_result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    optimization_cached_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Setup tracking
     setup_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     setup_step: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

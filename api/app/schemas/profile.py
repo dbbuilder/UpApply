@@ -274,3 +274,47 @@ class ResumeImportResponse(BaseModel):
     education: Optional[List[EducationEntry]] = None
     certifications: Optional[List[str]] = None
     extracted_memories: Optional[List[dict]] = None  # Memories extracted from resume
+
+
+# Profile optimization schemas
+
+class ProfileDimension(BaseModel):
+    """A single scored dimension of the Upwork profile."""
+
+    name: str
+    score: int  # 0-100
+    status: str  # 'good' | 'warning' | 'critical'
+    summary: str
+    detail: str
+
+
+class ProfileRecommendation(BaseModel):
+    """A prioritized improvement recommendation."""
+
+    priority: str  # 'critical' | 'high' | 'medium' | 'low'
+    dimension: str
+    title: str
+    problem: str
+    action: str  # specific actionable instruction
+
+
+class May2026Item(BaseModel):
+    """Single item in the May 2026 specialized-profiles checklist."""
+
+    item: str
+    done: bool
+    note: str
+
+
+class ProfileOptimizeResponse(BaseModel):
+    """Full AI-generated profile optimization report."""
+
+    overall_score: int
+    dimensions: List[ProfileDimension]
+    recommendations: List[ProfileRecommendation]
+    suggested_title: Optional[str] = None
+    suggested_overview_hook: Optional[str] = None  # first ~250 chars rewrite
+    suggested_skills: Optional[List[str]] = None
+    may_2026_checklist: List[May2026Item]
+    cached: bool = False
+    cached_at: Optional[str] = None

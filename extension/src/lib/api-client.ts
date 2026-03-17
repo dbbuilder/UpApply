@@ -577,6 +577,14 @@ class ApiClient {
       body: { image_base64: imageBase64, filename },
     });
   }
+
+  // Profile Optimization
+  async getProfileOptimization(forceRefresh = false): Promise<ProfileOptimizeResponse> {
+    const qs = forceRefresh ? '?force_refresh=true' : '';
+    return this.request<ProfileOptimizeResponse>(`/api/v1/profile/optimize${qs}`, {
+      method: 'POST',
+    });
+  }
 }
 
 export class ApiError extends Error {
@@ -1159,6 +1167,41 @@ export interface WorkLogListResponse {
   logs: WorkLog[];
   total: number;
   total_minutes: number;
+}
+
+// Profile Optimization Types
+export interface ProfileDimension {
+  name: string;
+  score: number;   // 0-100
+  status: 'good' | 'warning' | 'critical';
+  summary: string;
+  detail: string;
+}
+
+export interface ProfileRecommendation {
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  dimension: string;
+  title: string;
+  problem: string;
+  action: string;
+}
+
+export interface May2026Item {
+  item: string;
+  done: boolean;
+  note: string;
+}
+
+export interface ProfileOptimizeResponse {
+  overall_score: number;
+  dimensions: ProfileDimension[];
+  recommendations: ProfileRecommendation[];
+  suggested_title?: string;
+  suggested_overview_hook?: string;
+  suggested_skills?: string[];
+  may_2026_checklist: May2026Item[];
+  cached: boolean;
+  cached_at?: string;
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

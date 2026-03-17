@@ -1,5 +1,7 @@
 """Profile endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime, timezone, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,9 +16,11 @@ from app.schemas.profile import (
     ProfilePreferences,
     ProfileDealbreakers,
     ProfilePricing,
+    ProfileOptimizeResponse,
     ResumeImportRequest,
     ResumeImportResponse,
 )
+from app.services.profile_optimizer import optimize_profile
 from app.services.resume_parser import parse_resume
 
 router = APIRouter()
@@ -214,3 +218,53 @@ async def update_setup_step(
     await db.refresh(profile)
 
     return profile
+
+
+@router.post("/optimize", response_model=ProfileOptimizeResponse)
+async def optimize_profile_endpoint(
+    force_refresh: bool = Query(default=False),
+    profile: UserProfile = Depends(get_user_profile),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run AI-powered Upwork profile optimization analysis.
+
+    Results are cached for 24 hours. Pass force_refresh=true to bypass the cache.
+    """
+    _cache_ttl = timedelta(hours=24)
+    now = datetime.now(timezone.utc)
+
+    # Return cached result if fresh and not forcing a refresh
+    if (
+        not force_refresh
+        and profile.optimization_cached_at is not None
+        and profile.optimization_result is not None
+    ):
+        cached_at = profile.optimization_cached_at
+        # Ensure tz-aware comparison
+        if cached_at.tzinfo is None:
+            cached_at = cached_at.replace(tzinfo=timezone.utc)
+        if now - cached_at < _cache_ttl:
+            result = ProfileOptimizeResponse(**profile.optimization_result)
+            result.cached = True
+            result.cached_at = cached_at.isoformat()
+            return result
+
+    # Run the optimizer
+    try:
+        result = await optimize_profile(profile)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Profile optimization failed: {exc}",
+        ) from exc
+
+    # Persist cache
+    profile.optimization_result = result.model_dump(exclude={"cached", "cached_at"})
+    profile.optimization_cached_at = now
+
+    await db.commit()
+    await db.refresh(profile)
+
+    result.cached = False
+    result.cached_at = now.isoformat()
+    return result
