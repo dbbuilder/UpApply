@@ -2218,8 +2218,12 @@ interface ScrapedSavedSearch {
 }
 
 /**
- * Extract saved searches from Upwork's find-work or search pages.
- * Looks for links to /nx/search/jobs that contain a q= parameter.
+ * Extract saved searches from Upwork's find-work saved searches modal.
+ *
+ * Upwork saved searches use ?topic_id=XXXXX (not ?q=) in the link href.
+ * The human-readable query is the link's text content (e.g. "azure").
+ * We preserve the full URL params (including topic_id) so the search can
+ * be replayed later. Also handles legacy ?q= search links as a fallback.
  */
 function extractSavedSearches(): ScrapedSavedSearch[] {
   const results: ScrapedSavedSearch[] = [];
@@ -2230,20 +2234,26 @@ function extractSavedSearches(): ScrapedSavedSearch[] {
     try {
       const url = new URL(link.href);
       const q = url.searchParams.get('q');
-      if (!q || !q.trim()) return;
+      const topicId = url.searchParams.get('topic_id');
 
-      const normalized = q.trim().toLowerCase();
+      // Need at least one of q= or topic_id= to identify a search
+      if (!q && !topicId) return;
+
+      // Use link text as the human-readable label/query; fall back to q or topic_id
+      const linkText = link.textContent?.trim();
+      const query = linkText || q || topicId || '';
+      if (!query) return;
+
+      const normalized = query.toLowerCase();
       if (seen.has(normalized)) return;
       seen.add(normalized);
 
-      // Build url_params from remaining params (exclude q and nbs)
+      // Preserve full URL params (topic_id + any filters) minus noise params
       const extra = new URLSearchParams(url.search);
-      extra.delete('q');
       extra.delete('nbs');
       const urlParams = extra.toString();
 
-      const label = link.textContent?.trim() || q.trim();
-      results.push({ query: q.trim(), url_params: urlParams, label });
+      results.push({ query, url_params: urlParams, label: query });
     } catch {
       // Ignore malformed URLs
     }
