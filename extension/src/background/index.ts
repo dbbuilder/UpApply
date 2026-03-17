@@ -483,9 +483,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
           });
 
+        // Save the currently active tab so we can restore focus after scraping.
+        // Making the proposals tab active gives Vue full rAF speed — without this,
+        // background-tab rAF throttling (~1fps) makes each page navigation take 10–15s
+        // instead of ~1s, causing the 120s scrapeListPage timeout to fire after 2 pages.
+        const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const restoreTab = async () => {
+          if (currentTab?.id) {
+            try { await chrome.tabs.update(currentTab.id, { active: true }); } catch { /* ignore */ }
+          }
+        };
+
         try {
           await setProgress({ stage: 'opening' });
-          const propTab = await chrome.tabs.create({ url: 'https://www.upwork.com/nx/proposals/', active: false });
+          const propTab = await chrome.tabs.create({ url: 'https://www.upwork.com/nx/proposals/', active: true });
           if (!propTab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }
 
           try {
@@ -637,6 +648,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse({ success: true, data: results });
           } finally {
             try { await chrome.tabs.remove(propTab.id); } catch (e) { /* ignore */ }
+            await restoreTab();
           }
         } catch (err) {
           await setProgress({ stage: 'error', error: String(err) });
