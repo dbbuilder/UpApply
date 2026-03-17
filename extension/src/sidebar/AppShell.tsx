@@ -46,7 +46,7 @@ export default function AppShell({ children }: AppShellProps) {
       </div>
 
       {/* Page content — the only scrollable container */}
-      <div className="flex-1 overflow-auto min-h-0">
+      <div className="flex-1 overflow-auto min-h-0 pb-1">
         {children}
       </div>
 

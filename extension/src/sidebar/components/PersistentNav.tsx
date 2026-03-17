@@ -68,13 +68,10 @@ export default function PersistentNav({ goOpen, onGoToggle }: PersistentNavProps
 
   return (
     <div className="flex-shrink-0 relative">
-      {/* Contextual help tooltip */}
+      {/* Contextual help — renders as a strip inside the nav bar, never overlays content */}
       {helpOpen && (
-        <div
-          className="absolute bottom-full left-2 right-2 mb-1 bg-gray-900 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg z-50 leading-snug"
-          style={{ pointerEvents: 'none' }}
-        >
-          {helpText}
+        <div className="absolute inset-x-0 top-0 bottom-0 flex items-center px-3 bg-gray-900 rounded-none z-10">
+          <span className="text-white text-[10px] leading-snug">{helpText}</span>
         </div>
       )}
 
