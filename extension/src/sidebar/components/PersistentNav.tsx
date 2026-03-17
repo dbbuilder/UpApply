@@ -42,11 +42,7 @@ interface NavItem {
   dot?: boolean;
 }
 
-interface PersistentNavProps {
-  goOpen: boolean;
-}
-
-export default function PersistentNav({ goOpen }: PersistentNavProps) {
+export default function PersistentNav() {
   const { currentView, setCurrentView, currentJob } = useAppStore();
   const activeMode = getNavMode(currentView);
   const hasJob = !!currentJob?.title;
@@ -62,10 +58,10 @@ export default function PersistentNav({ goOpen }: PersistentNavProps) {
   ];
 
   return (
-    <div className="flex-shrink-0">
-      <nav className="flex border-t border-gray-200 bg-white" style={{ height: '52px' }}>
+    <div className="flex-shrink-0 w-full">
+      <nav className="flex border-t border-gray-200 bg-white w-full overflow-hidden" style={{ height: '52px' }}>
         {items.map(({ mode, icon, label, targetView, dot }) => {
-          const active = activeMode === mode && !goOpen;
+          const active = activeMode === mode;
           return (
             <button
               key={mode}

@@ -552,7 +552,7 @@ export default function GeneratorPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="flex flex-col">
       {/* Content */}
       <div className="flex-1 overflow-auto p-4 space-y-4">
         {!currentJob || !currentJob.title ? (
