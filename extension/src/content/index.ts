@@ -466,6 +466,11 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
       }
     };
 
+    // Cap list scraping at 150 proposals — background visits at most 150 detail pages,
+    // so there is no value collecting more IDs than that. This prevents the archived
+    // list (800+ proposals = 50+ pages) from running 100s+ and hitting the 120s timeout.
+    const MAX_LIST_PROPOSALS = 150;
+
     // Page 1 is already loaded
     chrome.storage.local.set({ proposalListProgress: { page: 1, totalPages } });
     addPage(extractProposals());
@@ -473,6 +478,10 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
     // Paginate until no next button — don't rely on totalPages being accurate
     let pageNum = 2;
     while (totalPages === null || pageNum <= totalPages) {
+      if (all.length >= MAX_LIST_PROPOSALS) {
+        console.log(`UpApply: Reached ${MAX_LIST_PROPOSALS}-proposal cap — stopping list pagination`);
+        break;
+      }
       const firstLink = document.querySelector<HTMLAnchorElement>('a[data-ev-label="jpn_list_details_link"]');
       const previousFirstHref = firstLink?.getAttribute('href') || null;
 
