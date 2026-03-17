@@ -3,7 +3,7 @@
 Stores the cached AI optimization result and its timestamp so the
 expensive analysis call can be avoided on repeat visits.
 
-Revision ID: 014_add_profile_optimization_cache
+Revision ID: 014_profile_opt_cache
 Revises: 013_cl_submission_tracking
 Create Date: 2026-03-17
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
 
-revision = '014_add_profile_optimization_cache'
+revision = '014_profile_opt_cache'
 down_revision = '013_cl_submission_tracking'
 branch_labels = None
 depends_on = None
