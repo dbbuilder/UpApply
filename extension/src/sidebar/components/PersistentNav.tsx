@@ -32,7 +32,7 @@ const HELP_CONTENT: Record<NavMode | 'apply', string> = {
   queue:    'Jobs you\'ve saved or are actively applying to. Use Apply → to open with your cover letter pre-filled.',
   track:    'Pipeline funnel, work log, proposal history, and activity trends.',
   insights: 'AI analysis of your proposal history — what\'s landing, what to target, and how to position.',
-  import:   'Data overview — corpus totals, funnel stats, and import tools to seed from Upwork.',
+  import:   'Sync — corpus overview (totals, funnel stats) and import tools to seed from Upwork.',
 };
 
 interface NavItem {
@@ -61,7 +61,7 @@ export default function PersistentNav({ goOpen, onGoToggle }: PersistentNavProps
     { mode: 'queue',    icon: '📋', label: 'Queue',  targetView: 'queue' },
     { mode: 'track',    icon: '📊', label: 'Track',  targetView: 'track' },
     { mode: 'insights', icon: '💡', label: 'Insight', targetView: 'insights' },
-    { mode: 'import',   icon: '⬇',  label: 'Data',   targetView: 'import' },
+    { mode: 'import',   icon: '⇅',  label: 'Sync',   targetView: 'import' },
   ];
 
   const helpText = HELP_CONTENT[activeMode];

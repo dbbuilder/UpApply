@@ -238,7 +238,7 @@ const IMPORT_DEFS: ImportDef[] = [
     id: 'saved_jobs',
     icon: '⭐',
     title: 'Saved Jobs',
-    description: 'Jobs you\'ve bookmarked on Upwork. Adds them to your Queue for scoring.',
+    description: 'Jobs you\'ve bookmarked on Upwork. Only imports jobs posted in the last 14 days. Adds them to your Queue for scoring.',
     run: runSavedJobs,
   },
   {

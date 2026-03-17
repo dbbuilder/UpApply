@@ -1,7 +1,7 @@
 /**
- * GoPage — quick navigation to Upwork pages + one-click actions from the sidebar.
+ * GoPage — quick navigation to Upwork pages from the sidebar.
+ * Import actions have moved to the Data tab (Data → Import).
  */
-import { useState, useEffect, useRef } from 'react';
 
 const UPWORK = 'https://www.upwork.com';
 
@@ -28,41 +28,7 @@ function navigateTo(url: string, onDone?: () => void) {
     const tabId = tabs[0]?.id;
     if (tabId) chrome.tabs.update(tabId, { url });
   });
-  // Close the sheet after a beat so the user sees the tap register
   if (onDone) setTimeout(onDone, 380);
-}
-
-interface ImportProgress {
-  stage: 'navigating' | 'scraping' | 'saving' | 'done' | 'error';
-  page?: number;       // current scraping page
-  total?: number;      // total pages (scraping) or total contracts (done)
-  count?: number;      // contracts to save
-  imported?: number;   // newly created
-  updated?: number;    // updated existing
-  error?: string;
-}
-
-function progressLabel(p: ImportProgress | null): string {
-  if (!p) return '📥 Import Contracts';
-  switch (p.stage) {
-    case 'navigating': return 'Opening contracts page…';
-    case 'scraping':   return p.page && p.total && p.total > 1
-      ? `Scraping page ${p.page} of ${p.total}…`
-      : 'Scraping contracts…';
-    case 'saving':     return p.count ? `Saving ${p.count} contracts…` : 'Saving…';
-    case 'done':       return '✓ Done';
-    case 'error':      return '✗ Failed — retry?';
-  }
-}
-
-function progressDetail(p: ImportProgress | null): string | null {
-  if (!p) return null;
-  if (p.stage === 'done') {
-    const n = (p.imported ?? 0) + (p.updated ?? 0);
-    return `${n} contract${n !== 1 ? 's' : ''} synced (${p.imported ?? 0} new, ${p.updated ?? 0} updated)`;
-  }
-  if (p.stage === 'error') return p.error || 'Import failed';
-  return null;
 }
 
 interface GoPageProps {
@@ -70,69 +36,6 @@ interface GoPageProps {
 }
 
 export default function GoPage({ onClose }: GoPageProps) {
-  const [progress, setProgress] = useState<ImportProgress | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const isRunning = progress !== null && progress.stage !== 'done' && progress.stage !== 'error';
-
-  const stopPolling = () => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  };
-
-  const startPolling = () => {
-    stopPolling();
-    pollRef.current = setInterval(() => {
-      chrome.storage.local.get('contractImportProgress', (result) => {
-        const p = result.contractImportProgress as ImportProgress | undefined;
-        if (p) setProgress(p);
-        if (p?.stage === 'done' || p?.stage === 'error') stopPolling();
-      });
-    }, 500);
-  };
-
-  useEffect(() => {
-    // Check if an import is already in progress when page mounts
-    chrome.storage.local.get('contractImportProgress', (result) => {
-      const p = result.contractImportProgress as ImportProgress | undefined;
-      if (p && p.stage !== 'done' && p.stage !== 'error') {
-        setProgress(p);
-        startPolling();
-      }
-    });
-    return stopPolling;
-  }, []);
-
-  const handleImportContracts = () => {
-    // Clear previous progress
-    chrome.storage.local.remove('contractImportProgress');
-    setProgress({ stage: 'navigating' });
-    startPolling();
-
-    chrome.runtime.sendMessage(
-      { type: 'NAVIGATE_AND_IMPORT_CONTRACTS' },
-      (resp: { success: boolean; imported?: number; updated?: number; total?: number; error?: string } | undefined) => {
-        stopPolling();
-        if (chrome.runtime.lastError || !resp) {
-          setProgress({ stage: 'error', error: chrome.runtime.lastError?.message || 'No response from background' });
-          return;
-        }
-        if (resp.success) {
-          setProgress({ stage: 'done', imported: resp.imported, updated: resp.updated, total: resp.total });
-        } else {
-          setProgress({ stage: 'error', error: resp.error || 'Import failed' });
-        }
-      }
-    );
-  };
-
-  const label = progressLabel(progress);
-  const detail = progressDetail(progress);
-  const isDone = progress?.stage === 'done';
-  const isError = progress?.stage === 'error';
-
   return (
     <div className="flex flex-col bg-white overflow-auto" style={{ maxHeight: '72vh' }}>
       {/* Sheet handle */}
@@ -141,7 +44,7 @@ export default function GoPage({ onClose }: GoPageProps) {
         <p className="text-xs font-semibold text-gray-500 tracking-wide uppercase">Go</p>
       </div>
 
-      <div className="p-3 space-y-4 overflow-auto">
+      <div className="p-3 pb-4 space-y-2 overflow-auto">
         {/* Quick nav grid */}
         <div className="grid grid-cols-2 gap-2">
           {LINKS.map((link) => (
@@ -160,52 +63,8 @@ export default function GoPage({ onClose }: GoPageProps) {
           ))}
         </div>
 
-        {/* Actions */}
-        <div>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Actions</p>
-
-          <div className="bg-white border border-gray-100 rounded-xl p-4 space-y-3">
-            <div>
-              <p className="text-xs font-medium text-gray-800">Import Contracts</p>
-              <p className="text-[10px] text-gray-400 mt-0.5 mb-2">
-                Navigates to your contracts page, scrapes all pages, and saves them as won jobs.
-              </p>
-
-              {/* Progress bar — visible while running */}
-              {isRunning && (
-                <div className="mb-2 h-1 w-full bg-gray-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-400 rounded-full animate-pulse"
-                    style={{ width: progress?.stage === 'saving' ? '80%' : progress?.stage === 'scraping' ? '50%' : '20%' }}
-                  />
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={handleImportContracts}
-                disabled={isRunning}
-                className={`w-full py-2 text-xs font-semibold rounded-lg transition-colors ${
-                  isDone
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : isError
-                    ? 'bg-red-50 text-red-600 border border-red-200'
-                    : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60'
-                }`}
-              >
-                {label}
-              </button>
-              {detail && (
-                <p className={`text-[10px] mt-1.5 text-center ${isDone ? 'text-emerald-600' : 'text-red-500'}`}>
-                  {detail}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <p className="text-[10px] text-gray-300 text-center pb-1">
-          Links open in your current Upwork tab
+        <p className="text-[10px] text-gray-300 text-center pt-1">
+          Links open in your current Upwork tab · Imports are in the Data tab
         </p>
       </div>
     </div>
