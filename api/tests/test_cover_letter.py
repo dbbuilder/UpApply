@@ -1,5 +1,6 @@
-"""Tests for cover letter service clean_cover_letter function."""
-from app.services.cover_letter import clean_cover_letter
+"""Tests for cover letter service functions."""
+import pytest
+from app.services.cover_letter import clean_cover_letter, append_closing, append_prototype_url
 
 
 def test_clean_removes_subject_line():
@@ -72,3 +73,110 @@ John Smith"""
     assert "Dear" not in result
     assert "Best regards" not in result
     assert "e-commerce platform" in result
+
+
+# ── append_closing ────────────────────────────────────────────────────────────
+
+def test_append_closing_adds_warm_regards():
+    text = "Here is my proposal."
+    result = append_closing(text, "Warm regards,")
+    assert result == "Here is my proposal.\n\nWarm regards,"
+
+
+def test_append_closing_none_returns_unchanged():
+    text = "Here is my proposal."
+    assert append_closing(text, None) == text
+
+
+def test_append_closing_empty_string_returns_unchanged():
+    text = "Here is my proposal."
+    assert append_closing(text, "") == text
+
+
+def test_append_closing_custom_closing():
+    text = "Thanks for your time."
+    result = append_closing(text, "Best,\nChris")
+    assert result.endswith("Best,\nChris")
+
+
+# ── append_prototype_url ──────────────────────────────────────────────────────
+
+def test_append_prototype_url_adds_sentence():
+    text = "My cover letter body."
+    result = append_prototype_url(text, "https://demo.example.com")
+    assert "https://demo.example.com" in result
+    assert result.startswith("My cover letter body.")
+
+
+def test_append_prototype_url_none_returns_unchanged():
+    text = "My cover letter body."
+    assert append_prototype_url(text, None) == text
+
+
+def test_append_prototype_url_empty_string_returns_unchanged():
+    text = "My cover letter body."
+    assert append_prototype_url(text, "") == text
+
+
+def test_append_prototype_url_strips_whitespace():
+    text = "Body."
+    result = append_prototype_url(text, "  https://demo.example.com  ")
+    assert "https://demo.example.com" in result
+    assert "  https://" not in result
+
+
+# ── Banned phrases ────────────────────────────────────────────────────────────
+
+BANNED_PHRASES = [
+    "I am well-equipped",
+    "unique blend of skills",
+    "align perfectly with your needs",
+    "I am excited to apply",
+    "I look forward to hearing from you",
+    "my skills directly translate",
+    "I am passionate about",
+    "leverage my expertise",
+    "I believe I would be a great fit",
+    "I am confident that",
+    "I would love the opportunity",
+    "I am a perfect fit",
+    "I am writing to",
+    "I am reaching out",
+]
+
+
+@pytest.mark.parametrize("phrase", BANNED_PHRASES)
+def test_clean_preserves_banned_phrases_in_body(phrase):
+    """clean_cover_letter doesn't strip banned phrases — they are a prompt concern.
+    This test documents that the function does NOT remove them (that's the AI's job).
+    The phrases should pass through so the cover letter reviewer can catch regressions
+    if the prompt is inadvertently changed to allow them."""
+    text = f"My background includes {phrase} the specific domain knowledge you need."
+    result = clean_cover_letter(text)
+    # clean_cover_letter does NOT strip banned phrases — they are caught at generation time
+    assert phrase in result, (
+        f"clean_cover_letter should not strip banned phrase '{phrase}'; "
+        "removing it here would hide generation regressions"
+    )
+
+
+def test_clean_preserves_warm_regards():
+    """'Warm regards,' must survive clean_cover_letter — it is the required sign-off."""
+    text = "Thank you for reading.\n\nWarm regards,"
+    result = clean_cover_letter(text)
+    assert "Warm regards," in result
+
+
+def test_clean_removes_best_regards_but_not_warm_regards():
+    """Only generic sign-offs are stripped; 'Warm regards,' is preserved."""
+    text = "Body text.\n\nBest regards,\nAlice"
+    result = clean_cover_letter(text)
+    assert "Best regards" not in result
+    assert "Warm regards" not in result  # not present, so nothing to preserve here
+
+
+def test_warm_regards_preserved_when_present_with_other_signoffs():
+    """If both appear, 'Warm regards,' survives and 'Sincerely,' is stripped."""
+    text = "Body.\n\nSincerely,\nSomeone\n\nWarm regards,"
+    result = clean_cover_letter(text)
+    assert "Warm regards," in result

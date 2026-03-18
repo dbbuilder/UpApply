@@ -17,7 +17,7 @@ from app.main import app
 # Use the same DATABASE_URL but target a test database, or fall back to default
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "postgresql+asyncpg://upapply:upapply@localhost:5435/upapply_test",
+    "postgresql+asyncpg://upapply:upapply@localhost:5432/upapply_test",
 )
 
 test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
@@ -67,6 +67,7 @@ async def client(setup_database):
         await conn.execute(text(
             "TRUNCATE TABLE beta_feedback, feedback, screening_answers, proposals, "
             "applications, cover_letters, jobs, search_queries, memories, "
+            "job_reviews, work_logs, "
             "user_profiles, users RESTART IDENTITY CASCADE"
         ))
 

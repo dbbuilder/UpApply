@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useAppStore } from './store';
 import AppShell from './AppShell';
+import ErrorBoundary from './ErrorBoundary';
 import AuthPage from './pages/Auth';
 import SetupPage from './pages/Setup';
 import GeneratorPage from './pages/Generator';
@@ -73,9 +74,11 @@ function App() {
   };
 
   return (
-    <AppShell>
-      {renderView()}
-    </AppShell>
+    <ErrorBoundary>
+      <AppShell>
+        {renderView()}
+      </AppShell>
+    </ErrorBoundary>
   );
 }
 

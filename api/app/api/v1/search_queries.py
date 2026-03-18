@@ -8,13 +8,14 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from openai import AsyncOpenAI
 from sqlalchemy import select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.security import get_current_user
 from app.models.user import User, UserProfile
 from app.models.job import Job
@@ -391,7 +392,9 @@ async def seed_search_queries(
 
 
 @router.post("/generate", response_model=List[SearchQueryResponse])
+@limiter.limit("5/hour")
 async def generate_search_queries(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -521,7 +524,9 @@ def _job_matches_query(title: str, description: str, tokens: list[str]) -> bool:
 
 
 @router.post("/evaluate", response_model=SearchLabResult)
+@limiter.limit("5/hour")
 async def evaluate_search_lab(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -845,8 +850,10 @@ Output EXACTLY this JSON format, one object per line, nothing else:
 
 
 @router.post("/optimize", response_model=OptimizeResult)
+@limiter.limit("5/hour")
 async def optimize_search_lab(
-    request: OptimizeRequest,
+    request: Request,
+    body: OptimizeRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -858,7 +865,7 @@ async def optimize_search_lab(
     optimizations: list[QueryOptimization] = []
     weak_exps: list[QueryExperimentResult] = []
 
-    for exp in request.experiments:
+    for exp in body.experiments:
         hit_rate = exp.high_score_count / max(exp.jobs_returned, 1)
         inclusive_score = float(exp.high_score_count)
         low_vol = exp.jobs_returned < _OPT_LOW_VOLUME

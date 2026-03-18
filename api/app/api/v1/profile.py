@@ -1,11 +1,14 @@
 """Profile endpoints."""
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.security import get_current_user
 from app.models.user import User, UserProfile
 from app.schemas.profile import (
@@ -23,6 +26,7 @@ from app.schemas.profile import (
 from app.services.profile_optimizer import optimize_profile
 from app.services.resume_parser import parse_resume
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -221,7 +225,9 @@ async def update_setup_step(
 
 
 @router.post("/optimize", response_model=ProfileOptimizeResponse)
+@limiter.limit("5/hour")
 async def optimize_profile_endpoint(
+    request: Request,
     force_refresh: bool = Query(default=False),
     profile: UserProfile = Depends(get_user_profile),
     db: AsyncSession = Depends(get_db),
@@ -253,9 +259,10 @@ async def optimize_profile_endpoint(
     try:
         result = await optimize_profile(profile)
     except Exception as exc:
+        logger.exception("Profile optimization failed for user %s: %s", profile.user_id, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Profile optimization failed: {exc}",
+            detail="Profile optimization unavailable. Please try again later.",
         ) from exc
 
     # Persist cache
