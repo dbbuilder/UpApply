@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
 
-revision = '015_add_preferred_client_locations'
+revision = '015_client_locations'
 down_revision = '014_profile_opt_cache'
 branch_labels = None
 depends_on = None
