@@ -4,6 +4,7 @@
  */
 import type { JobData } from '../types';
 import { extractBudgetFromPageText, detectNotifChips, topOfRange as _topOfRange } from '../lib/notif-chips';
+import { logger } from '../lib/logger';
 
 // Store current job data for sidebar access
 let currentJobData: JobData | null = null;
@@ -28,7 +29,7 @@ function _stopKeepAlive(): void {
 
 // Listen for messages from content script and sidebar
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('UpApply Background: Received message', message.type);
+  logger.log('UpApply Background: Received message', message.type);
 
   switch (message.type) {
     case 'PING':
@@ -36,12 +37,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
 
     case 'CONTENT_SCRIPT_READY':
-      console.log('Content script ready on', message.url);
+      logger.log('Content script ready on', message.url);
       break;
 
     case 'JOB_DATA_EXTRACTED':
       currentJobData = message.data;
-      console.log('Job data extracted:', currentJobData?.title);
+      logger.log('Job data extracted:', currentJobData?.title);
 
       // Store in local storage for sidebar access
       chrome.storage.local.set({ currentJob: currentJobData });
@@ -86,7 +87,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Forward extraction request to content script in active tab
       chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
         const tab = tabs[0];
-        console.log('UpApply Background: Requesting extraction from tab', tab?.id, tab?.url);
+        logger.log('UpApply Background: Requesting extraction from tab', tab?.id, tab?.url);
 
         if (!tab?.id || !tab?.url?.includes('upwork.com')) {
           sendResponse({ success: false, error: 'Not on an Upwork page' });
@@ -103,18 +104,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               target: { tabId: tab.id },
               files: [contentScriptPath]
             });
-            console.log('UpApply Background: Content script injected:', contentScriptPath);
+            logger.log('UpApply Background: Content script injected:', contentScriptPath);
           }
         } catch (e) {
-          console.log('UpApply Background: Script injection note:', e);
+          logger.log('UpApply Background: Script injection note:', e);
         }
 
         // Small delay to let script initialize
         setTimeout(() => {
           chrome.tabs.sendMessage(tab.id!, { type: 'EXTRACT_JOB_DATA' }, (response) => {
-            console.log('UpApply Background: Extraction response:', response);
+            logger.log('UpApply Background: Extraction response:', response);
             if (response?.debug) {
-              console.log('UpApply Background: DEBUG - page headings:', response.debug);
+              logger.log('UpApply Background: DEBUG - page headings:', response.debug);
             }
             if (chrome.runtime.lastError) {
               console.error('UpApply Background: Error:', chrome.runtime.lastError.message);
@@ -149,10 +150,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               target: { tabId: tab.id },
               files: [contentScriptPath]
             });
-            console.log('UpApply Background: Content script injected for fill');
+            logger.log('UpApply Background: Content script injected for fill');
           }
         } catch (e) {
-          console.log('UpApply Background: Script injection note:', e);
+          logger.log('UpApply Background: Script injection note:', e);
         }
 
         // Small delay to let script initialize
@@ -353,9 +354,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               sendResponse({ success: false, error: 'Content script not loaded. Please refresh the page.' });
             } else {
               if (response?.debug?.length) {
-                console.log('UpApply Proposals debug — selectors that matched: ' + response.debug.join(' | '));
+                logger.log('UpApply Proposals debug — selectors that matched: ' + response.debug.join(' | '));
               }
-              console.log('UpApply Proposals scrape result:', response?.success, '— found', response?.data?.length ?? 0, 'proposals', 'url:', response?.url);
+              logger.log('UpApply Proposals scrape result:', response?.success, '— found', response?.data?.length ?? 0, 'proposals', 'url:', response?.url);
               sendResponse(response || { success: false, error: 'No response' });
             }
           });
@@ -383,7 +384,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (chrome.runtime.lastError) {
               sendResponse({ success: false, error: 'Content script not loaded. Please refresh.' });
             } else {
-              console.log('UpApply Job cards scrape:', response?.success, '—', response?.data?.length ?? 0, 'cards');
+              logger.log('UpApply Job cards scrape:', response?.success, '—', response?.data?.length ?? 0, 'cards');
               sendResponse(response || { success: false, error: 'No response' });
             }
           });
@@ -395,7 +396,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Navigate to saved jobs page in background tab, scrape, close, return cards
       (async () => {
         const savedUrl = 'https://www.upwork.com/nx/search/jobs/saved/';
-        console.log('UpApply Background: Opening saved jobs tab:', savedUrl);
+        logger.log('UpApply Background: Opening saved jobs tab:', savedUrl);
         const savedTab = await chrome.tabs.create({ url: savedUrl, active: false });
         if (!savedTab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }
         try {
@@ -506,7 +507,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             await new Promise(r => setTimeout(r, 2000));
             await waitForContentScript(propTab.id);
             const activeProposals = await scrapeListPage(propTab.id);
-            console.log('UpApply: Active proposals found:', activeProposals.length);
+            logger.log('UpApply: Active proposals found:', activeProposals.length);
 
             // 2. Scrape archived proposals list
             await setProgress({ stage: 'scraping_archived' });
@@ -514,7 +515,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             await new Promise(r => setTimeout(r, 2000));
             await waitForContentScript(propTab.id);
             const archivedProposals = await scrapeListPage(propTab.id);
-            console.log('UpApply: Archived proposals found:', archivedProposals.length);
+            logger.log('UpApply: Archived proposals found:', archivedProposals.length);
 
             // Merge — active first, archived fills in gaps; track which list each came from
             type ProposalWithSource = import('../types').ScrapedProposal & { _isArchived: boolean };
@@ -528,7 +529,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
             }
             const allProposals = Array.from(proposalMap.values());
-            console.log('UpApply: Total unique proposals:', allProposals.length);
+            logger.log('UpApply: Total unique proposals:', allProposals.length);
 
             if (allProposals.length === 0) {
               sendResponse({ success: false, error: 'No proposals found on active or archived pages.' });
@@ -543,7 +544,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const detailCandidates = allProposals.slice(0, MAX_DETAIL_PAGES);
             const results: import('../types').ScrapedProposal[] = [];
             const total = detailCandidates.length;
-            console.log(`UpApply: Visiting ${total} detail pages (${allProposals.length} total proposals — capped at ${MAX_DETAIL_PAGES})`);
+            logger.log(`UpApply: Visiting ${total} detail pages (${allProposals.length} total proposals — capped at ${MAX_DETAIL_PAGES})`);
 
             for (let i = 0; i < detailCandidates.length; i++) {
               const proposal = detailCandidates[i];
@@ -558,7 +559,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               try {
                 await navigateAndWait(propTab.id, detailUrl, 15_000);
               } catch {
-                console.log('UpApply: Timeout loading detail for proposal', proposal.proposalId);
+                logger.log('UpApply: Timeout loading detail for proposal', proposal.proposalId);
                 results.push({ ...proposal, coverLetter: null });
                 continue;
               }
@@ -603,7 +604,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 nuxtBidAmount = r?.bidAmount || null;
                 nuxtJobTitle = r?.jobTitle || null;
               } catch (e) {
-                console.log('UpApply: NUXT read failed for proposal', proposal.proposalId, String(e));
+                logger.log('UpApply: NUXT read failed for proposal', proposal.proposalId, String(e));
               }
 
               // DOM fallback via content script (already injected by manifest — no re-inject)
@@ -652,7 +653,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
 
             await setProgress({ stage: 'done', current: total, total });
-            console.log('UpApply: Proposal deep-scrape complete —', results.length, 'proposals,', results.filter(r => r.coverLetter).length, 'with cover letters');
+            logger.log('UpApply: Proposal deep-scrape complete —', results.length, 'proposals,', results.filter(r => r.coverLetter).length, 'with cover letters');
             sendResponse({ success: true, data: results });
           } finally {
             try { await chrome.tabs.remove(propTab.id); } catch (e) { /* ignore */ }
@@ -672,7 +673,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Navigate to Upwork find-work page in background tab, scrape saved searches, close tab
       (async () => {
         const findWorkUrl = 'https://www.upwork.com/nx/find-work/';
-        console.log('UpApply Background: Opening find-work tab for saved searches:', findWorkUrl);
+        logger.log('UpApply Background: Opening find-work tab for saved searches:', findWorkUrl);
         const findWorkTab = await chrome.tabs.create({ url: findWorkUrl, active: false });
         if (!findWorkTab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }
         try {
@@ -704,7 +705,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const query = encodeURIComponent(message.query || '');
         const extraParams = message.urlParams ? `&${message.urlParams}` : '';
         const searchUrl = `https://www.upwork.com/nx/search/jobs/?q=${query}&sort=recency${extraParams}`;
-        console.log('UpApply Background: Opening search tab for:', searchUrl);
+        logger.log('UpApply Background: Opening search tab for:', searchUrl);
         const tab = await chrome.tabs.create({ url: searchUrl, active: false });
         if (!tab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }
         try {
@@ -828,11 +829,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           let budgetType   = preBudgetType   ?? null;
           if (!budgetAmount) {
             const extracted = extractBudgetFromPageText(pageText || description);
-            console.log('[UpApply] SCORE_JOB_WITH_DATA budget fallback:', extracted, 'pageTextLen:', (pageText || '').length);
+            logger.log('[UpApply] SCORE_JOB_WITH_DATA budget fallback:', extracted, 'pageTextLen:', (pageText || '').length);
             budgetAmount = extracted?.amount ?? null;
             budgetType   = extracted?.type   ?? null;
           }
-          console.log('[UpApply] SCORE_JOB_WITH_DATA final budget:', { budgetAmount, budgetType, source: preBudgetAmount ? 'graphql' : 'regex' });
+          logger.log('[UpApply] SCORE_JOB_WITH_DATA final budget:', { budgetAmount, budgetType, source: preBudgetAmount ? 'graphql' : 'regex' });
 
           // Score via API — 25s timeout prevents SW termination from a slow/cold-start Render instance
           const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
@@ -1005,7 +1006,7 @@ async function extractFullJobInBackground(jobPostingUrl: string): Promise<{
   fullDescription: string | null;
   attachments: Array<{ url: string; filename: string; contentType: string }>;
 }> {
-  console.log('UpApply Background: Opening background tab for:', jobPostingUrl);
+  logger.log('UpApply Background: Opening background tab for:', jobPostingUrl);
 
   // Create background tab (not active)
   const tab = await chrome.tabs.create({
@@ -1033,9 +1034,9 @@ async function extractFullJobInBackground(jobPostingUrl: string): Promise<{
           target: { tabId: tab.id },
           files: [contentScriptPath],
         });
-        console.log('UpApply Background: Content script injected into background tab');
+        logger.log('UpApply Background: Content script injected into background tab');
       } catch (e) {
-        console.log('UpApply Background: Script injection note:', e);
+        logger.log('UpApply Background: Script injection note:', e);
       }
     }
 
@@ -1057,7 +1058,7 @@ async function extractFullJobInBackground(jobPostingUrl: string): Promise<{
       throw new Error(response.error || 'Extraction failed');
     }
 
-    console.log('UpApply Background: Full job extracted successfully');
+    logger.log('UpApply Background: Full job extracted successfully');
     return response.data as {
       fullDescription: string | null;
       attachments: Array<{ url: string; filename: string; contentType: string }>;
@@ -1066,7 +1067,7 @@ async function extractFullJobInBackground(jobPostingUrl: string): Promise<{
     // Always close the background tab
     try {
       await chrome.tabs.remove(tab.id);
-      console.log('UpApply Background: Background tab closed');
+      logger.log('UpApply Background: Background tab closed');
     } catch (e) {
       console.error('UpApply Background: Failed to close tab:', e);
     }
@@ -1078,7 +1079,7 @@ async function extractFullJobInBackground(jobPostingUrl: string): Promise<{
  * This runs in the background context which may have different CORS restrictions.
  */
 async function downloadAttachment(url: string): Promise<{ data: string; contentType: string; size: number }> {
-  console.log('UpApply Background: Downloading attachment:', url);
+  logger.log('UpApply Background: Downloading attachment:', url);
 
   const response = await fetch(url, {
     credentials: 'include',
@@ -1162,7 +1163,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
-console.log('UpApply Background: Service worker started');
+logger.log('UpApply Background: Service worker started');
 
 // ---------------------------------------------------------------------------
 // extractBudgetFromPageText, detectNotifChips, topOfRange imported from ../lib/notif-chips

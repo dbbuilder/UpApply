@@ -12,6 +12,7 @@ import {
 import type { ScreeningQuestion, JobData, ScrapedProposal, AttachmentInfo, JobPostingData } from '../types';
 import { initDraftSaver } from './draft-saver';
 import { detectNotifChips } from '../lib/notif-chips';
+import { logger } from '../lib/logger';
 
 /**
  * Extract screening questions from the page.
@@ -59,7 +60,7 @@ function extractJobData(): JobData {
   // Debug: if extraction failed, dump what we can find
   if (!title) {
     const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5')).slice(0, 10);
-    console.log('UpApply: Title not found. Page headings:', headings.map(h => ({
+    logger.log('UpApply: Title not found. Page headings:', headings.map(h => ({
       tag: h.tagName,
       class: h.className.substring(0, 60),
       text: h.textContent?.trim().substring(0, 80),
@@ -67,7 +68,7 @@ function extractJobData(): JobData {
     })));
   }
 
-  console.log('UpApply: Extraction results:', {
+  logger.log('UpApply: Extraction results:', {
     title: title?.substring(0, 60),
     descriptionLength: description?.length,
     skillCount: skills.length,
@@ -223,7 +224,7 @@ async function extractAllJobCards(): Promise<ScrapedJobCard[]> {
   const win = window as unknown as Record<string, unknown>;
 
   if (win[lockKey]) {
-    console.log('UpApply: Joining existing job card scrape');
+    logger.log('UpApply: Joining existing job card scrape');
     return win[lockKey] as Promise<ScrapedJobCard[]>;
   }
 
@@ -237,10 +238,10 @@ async function extractAllJobCards(): Promise<ScrapedJobCard[]> {
       : 1;
     const pagesToScrape = Math.min(totalPages, 50); // cap at 50 pages
 
-    console.log('UpApply: Job card scrape — total pages:', totalPages, 'scraping up to:', pagesToScrape);
+    logger.log('UpApply: Job card scrape — total pages:', totalPages, 'scraping up to:', pagesToScrape);
 
     all.push(...extractJobCards());
-    console.log('UpApply: Page 1 —', all.length, 'job cards');
+    logger.log('UpApply: Page 1 —', all.length, 'job cards');
 
     for (let page = 2; page <= pagesToScrape; page++) {
       const nextBtn = document.querySelector<HTMLButtonElement>('button[data-test="next-page"]');
@@ -275,7 +276,7 @@ async function extractAllJobCards(): Promise<ScrapedJobCard[]> {
 
       const pageCards = extractJobCards();
       all.push(...pageCards);
-      console.log('UpApply: Page', page, '—', pageCards.length, 'job cards (total:', all.length, ')');
+      logger.log('UpApply: Page', page, '—', pageCards.length, 'job cards (total:', all.length, ')');
     }
 
     return all;
@@ -305,7 +306,7 @@ function extractProposals(): ScrapedProposal[] {
       'a[data-ev-label="jpn_list_details_link"], a[href*="/nx/proposals/"]:not([href$="/nx/proposals/"])'
     )
   );
-  console.log('UpApply: Found', proposalLinks.length, 'proposal links');
+  logger.log('UpApply: Found', proposalLinks.length, 'proposal links');
 
   for (const link of proposalLinks) {
     const href = link.getAttribute('href') || '';
@@ -348,7 +349,7 @@ function extractProposals(): ScrapedProposal[] {
     });
   }
 
-  console.log('UpApply: Extracted', proposals.length, 'proposals');
+  logger.log('UpApply: Extracted', proposals.length, 'proposals');
   return proposals;
 }
 
@@ -447,7 +448,7 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
 
   // If another instance already started scraping, share its result
   if (win[SCRAPE_KEY]) {
-    console.log('UpApply: Joining existing scrape in progress');
+    logger.log('UpApply: Joining existing scrape in progress');
     return win[SCRAPE_KEY] as Promise<ScrapedProposal[]>;
   }
 
@@ -460,7 +461,7 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
       ? parseInt(paginationDiv.getAttribute('data-ev-max_page_count') || '1', 10)
       : null;
 
-    console.log('UpApply: Proposals pagination — total pages:', totalPages ?? 'unknown (will paginate until no next button)');
+    logger.log('UpApply: Proposals pagination — total pages:', totalPages ?? 'unknown (will paginate until no next button)');
 
     const all: ScrapedProposal[] = [];
     const seenIds = new Set<string>();
@@ -501,7 +502,7 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
     let pageNum = 2;
     while (totalPages === null || pageNum <= totalPages) {
       if (all.length >= MAX_LIST_PROPOSALS) {
-        console.log(`UpApply: Reached ${MAX_LIST_PROPOSALS}-proposal cap — stopping list pagination`);
+        logger.log(`UpApply: Reached ${MAX_LIST_PROPOSALS}-proposal cap — stopping list pagination`);
         break;
       }
       // Capture the first PROPOSAL link href (numeric ID — excludes interview/uid/ links)
@@ -513,11 +514,11 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
       // Wait for next button to be enabled (it's briefly disabled during transitions)
       const nextBtn = await waitForNextButton();
       if (!nextBtn) {
-        console.log('UpApply: No enabled next button found at page', pageNum - 1, '— stopping');
+        logger.log('UpApply: No enabled next button found at page', pageNum - 1, '— stopping');
         break;
       }
 
-      console.log('UpApply: Clicking to page', pageNum, totalPages ? `of ${totalPages}` : '(unknown total)');
+      logger.log('UpApply: Clicking to page', pageNum, totalPages ? `of ${totalPages}` : '(unknown total)');
       chrome.storage.local.set({ proposalListProgress: { page: pageNum, totalPages } });
       nextBtn.click();
 
@@ -525,7 +526,7 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
       // Returns false if the click didn't trigger navigation (background tab click issue).
       const changed = await waitForProposalPageChange(previousFirstHref, pageNum);
       if (!changed) {
-        console.log('UpApply: Page did not advance to', pageNum, '— stopping pagination');
+        logger.log('UpApply: Page did not advance to', pageNum, '— stopping pagination');
         break;
       }
 
@@ -533,7 +534,7 @@ async function extractAllProposals(): Promise<ScrapedProposal[]> {
       pageNum++;
     }
 
-    console.log('UpApply: Total proposals across all pages:', all.length);
+    logger.log('UpApply: Total proposals across all pages:', all.length);
     return all;
   })();
 
@@ -612,7 +613,7 @@ function extractJobPostingData(): JobPostingData {
     });
   }
 
-  console.log('UpApply: Extracted job posting data:', {
+  logger.log('UpApply: Extracted job posting data:', {
     descriptionLength: fullDescription?.length,
     attachmentCount: attachments.length,
   });
@@ -630,7 +631,7 @@ function fillCoverLetter(content: string): boolean {
   const textarea = querySelector(SELECTORS.coverLetterTextarea) as HTMLTextAreaElement | null;
 
   if (!textarea) {
-    console.warn('UpApply: Cover letter textarea not found');
+    logger.warn('UpApply: Cover letter textarea not found');
     return false;
   }
 
@@ -652,7 +653,7 @@ function setBidAmount(amount: number): boolean {
   const input = querySelector(SELECTORS.bidAmountInput) as HTMLInputElement | null;
 
   if (!input) {
-    console.warn('UpApply: Bid amount input not found');
+    logger.warn('UpApply: Bid amount input not found');
     return false;
   }
 
@@ -670,7 +671,7 @@ function fillScreeningQuestion(selector: string, answer: string): boolean {
   try {
     const input = document.querySelector(selector) as HTMLTextAreaElement | HTMLInputElement | null;
     if (!input) {
-      console.warn('UpApply: Screening question input not found:', selector);
+      logger.warn('UpApply: Screening question input not found:', selector);
       return false;
     }
 
@@ -1405,11 +1406,11 @@ async function _fetchJobViaGraphQL(jobUid: string): Promise<JobFetchResult | nul
     signal: AbortSignal.timeout(8000),
   });
 
-  console.log('[UpApply] GraphQL status:', resp.status, 'for', jobUid);
+  logger.log('[UpApply] GraphQL status:', resp.status, 'for', jobUid);
   if (!resp.ok) return null;
 
   const json = await resp.json() as { data?: { jobPosting?: Record<string, unknown> }; errors?: unknown[] };
-  console.log('[UpApply] GraphQL response:', JSON.stringify(json).slice(0, 400));
+  logger.log('[UpApply] GraphQL response:', JSON.stringify(json).slice(0, 400));
 
   const job = json?.data?.jobPosting;
   if (!job) return null;
@@ -1452,7 +1453,7 @@ async function _fetchJobData(jobUrl: string): Promise<JobFetchResult> {
   if (uidMatch) {
     const result = await _fetchJobViaGraphQL(uidMatch[1]).catch(() => null);
     if (result && result.description.length > 0) {
-      console.log('[UpApply] GraphQL success:', { descLen: result.description.length, budget: result.budgetAmount });
+      logger.log('[UpApply] GraphQL success:', { descLen: result.description.length, budget: result.budgetAmount });
       return result;
     }
   }
@@ -1491,7 +1492,7 @@ function _clearAuthTokenCache(): void {
 /** Score a single item and update its badge. Never throws. */
 async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
   const uid = item.jobUrl.match(/(~[0-9a-f]+)/i)?.[1] ?? item.jobUrl.slice(-12);
-  console.log(`[UpApply] score START  ${uid} "${item.title.slice(0, 40)}"`);
+  logger.log(`[UpApply] score START  ${uid} "${item.title.slice(0, 40)}"`);
   try {
     // 1. Persistent cache check
     // sc_v9: added description/title/skills so preview toggle never needs to re-fetch
@@ -1503,7 +1504,7 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
       const cacheStore = await chrome.storage.local.get(CACHE_KEY);
       const cached = cacheStore[CACHE_KEY] as CacheEntry | undefined;
       if (cached && Date.now() - cached.ts < CACHE_TTL) {
-        console.log(`[UpApply] score CACHED ${uid} score=${cached.score}`);
+        logger.log(`[UpApply] score CACHED ${uid} score=${cached.score}`);
         // Restore job data so preview toggle and action panel don't need to re-fetch
         if (!_jobDataStore.has(item.jobUrl)) {
           _jobDataStore.set(item.jobUrl, {
@@ -1521,7 +1522,7 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
         const resp = await chrome.runtime.sendMessage({ type: 'GET_NOTIF_CACHE', key: CACHE_KEY }) as { value: CacheEntry | null };
         const cached = resp?.value;
         if (cached && Date.now() - cached.ts < CACHE_TTL) {
-          console.log(`[UpApply] score CACHED(SW) ${uid} score=${cached.score}`);
+          logger.log(`[UpApply] score CACHED(SW) ${uid} score=${cached.score}`);
           if (!_jobDataStore.has(item.jobUrl)) {
             _jobDataStore.set(item.jobUrl, {
               title: cached.title || item.title,
@@ -1545,14 +1546,14 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
     }
 
     // 3. Fetch job description via Upwork GraphQL (content script context, 8s timeout)
-    console.log(`[UpApply] score FETCH  ${uid}`);
+    logger.log(`[UpApply] score FETCH  ${uid}`);
     const jobData = await _fetchJobData(item.jobUrl);
     const description = jobData.description || ''; // real description; don't fall back to title
     const scoreText = description || item.title;   // scoring API needs something to analyze
-    console.log(`[UpApply] score FETCH  ${uid} done — descLen=${description.length} budget=${jobData.budgetAmount} source=${jobData.description ? 'graphql' : 'title-fallback'}`);
+    logger.log(`[UpApply] score FETCH  ${uid} done — descLen=${description.length} budget=${jobData.budgetAmount} source=${jobData.description ? 'graphql' : 'title-fallback'}`);
 
     // 4. Score via API directly (no SW message channel — eliminates zombie channel accumulation)
-    console.log(`[UpApply] score SCORE  ${uid}`);
+    logger.log(`[UpApply] score SCORE  ${uid}`);
     const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL']
       || 'https://upapply-api.onrender.com';
     const apiResp = await fetch(`${apiBase}/api/v1/jobs/analyze`, {
@@ -1572,7 +1573,7 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
 
     if (!apiResp.ok) throw new Error(`API ${apiResp.status}`);
     const data = await apiResp.json() as { match_score: number; reason?: string };
-    console.log(`[UpApply] score SCORE  ${uid} done — score=${data.match_score}`);
+    logger.log(`[UpApply] score SCORE  ${uid} done — score=${data.match_score}`);
 
     // 5. Compute chips and cache result
     const chips = detectNotifChips(item.title, scoreText, jobData.budgetAmount, jobData.budgetType);
@@ -1595,7 +1596,7 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
     });
 
     _applyBadgeResult(item, data.match_score, chips, false, data.reason);
-    console.log(`[UpApply] score DONE   ${uid}`);
+    logger.log(`[UpApply] score DONE   ${uid}`);
   } catch (err) {
     console.error(`[UpApply] score ERROR  ${uid}`, err);
     item.badge.textContent = '?';
@@ -1723,7 +1724,7 @@ function _observeRowForHud(row: Element): void {
 
 async function _processNotifQueue(): Promise<void> {
   if (_notifProcessing) {
-    console.warn('[UpApply] _processNotifQueue called while already processing — skipped');
+    logger.warn('[UpApply] _processNotifQueue called while already processing — skipped');
     return;
   }
   _notifProcessing = true;
@@ -1731,7 +1732,7 @@ async function _processNotifQueue(): Promise<void> {
   _updateProgressBar(0, _notifTotal);
 
   const items = _notifQueue.splice(0);
-  console.log(`[UpApply] queue START total=${items.length}`);
+  logger.log(`[UpApply] queue START total=${items.length}`);
 
   try {
     for (const item of items) {
@@ -1747,7 +1748,7 @@ async function _processNotifQueue(): Promise<void> {
         _scoreOneNotif(item).finally(() => clearTimeout(hardTimeoutId)),
         new Promise<void>(resolve => {
           hardTimeoutId = setTimeout(() => {
-            console.warn(`[UpApply] item hard timeout: ${item.jobUrl}`);
+            logger.warn(`[UpApply] item hard timeout: ${item.jobUrl}`);
             item.badge.textContent = '?';
             item.badge.style.background = '#6b7280';
             item.badge.title = 'UpApply: timed out';
@@ -1757,10 +1758,10 @@ async function _processNotifQueue(): Promise<void> {
       ]);
       _notifDone++;
       _updateProgressBar(_notifDone, _notifTotal);
-      console.log(`[UpApply] progress ${_notifDone}/${_notifTotal}`);
+      logger.log(`[UpApply] progress ${_notifDone}/${_notifTotal}`);
     }
   } finally {
-    console.log(`[UpApply] queue FINISHED done=${_notifDone}/${_notifTotal}`);
+    logger.log(`[UpApply] queue FINISHED done=${_notifDone}/${_notifTotal}`);
     _notifProcessing = false;
     _hideProgressBar();
     // Re-trigger: items pushed by IntersectionObserver while this run was active
@@ -1944,7 +1945,7 @@ function _handleMutations(): void {
 const _W = window as Window & { __upapply_gen?: number };
 const _MY_GEN = (_W.__upapply_gen ?? 0) + 1;
 _W.__upapply_gen = _MY_GEN;
-console.log(`[UpApply] scoring gen=${_MY_GEN}`);
+logger.log(`[UpApply] scoring gen=${_MY_GEN}`);
 
 new MutationObserver(() => {
   // Yield immediately if a newer instance has taken over
@@ -2266,7 +2267,7 @@ function extractSavedSearches(): ScrapedSavedSearch[] {
  * Handle messages from background script or sidebar.
  */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  console.log('UpApply: Received message', message.type, message);
+  logger.log('UpApply: Received message', message.type, message);
 
   switch (message.type) {
     case 'PING':
@@ -2274,20 +2275,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       break;
 
     case 'EXTRACT_JOB_DATA':
-      console.log('UpApply: EXTRACT_JOB_DATA received, isJobPage:', isJobPage(), 'URL:', window.location.href);
+      logger.log('UpApply: EXTRACT_JOB_DATA received, isJobPage:', isJobPage(), 'URL:', window.location.href);
       if (!isJobPage()) {
-        console.log('UpApply: Not a job page, returning error');
+        logger.log('UpApply: Not a job page, returning error');
         sendResponse({ success: false, error: 'Not on a job page' });
         return true;
       }
       try {
         const jobData = extractJobData();
-        console.log('UpApply: Extraction complete, title:', jobData.title);
+        logger.log('UpApply: Extraction complete, title:', jobData.title);
         if (!jobData.title) {
           // Send debug info back so it's visible in the background/sidebar console
           const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5')).slice(0, 8);
           const debug = headings.map(h => `<${h.tagName} class="${h.className.substring(0, 40)}"> ${h.textContent?.trim().substring(0, 60)}`);
-          console.log('UpApply: DEBUG headings:', debug);
+          logger.log('UpApply: DEBUG headings:', debug);
           sendResponse({ success: true, data: jobData, debug });
         } else {
           sendResponse({ success: true, data: jobData });
@@ -2505,7 +2506,7 @@ async function checkPendingAutoFill(): Promise<void> {
 
   // Consume the pending fill immediately so it doesn't apply twice
   await chrome.storage.local.remove('pendingAutoFill');
-  console.log('UpApply: Pending auto-fill found for job slug', urlSlug);
+  logger.log('UpApply: Pending auto-fill found for job slug', urlSlug);
 
   const tryFill = (): boolean => fillCoverLetter(pending.coverLetter);
 
@@ -2514,14 +2515,14 @@ async function checkPendingAutoFill(): Promise<void> {
     const observer = new MutationObserver(() => {
       if (tryFill()) {
         observer.disconnect();
-        console.log('UpApply: Pending auto-fill applied via observer');
+        logger.log('UpApply: Pending auto-fill applied via observer');
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
     // Give up after 15 seconds
     setTimeout(() => observer.disconnect(), 15000);
   } else {
-    console.log('UpApply: Pending auto-fill applied immediately');
+    logger.log('UpApply: Pending auto-fill applied immediately');
   }
 }
 
@@ -2531,12 +2532,12 @@ async function checkPendingAutoFill(): Promise<void> {
 function init() {
   // Prevent duplicate init from re-injection
   if ((window as unknown as Record<string, unknown>)[INIT_FLAG]) {
-    console.log('UpApply: Already initialized, skipping');
+    logger.log('UpApply: Already initialized, skipping');
     return;
   }
   (window as unknown as Record<string, unknown>)[INIT_FLAG] = true;
 
-  console.log('UpApply: Content script loaded on', window.location.href);
+  logger.log('UpApply: Content script loaded on', window.location.href);
 
   // Notify background script that we're ready
   chrome.runtime.sendMessage({
@@ -2556,7 +2557,7 @@ function init() {
   const observer = new MutationObserver(() => {
     if (window.location.href !== lastUrl) {
       lastUrl = window.location.href;
-      console.log('UpApply: URL changed to', lastUrl);
+      logger.log('UpApply: URL changed to', lastUrl);
 
       // Re-extract job data on navigation — wait for React to finish rendering
       if (isJobPage()) {

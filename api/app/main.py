@@ -31,6 +31,12 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Sentry initialized for environment: %s", settings.environment)
 
+    # Warn if Anthropic API key is missing (cover letter generation will fail)
+    if not getattr(settings, "anthropic_api_key", None):
+        logger.warning(
+            "ANTHROPIC_API_KEY is not set — cover letter generation will be unavailable"
+        )
+
     # Startup
     await init_db()
     yield

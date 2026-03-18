@@ -1,10 +1,11 @@
 {
   "name": "upapply-extension",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AI-powered cover letter generation for Upwork",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/bump-version.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
