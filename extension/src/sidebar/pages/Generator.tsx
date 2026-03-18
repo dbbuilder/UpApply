@@ -1,29 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
 import { apiClient, ScreeningAnswerSearchResult, AttachmentData, MilestoneSuggestion } from '../../lib/api-client';
-
-function MatchScoreBadge({ score }: { score: number }) {
-  let colorClass = 'score-low';
-  let label = 'Low Match';
-
-  if (score >= 80) {
-    colorClass = 'score-excellent';
-    label = 'Excellent';
-  } else if (score >= 65) {
-    colorClass = 'score-good';
-    label = 'Good';
-  } else if (score >= 50) {
-    colorClass = 'score-moderate';
-    label = 'Moderate';
-  }
-
-  return (
-    <div className="text-center">
-      <div className={`text-3xl font-bold ${colorClass}`}>{score}%</div>
-      <div className="text-sm text-gray-500">{label}</div>
-    </div>
-  );
-}
+import JobHeader from '../components/generator/JobHeader';
+import AnalysisPanel from '../components/generator/AnalysisPanel';
+import CoverLetterPanel from '../components/generator/CoverLetterPanel';
+import ScreeningPanel from '../components/generator/ScreeningPanel';
+import MilestonesPanel from '../components/generator/MilestonesPanel';
 
 export default function GeneratorPage() {
   const {
@@ -46,44 +28,44 @@ export default function GeneratorPage() {
     addSkillToProfile,
   } = useAppStore();
 
-  // State for screening question answers
+  // Screening question state
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
   const [suggestedAnswers, setSuggestedAnswers] = useState<Record<string, ScreeningAnswerSearchResult[]>>({});
   const [loadingSuggestions, setLoadingSuggestions] = useState<Record<string, boolean>>({});
   const [generatingAnswers, setGeneratingAnswers] = useState<Record<string, boolean>>({});
 
-  // State for fetching full job with attachments
+  // Fetch full job state
   const [fetchingFullJob, setFetchingFullJob] = useState(false);
   const [fullJobFetched, setFullJobFetched] = useState(false);
   const [attachmentCount, setAttachmentCount] = useState(0);
   const [attachmentStatuses, setAttachmentStatuses] = useState<string[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // State for regeneration feedback
+  // Regeneration feedback state
   const [showFeedbackInput, setShowFeedbackInput] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
 
-  // State for application tracking
+  // Application tracking state
   const [showAppliedPrompt, setShowAppliedPrompt] = useState(false);
   const [markingApplied, setMarkingApplied] = useState(false);
 
-  // State for submit + improve feedback loop
+  // Submit + improve feedback loop state
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [improving, setImproving] = useState(false);
   const [improvementNotes, setImprovementNotes] = useState<string[] | null>(null);
   const [showImprovementNotes, setShowImprovementNotes] = useState(false);
 
-  // State for adding skills from missing list
+  // Missing skill add state
   const [addingSkill, setAddingSkill] = useState<string | null>(null);
   const [addedSkills, setAddedSkills] = useState<Set<string>>(new Set());
 
-  // State for inclusions, prototype URL, and call offer
+  // Cover letter options state
   const [inclusions, setInclusions] = useState('');
   const [prototypeUrl, setPrototypeUrl] = useState('');
   const [includeCallOffer, setIncludeCallOffer] = useState(true);
 
-  // State for milestones
+  // Milestones state
   const [milestones, setMilestones] = useState<MilestoneSuggestion[]>([]);
   const [generatingMilestones, setGeneratingMilestones] = useState(false);
   const [fillingMilestones, setFillingMilestones] = useState(false);
@@ -99,7 +81,6 @@ export default function GeneratorPage() {
     return single ? String(Math.round(parseFloat(single[0]))) : '';
   };
 
-  // Sync default budget when job changes
   useEffect(() => {
     if (currentJob?.budgetAmount) {
       const parsed = parseBudgetMax(currentJob.budgetAmount);
@@ -108,37 +89,34 @@ export default function GeneratorPage() {
   }, [currentJob?.budgetAmount]);
 
   useEffect(() => {
-    // Request current job data from stored cache first
     chrome.runtime.sendMessage({ type: 'GET_CURRENT_JOB' }, (response) => {
-      console.log('UpApply Sidebar: GET_CURRENT_JOB response:', response);
-      if (response?.data) {
-        useAppStore.getState().setCurrentJob(response.data);
-      }
+      if (response?.data) useAppStore.getState().setCurrentJob(response.data);
     });
-
-    // Also actively request extraction via background (handles script injection)
     chrome.runtime.sendMessage({ type: 'REQUEST_JOB_EXTRACTION' }, (response) => {
-      if (chrome.runtime.lastError) return; // No listener or not on Upwork
-      if (response?.success && response.data) {
-        useAppStore.getState().setCurrentJob(response.data);
-      }
+      if (chrome.runtime.lastError) return;
+      if (response?.success && response.data) useAppStore.getState().setCurrentJob(response.data);
     });
   }, []);
 
+  // Listen for updates from the popup editor
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'COVER_LETTER_UPDATED') {
+        useAppStore.getState().setCoverLetter(event.data.content);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
   const handleRefreshJob = () => {
-    // Route through background script which has tabs permission
     chrome.runtime.sendMessage({ type: 'REQUEST_JOB_EXTRACTION' }, (response) => {
-      console.log('UpApply Sidebar: Manual extract response:', response);
       if (response?.success && response.data) {
         useAppStore.getState().setCurrentJob(response.data);
       } else {
         alert('Could not extract job data. Make sure you are on an Upwork job/proposal page. Error: ' + (response?.error || 'No response'));
       }
     });
-  };
-
-  const handleAnalyze = () => {
-    analyzeCurrentJob();
   };
 
   const _resetFeedbackLoopState = () => {
@@ -172,24 +150,18 @@ export default function GeneratorPage() {
 
   const handleFill = async () => {
     const success = await fillCoverLetter();
-    if (success) {
-      setShowAppliedPrompt(true);
-    }
+    if (success) setShowAppliedPrompt(true);
   };
 
   const handleMarkAsApplied = async () => {
     setMarkingApplied(true);
     const success = await createApplication();
     setMarkingApplied(false);
-    if (success) {
-      setShowAppliedPrompt(false);
-    }
+    if (success) setShowAppliedPrompt(false);
   };
 
   const handleCopy = () => {
-    if (coverLetter) {
-      navigator.clipboard.writeText(coverLetter);
-    }
+    if (coverLetter) navigator.clipboard.writeText(coverLetter);
   };
 
   const handleMarkSubmitted = async () => {
@@ -217,7 +189,7 @@ export default function GeneratorPage() {
       useAppStore.getState().setCoverLetterId(result.cover_letter_id);
       setImprovementNotes(result.improvement_notes);
       setShowImprovementNotes(true);
-      setSubmitted(false); // improved version not yet submitted
+      setSubmitted(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('422') || msg.includes('Need at least')) {
@@ -230,16 +202,12 @@ export default function GeneratorPage() {
 
   const handleOpenEditor = () => {
     if (!coverLetter) return;
-
-    // Create a popup window with the cover letter for editing
     const width = 600;
     const height = 500;
     const left = (screen.width - width) / 2;
     const top = (screen.height - height) / 2;
-
     const popup = window.open('', 'CoverLetterEditor',
       `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`);
-
     if (popup) {
       popup.document.write(`
         <!DOCTYPE html>
@@ -289,30 +257,11 @@ export default function GeneratorPage() {
     }
   };
 
-  // Listen for updates from the popup editor
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'COVER_LETTER_UPDATED') {
-        useAppStore.getState().setCoverLetter(event.data.content);
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
-
   const handleFillQuestion = async (selector: string, index: number, question: string) => {
     const answer = questionAnswers[`q${index}`];
-    if (!answer) {
-      alert('Please enter an answer first');
-      return;
-    }
+    if (!answer) { alert('Please enter an answer first'); return; }
     const success = await fillScreeningQuestion(selector, answer);
-    if (!success) {
-      alert('Failed to fill answer. Make sure you are on the Upwork proposal page.');
-      return;
-    }
-
-    // Save the Q&A for future reference
+    if (!success) { alert('Failed to fill answer. Make sure you are on the Upwork proposal page.'); return; }
     try {
       await apiClient.createScreeningAnswer({
         question,
@@ -320,23 +269,20 @@ export default function GeneratorPage() {
         job_title: currentJob?.title || undefined,
         job_skills: currentJob?.skills,
       });
-      console.log('Screening answer saved for future use');
-    } catch (err) {
-      console.error('Failed to save screening answer:', err);
+    } catch {
+      // non-critical
     }
   };
 
-  // Search for similar past answers when a question is focused
   const handleQuestionFocus = async (question: string, index: number) => {
     const key = `q${index}`;
     if (suggestedAnswers[key] || loadingSuggestions[key]) return;
-
     setLoadingSuggestions(prev => ({ ...prev, [key]: true }));
     try {
       const results = await apiClient.searchScreeningAnswers(question, 3);
       setSuggestedAnswers(prev => ({ ...prev, [key]: results }));
-    } catch (err) {
-      console.error('Failed to search past answers:', err);
+    } catch {
+      // non-critical
     } finally {
       setLoadingSuggestions(prev => ({ ...prev, [key]: false }));
     }
@@ -358,7 +304,7 @@ export default function GeneratorPage() {
       );
       setQuestionAnswers(prev => ({ ...prev, [key]: result.answer }));
     } catch {
-      // silently fail — user can still type manually
+      // silent
     } finally {
       setGeneratingAnswers(prev => ({ ...prev, [key]: false }));
     }
@@ -376,9 +322,7 @@ export default function GeneratorPage() {
   };
 
   const handleGenerateAll = async () => {
-    // Generate cover letter
     await generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
-    // Generate all Q&A answers in parallel
     if (currentJob?.screeningQuestions && currentJob.screeningQuestions.length > 0) {
       const results = await Promise.allSettled(
         currentJob.screeningQuestions.map((q, i) =>
@@ -392,9 +336,7 @@ export default function GeneratorPage() {
       );
       const newAnswers: Record<string, string> = {};
       results.forEach(r => {
-        if (r.status === 'fulfilled') {
-          newAnswers[`q${r.value.index}`] = r.value.answer;
-        }
+        if (r.status === 'fulfilled') newAnswers[`q${r.value.index}`] = r.value.answer;
       });
       setQuestionAnswers(prev => ({ ...prev, ...newAnswers }));
     }
@@ -412,8 +354,8 @@ export default function GeneratorPage() {
         3,
       );
       setMilestones(result.milestones);
-    } catch (err) {
-      console.error('Failed to generate milestones:', err);
+    } catch {
+      // non-critical
     } finally {
       setGeneratingMilestones(false);
     }
@@ -432,35 +374,25 @@ export default function GeneratorPage() {
     setAddingSkill(skillName);
     const success = await addSkillToProfile(skillName, 'beginner');
     setAddingSkill(null);
-    if (success) {
-      setAddedSkills(prev => new Set(prev).add(skillName));
-    }
+    if (success) setAddedSkills(prev => new Set(prev).add(skillName));
   };
 
   const handleAnswerChange = (index: number, value: string) => {
     setQuestionAnswers(prev => ({ ...prev, [`q${index}`]: value }));
   };
 
-  // Fetch the full job posting via background tab
   const handleFetchFullJob = async () => {
     setFetchingFullJob(true);
     setFetchError(null);
     setAttachmentStatuses([]);
-
     try {
-      // First, get the "View job posting" link from the current page
       const linkResponse = await new Promise<{ success: boolean; url?: string; error?: string }>((resolve) => {
         chrome.runtime.sendMessage({ type: 'GET_VIEW_POSTING_LINK' }, resolve);
       });
-
       if (!linkResponse.success || !linkResponse.url) {
         setFetchError('Could not find "View job posting" link on this page');
         return;
       }
-
-      console.log('UpApply: Fetching full job from:', linkResponse.url);
-
-      // Open background tab and extract data
       const extractResponse = await new Promise<{
         success: boolean;
         data?: { fullDescription: string | null; attachments: Array<{ url: string; filename: string; contentType: string }> };
@@ -468,40 +400,25 @@ export default function GeneratorPage() {
       }>((resolve) => {
         chrome.runtime.sendMessage({ type: 'EXTRACT_FULL_JOB', jobPostingUrl: linkResponse.url }, resolve);
       });
-
       if (!extractResponse.success || !extractResponse.data) {
         setFetchError(extractResponse.error || 'Failed to extract job posting data');
         return;
       }
-
       const { fullDescription, attachments } = extractResponse.data;
-      console.log('UpApply: Extracted', attachments.length, 'attachments');
-
-      // Save the job to get a job_id for attachment extraction
       let jobId = savedJobId;
-      if (!jobId) {
-        jobId = await saveCurrentJob();
-      }
-
-      // If there are attachments and we have a job_id, download and send to backend
+      if (!jobId) jobId = await saveCurrentJob();
       if (attachments.length > 0 && jobId) {
         const attachmentData: AttachmentData[] = [];
         const statuses: string[] = [];
-
         for (const att of attachments) {
           try {
             statuses.push(`Downloading ${att.filename}...`);
             setAttachmentStatuses([...statuses]);
-
             const downloadResponse = await new Promise<{
-              success: boolean;
-              data?: string;
-              contentType?: string;
-              error?: string;
+              success: boolean; data?: string; contentType?: string; error?: string;
             }>((resolve) => {
               chrome.runtime.sendMessage({ type: 'DOWNLOAD_ATTACHMENT', url: att.url }, resolve);
             });
-
             if (downloadResponse.success && downloadResponse.data) {
               attachmentData.push({
                 data: downloadResponse.data,
@@ -513,38 +430,26 @@ export default function GeneratorPage() {
               statuses[statuses.length - 1] = `Failed: ${att.filename}`;
             }
             setAttachmentStatuses([...statuses]);
-          } catch (err) {
-            console.error('Failed to download attachment:', att.filename, err);
+          } catch {
             statuses[statuses.length - 1] = `Error: ${att.filename}`;
             setAttachmentStatuses([...statuses]);
           }
         }
-
-        // Send to backend for text extraction
         if (attachmentData.length > 0) {
           try {
-            const extractResult = await apiClient.extractJobAttachments(
-              jobId,
-              attachmentData,
-              fullDescription || undefined,
-            );
-            console.log('UpApply: Extracted text from', extractResult.attachment_count, 'attachments');
-          } catch (err) {
-            console.error('Failed to extract attachment text:', err);
+            await apiClient.extractJobAttachments(jobId, attachmentData, fullDescription || undefined);
+          } catch {
+            // non-critical
           }
         }
       }
-
-      // Update current job with full description
       if (fullDescription) {
         const updatedJob = { ...currentJob, fullDescription };
         useAppStore.getState().setCurrentJob(updatedJob as typeof currentJob);
       }
-
       setFullJobFetched(true);
       setAttachmentCount(attachments.length);
     } catch (err) {
-      console.error('UpApply: Fetch full job error:', err);
       setFetchError(String(err));
     } finally {
       setFetchingFullJob(false);
@@ -553,7 +458,6 @@ export default function GeneratorPage() {
 
   return (
     <div className="flex flex-col">
-      {/* Content */}
       <div className="flex-1 overflow-auto p-4 space-y-4">
         {!currentJob || !currentJob.title ? (
           <div className="card text-center py-8">
@@ -562,601 +466,98 @@ export default function GeneratorPage() {
             <p className="text-sm text-gray-500 mt-1">
               Navigate to an Upwork job page to get started
             </p>
-            <button
-              type="button"
-              onClick={handleRefreshJob}
-              className="btn-outline mt-4"
-            >
+            <button type="button" onClick={handleRefreshJob} className="btn-outline mt-4">
               Refresh Detection
             </button>
           </div>
         ) : (
           <>
-            {/* Job Info */}
-            <div className="card">
-              <div className="flex items-start justify-between gap-2">
-                <h3 className="font-medium text-gray-900 line-clamp-2 flex-1">{currentJob.title}</h3>
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  {jobAnalysis && (
-                    <span
-                      className="text-xs font-bold px-2 py-0.5 rounded-full text-white"
-                      style={{
-                        background:
-                          jobAnalysis.match_score >= 70
-                            ? '#16a34a'
-                            : jobAnalysis.match_score >= 50
-                            ? '#ca8a04'
-                            : '#dc2626',
-                      }}
-                    >
-                      {Math.round(jobAnalysis.match_score)}%
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleRefreshJob}
-                    className="text-gray-400 hover:text-gray-700 text-sm"
-                    title="Sync job from current page"
-                  >
-                    ⟳
-                  </button>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2 mt-2">
-                {currentJob.budgetAmount && (
-                  <span className="badge badge-green">{currentJob.budgetAmount}</span>
-                )}
-                {currentJob.skills.slice(0, 4).map((skill) => (
-                  <span key={skill} className="badge badge-gray">
-                    {skill}
-                  </span>
-                ))}
-                {currentJob.skills.length > 4 && (
-                  <span className="badge badge-gray">+{currentJob.skills.length - 4}</span>
-                )}
-              </div>
+            <JobHeader
+              currentJob={currentJob}
+              jobAnalysis={jobAnalysis}
+              onRefresh={handleRefreshJob}
+              fetchingFullJob={fetchingFullJob}
+              fullJobFetched={fullJobFetched}
+              attachmentCount={attachmentCount}
+              attachmentStatuses={attachmentStatuses}
+              fetchError={fetchError}
+              onFetchFullJob={handleFetchFullJob}
+            />
 
-              {/* Fetch Full Job */}
-              <div className="mt-3 pt-3 border-t border-gray-100">
-                {!fullJobFetched ? (
-                  <button
-                    type="button"
-                    onClick={handleFetchFullJob}
-                    disabled={fetchingFullJob}
-                    className="text-sm text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
-                  >
-                    {fetchingFullJob ? (
-                      <>
-                        <span className="animate-spin">&#9203;</span>
-                        Fetching full job details...
-                      </>
-                    ) : (
-                      <>
-                        &#128196; Fetch full job posting & attachments
-                      </>
-                    )}
-                  </button>
-                ) : (
-                  <div className="text-sm text-gray-500 flex items-center gap-1">
-                    &#10003; Full job loaded
-                    {attachmentCount > 0 && (
-                      <span className="text-emerald-600">
-                        ({attachmentCount} attachment{attachmentCount !== 1 ? 's' : ''})
-                      </span>
-                    )}
-                  </div>
-                )}
-                {fetchingFullJob && attachmentStatuses.length > 0 && (
-                  <div className="mt-2 text-xs text-gray-500 space-y-1">
-                    {attachmentStatuses.map((status, i) => (
-                      <p key={i}>{status}</p>
-                    ))}
-                  </div>
-                )}
-                {fetchError && (
-                  <p className="text-sm text-red-500 mt-1">{fetchError}</p>
-                )}
-              </div>
-            </div>
+            <AnalysisPanel
+              jobAnalysis={jobAnalysis}
+              analysisLoading={analysisLoading}
+              analysisError={analysisError}
+              onAnalyze={() => analyzeCurrentJob()}
+              addedSkills={addedSkills}
+              addingSkill={addingSkill}
+              onAddMissingSkill={handleAddMissingSkill}
+            />
 
-            {/* Analysis Error */}
-            {analysisError && (
-              <div className="card bg-red-50 border-red-200">
-                <h4 className="font-medium text-red-800 mb-1">Analysis Failed</h4>
-                <p className="text-sm text-red-700">{analysisError}</p>
-                <button
-                  type="button"
-                  onClick={handleAnalyze}
-                  className="btn-outline text-sm mt-2"
-                >
-                  Retry
-                </button>
-              </div>
-            )}
+            <CoverLetterPanel
+              coverLetter={coverLetter || ''}
+              jobAnalysis={jobAnalysis}
+              inclusions={inclusions}
+              setInclusions={setInclusions}
+              prototypeUrl={prototypeUrl}
+              setPrototypeUrl={setPrototypeUrl}
+              includeCallOffer={includeCallOffer}
+              setIncludeCallOffer={setIncludeCallOffer}
+              coverLetterError={coverLetterError}
+              coverLetterLoading={coverLetterLoading}
+              showFeedbackInput={showFeedbackInput}
+              feedbackText={feedbackText}
+              setFeedbackText={setFeedbackText}
+              improvementNotes={improvementNotes}
+              showImprovementNotes={showImprovementNotes}
+              setShowImprovementNotes={setShowImprovementNotes}
+              improving={improving}
+              submitting={submitting}
+              submitted={submitted}
+              showAppliedPrompt={showAppliedPrompt}
+              markingApplied={markingApplied}
+              applicationId={applicationId}
+              onGenerate={handleGenerate}
+              onGenerateAll={handleGenerateAll}
+              onRetryGenerate={handleGenerate}
+              onFill={handleFill}
+              onCopy={handleCopy}
+              onRegenerate={handleRegenerate}
+              onRegenerateFresh={handleRegenerateFresh}
+              onOpenEditor={handleOpenEditor}
+              onImprove={handleImprove}
+              onMarkSubmitted={handleMarkSubmitted}
+              onMarkAsApplied={handleMarkAsApplied}
+              onDismissAppliedPrompt={() => setShowAppliedPrompt(false)}
+            />
 
-            {/* Analysis */}
-            {!jobAnalysis && !analysisLoading && !analysisError && (
-              <button
-                type="button"
-                onClick={handleAnalyze}
-                className="btn-outline w-full"
-              >
-                Analyze Job Match
-              </button>
-            )}
-
-            {analysisLoading && (
-              <div className="card text-center py-6">
-                <div className="animate-pulse-slow text-gray-500">Analyzing job...</div>
-              </div>
-            )}
-
-            {jobAnalysis && (
-              <div className="card animate-slide-up">
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="font-medium text-gray-900">Match Analysis</h4>
-                  <MatchScoreBadge score={jobAnalysis.match_score} />
-                </div>
-
-                <p className="text-sm text-gray-600 mb-3">{jobAnalysis.recommendation}</p>
-
-                {/* Deal breakers */}
-                {jobAnalysis.deal_breaker_warnings.length > 0 && (
-                  <div className="bg-red-50 rounded-lg p-3 mb-3">
-                    <h5 className="text-sm font-medium text-red-800 mb-1">Warnings</h5>
-                    <ul className="text-sm text-red-700 space-y-1">
-                      {jobAnalysis.deal_breaker_warnings.map((warning, i) => (
-                        <li key={i}>&#8226; {warning}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Strengths */}
-                {jobAnalysis.strengths.length > 0 && (
-                  <div className="mb-3">
-                    <h5 className="text-sm font-medium text-gray-700 mb-1">Strengths</h5>
-                    <ul className="text-sm text-gray-600 space-y-1">
-                      {jobAnalysis.strengths.map((strength, i) => (
-                        <li key={i} className="text-green-600">
-                          &#10003; {strength}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Concerns */}
-                {jobAnalysis.concerns.length > 0 && (
-                  <div className="mb-3">
-                    <h5 className="text-sm font-medium text-gray-700 mb-1">Concerns</h5>
-                    <ul className="text-sm text-gray-600 space-y-1">
-                      {jobAnalysis.concerns.map((concern, i) => (
-                        <li key={i} className="text-yellow-600">
-                          ! {concern}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Skill matches */}
-                {jobAnalysis.skill_matches.length > 0 && (
-                  <div>
-                    <h5 className="text-sm font-medium text-gray-700 mb-1">Matching Skills</h5>
-                    <div className="flex flex-wrap gap-1">
-                      {jobAnalysis.skill_matches.map((match) => (
-                        <span
-                          key={match.skill}
-                          className={`badge ${
-                            match.match_type === 'exact' ? 'badge-green' : 'badge-yellow'
-                          }`}
-                        >
-                          {match.skill}
-                          {match.user_level && ` (${match.user_level})`}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {jobAnalysis.missing_skills.length > 0 && (
-                  <div className="mt-2">
-                    <h5 className="text-sm font-medium text-gray-700 mb-1">Missing Skills</h5>
-                    <div className="flex flex-wrap gap-1">
-                      {jobAnalysis.missing_skills.map((skill) => (
-                        <span key={skill} className="badge badge-red inline-flex items-center gap-1">
-                          {skill}
-                          {addedSkills.has(skill) ? (
-                            <span className="text-green-600 text-xs" title="Added to profile">&#10003;</span>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleAddMissingSkill(skill)}
-                              disabled={addingSkill === skill}
-                              className="text-red-400 hover:text-green-600 text-xs font-bold ml-0.5"
-                              title="Add to profile"
-                            >
-                              {addingSkill === skill ? '...' : '+'}
-                            </button>
-                          )}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Cover Letter Error */}
-            {coverLetterError && (
-              <div className="card bg-red-50 border-red-200">
-                <h4 className="font-medium text-red-800 mb-1">Generation Failed</h4>
-                <p className="text-sm text-red-700">{coverLetterError}</p>
-                <button
-                  type="button"
-                  onClick={handleGenerate}
-                  className="btn-outline text-sm mt-2"
-                >
-                  Retry
-                </button>
-              </div>
-            )}
-
-            {/* Inclusions + Generate button */}
-            {jobAnalysis && !coverLetter && !coverLetterLoading && !coverLetterError && (
-              <div className="space-y-2">
-                <div>
-                  <label className="text-xs font-medium text-gray-600 mb-1 block">
-                    Include in cover letter <span className="text-gray-400 font-normal">(optional)</span>
-                  </label>
-                  <textarea
-                    value={inclusions}
-                    onChange={e => setInclusions(e.target.value)}
-                    rows={3}
-                    className="input text-sm w-full"
-                    placeholder={'Concepts to weave in, or "exact phrases" in quotes\ne.g. I built a similar SaaS dashboard\n"10+ years of React experience"'}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-600 mb-1 block">
-                    Prototype URL <span className="text-gray-400 font-normal">(optional)</span>
-                  </label>
-                  <input
-                    type="url"
-                    value={prototypeUrl}
-                    onChange={e => setPrototypeUrl(e.target.value)}
-                    className="input text-sm w-full"
-                    placeholder="https://your-prototype.vercel.app"
-                  />
-                  {prototypeUrl.trim() && (
-                    <p className="text-xs text-gray-400 mt-1 italic">
-                      Will add: "...I created a prototype of this project at {prototypeUrl.trim()}..."
-                    </p>
-                  )}
-                </div>
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={includeCallOffer}
-                    onChange={e => setIncludeCallOffer(e.target.checked)}
-                    className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <span className="text-xs text-gray-600">
-                    Include no-cost call offer
-                    <span className="text-gray-400 ml-1">(recommended)</span>
-                  </span>
-                </label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleGenerate}
-                    className="btn-outline flex-1"
-                  >
-                    Cover Letter Only
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleGenerateAll}
-                    className="btn-primary flex-1"
-                  >
-                    Generate All
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {coverLetterLoading && (
-              <div className="card text-center py-6">
-                <div className="animate-pulse-slow text-gray-500">
-                  Generating personalized cover letter...
-                </div>
-              </div>
-            )}
-
-            {/* Cover Letter */}
-            {coverLetter && (
-              <div className="card animate-slide-up">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="font-medium text-gray-900">Cover Letter</h4>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={handleOpenEditor}
-                      className="text-gray-500 hover:text-gray-700 text-sm"
-                      title="Open in larger editor"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCopy}
-                      className="text-gray-500 hover:text-gray-700 text-sm"
-                    >
-                      Copy
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleRegenerate}
-                      className="text-gray-500 hover:text-gray-700 text-sm"
-                    >
-                      {showFeedbackInput ? 'Submit' : 'Regenerate'}
-                    </button>
-                    {showFeedbackInput && (
-                      <button
-                        type="button"
-                        onClick={handleRegenerateFresh}
-                        className="text-gray-400 hover:text-gray-600 text-sm"
-                      >
-                        Fresh
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Feedback input for regeneration */}
-                {showFeedbackInput && (
-                  <div className="mb-3">
-                    <input
-                      type="text"
-                      value={feedbackText}
-                      onChange={(e) => setFeedbackText(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && feedbackText.trim() && handleRegenerate()}
-                      placeholder="What should be different? (e.g., more technical, shorter...)"
-                      className="input text-sm"
-                      autoFocus
-                    />
-                    <button
-                      type="button"
-                      onClick={() => { setShowFeedbackInput(false); setFeedbackText(''); }}
-                      className="text-xs text-gray-400 mt-1"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )}
-
-                <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-700 whitespace-pre-wrap max-h-[300px] overflow-auto">
-                  {coverLetter}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleFill}
-                  className="btn-primary w-full mt-3"
-                >
-                  Fill in Upwork Form
-                </button>
-
-                {/* Improvement notes collapsible */}
-                {improvementNotes && improvementNotes.length > 0 && (
-                  <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setShowImprovementNotes(v => !v)}
-                      className="w-full flex items-center justify-between px-3 py-2 text-amber-800 font-medium"
-                    >
-                      <span>✨ {improvementNotes.length} improvement{improvementNotes.length !== 1 ? 's' : ''} applied</span>
-                      <span>{showImprovementNotes ? '▲' : '▼'}</span>
-                    </button>
-                    {showImprovementNotes && (
-                      <ul className="px-3 pb-2 space-y-1 text-amber-700">
-                        {improvementNotes.map((note, i) => (
-                          <li key={i} className="leading-snug">• {note}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
-
-                {/* Feedback loop actions */}
-                <div className="mt-2 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleImprove}
-                    disabled={improving}
-                    title="Compare against your won proposals and improve this letter"
-                    className="flex-1 btn-outline text-xs py-1.5 disabled:opacity-50"
-                  >
-                    {improving ? '✨ Comparing…' : '✨ Improve'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleMarkSubmitted}
-                    disabled={submitting || submitted}
-                    title="Save this letter to your corpus as submitted"
-                    className={`flex-1 text-xs py-1.5 rounded border font-medium transition-colors ${
-                      submitted
-                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700 cursor-default'
-                        : 'btn-outline'
-                    }`}
-                  >
-                    {submitted ? '✓ Submitted' : submitting ? 'Saving…' : 'Mark Submitted'}
-                  </button>
-                </div>
-
-                {/* Mark as Applied prompt */}
-                {showAppliedPrompt && !applicationId && (
-                  <div className="mt-3 p-3 bg-blue-50 rounded-lg">
-                    <p className="text-sm text-blue-800 mb-2">Form filled! Did you submit the proposal?</p>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={handleMarkAsApplied}
-                        disabled={markingApplied}
-                        className="btn-primary text-sm flex-1"
-                      >
-                        {markingApplied ? 'Saving...' : 'Yes, Mark as Applied'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowAppliedPrompt(false)}
-                        className="btn-outline text-sm flex-1"
-                      >
-                        Not Yet
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {applicationId && (
-                  <div className="mt-3 p-2 bg-green-50 rounded-lg text-sm text-green-700 text-center">
-                    &#10003; Application tracked
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Screening Questions */}
             {currentJob?.screeningQuestions && currentJob.screeningQuestions.length > 0 && (
-              <div className="card animate-slide-up">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="font-medium text-gray-900">
-                    Screening Questions ({currentJob.screeningQuestions.length})
-                  </h4>
-                  {currentJob.screeningQuestions.some((_, i) => questionAnswers[`q${i}`]) && (
-                    <button
-                      type="button"
-                      onClick={handleFillAll}
-                      className="btn-primary text-xs py-1 px-3"
-                    >
-                      Fill All ↵
-                    </button>
-                  )}
-                </div>
-                <div className="space-y-4">
-                  {currentJob.screeningQuestions.map((q, index) => (
-                    <div key={index} className="border-b border-gray-100 pb-3 last:border-0">
-                      <p className="text-sm text-gray-700 mb-2">{q.question}</p>
-                      <textarea
-                        className="w-full border border-gray-200 rounded-lg p-2 text-sm resize-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                        rows={3}
-                        placeholder="Enter your answer or click AI to generate..."
-                        value={questionAnswers[`q${index}`] || ''}
-                        onChange={(e) => handleAnswerChange(index, e.target.value)}
-                        onFocus={() => handleQuestionFocus(q.question, index)}
-                      />
-
-                      {/* Past Answer Suggestions */}
-                      {loadingSuggestions[`q${index}`] && (
-                        <p className="text-xs text-gray-400 mt-1">Searching past answers...</p>
-                      )}
-                      {suggestedAnswers[`q${index}`]?.length > 0 && (
-                        <div className="mt-2 bg-blue-50 rounded p-2">
-                          <p className="text-xs font-medium text-blue-700 mb-1">Past answers for similar questions:</p>
-                          {suggestedAnswers[`q${index}`].map((suggestion, sIdx) => (
-                            <div key={sIdx} className="text-xs text-gray-600 mb-1 flex justify-between items-start gap-2">
-                              <span className="flex-1 line-clamp-2">{suggestion.answer.answer}</span>
-                              <button
-                                type="button"
-                                onClick={() => handleUseSuggestedAnswer(index, suggestion.answer.answer)}
-                                className="text-blue-600 hover:text-blue-800 whitespace-nowrap"
-                              >
-                                Use
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="flex gap-2 mt-2">
-                        <button
-                          type="button"
-                          onClick={() => handleGenerateAnswer(q.question, index)}
-                          disabled={generatingAnswers[`q${index}`]}
-                          className="btn-outline text-xs py-1 px-3 disabled:opacity-60"
-                        >
-                          {generatingAnswers[`q${index}`] ? 'Generating...' : 'AI Answer'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleFillQuestion(q.inputSelector, index, q.question)}
-                          className="btn-outline text-xs py-1 px-3"
-                          disabled={!questionAnswers[`q${index}`]}
-                        >
-                          Fill & Save
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <ScreeningPanel
+                questions={currentJob.screeningQuestions}
+                questionAnswers={questionAnswers}
+                suggestedAnswers={suggestedAnswers}
+                loadingSuggestions={loadingSuggestions}
+                generatingAnswers={generatingAnswers}
+                onAnswerChange={handleAnswerChange}
+                onQuestionFocus={handleQuestionFocus}
+                onUseSuggestedAnswer={handleUseSuggestedAnswer}
+                onGenerateAnswer={handleGenerateAnswer}
+                onFillQuestion={handleFillQuestion}
+                onFillAll={handleFillAll}
+              />
             )}
 
-            {/* Milestones */}
             {coverLetter && (
-              <div className="card animate-slide-up">
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="font-medium text-gray-900">Milestones</h4>
-                  {milestones.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleFillMilestones}
-                      disabled={fillingMilestones}
-                      className="btn-primary text-xs py-1 px-3 disabled:opacity-60"
-                    >
-                      {fillingMilestones ? 'Filling...' : 'Fill Milestones ↵'}
-                    </button>
-                  )}
-                </div>
-
-                {/* Budget input — ask before generating */}
-                <div className="flex items-center gap-2 mb-3">
-                  <label className="text-xs font-medium text-gray-600 whitespace-nowrap">Total $</label>
-                  <input
-                    type="text"
-                    value={milestonesBudget}
-                    onChange={e => setMilestonesBudget(e.target.value.replace(/[^0-9.]/g, ''))}
-                    className="input text-sm flex-1"
-                    placeholder={currentJob?.budgetAmount ?? 'e.g. 6500'}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleGenerateMilestones}
-                    disabled={generatingMilestones}
-                    className="btn-outline text-xs py-1 px-3 disabled:opacity-60 whitespace-nowrap"
-                  >
-                    {generatingMilestones ? '…' : milestones.length ? 'Regenerate' : 'Generate'}
-                  </button>
-                </div>
-
-                {milestones.length > 0 && (
-                  <div className="space-y-3">
-                    {milestones.map((ms, i) => (
-                      <div key={i} className="border border-gray-100 rounded-lg p-2 text-sm">
-                        <div className="font-medium text-gray-800">{ms.description}</div>
-                        <div className="flex gap-4 mt-1 text-gray-500 text-xs">
-                          <span>Day {ms.days_from_start}</span>
-                          <span>${ms.amount.toFixed(0)}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {!milestones.length && (
-                  <p className="text-xs text-gray-400">Set total budget and click Generate.</p>
-                )}
-              </div>
+              <MilestonesPanel
+                milestones={milestones}
+                generatingMilestones={generatingMilestones}
+                fillingMilestones={fillingMilestones}
+                milestonesBudget={milestonesBudget}
+                budgetPlaceholder={currentJob?.budgetAmount}
+                setMilestonesBudget={setMilestonesBudget}
+                onGenerate={handleGenerateMilestones}
+                onFill={handleFillMilestones}
+              />
             )}
           </>
         )}
