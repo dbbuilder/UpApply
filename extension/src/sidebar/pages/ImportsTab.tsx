@@ -168,6 +168,14 @@ async function runSavedJobs(
   return `${imported.length} new jobs added to Queue${skipNote}`;
 }
 
+async function runBackfill(
+  setMsg: (m: string) => void,
+): Promise<string> {
+  setMsg('Backfilling proposal corpus…');
+  const r = await apiClient.backfillProposalsCorpus();
+  return `${r.created} new · ${r.updated} updated · ${r.skipped} skipped`;
+}
+
 async function runSavedSearches(
   setMsg: (m: string) => void,
 ): Promise<string> {
@@ -247,6 +255,13 @@ const IMPORT_DEFS: ImportDef[] = [
     title: 'Saved Searches',
     description: 'Your Upwork saved search filters → imports as Search Queries you can re-run.',
     run: runSavedSearches,
+  },
+  {
+    id: 'backfill_corpus',
+    icon: '🔄',
+    title: 'Backfill was_hired',
+    description: 'Sets hired/declined status on proposals already in corpus. Run after importing proposals.',
+    run: runBackfill,
   },
 ];
 

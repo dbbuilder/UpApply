@@ -96,6 +96,7 @@ class UserProfile(Base):
     preferred_industries: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
     preferred_team_size: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     preferred_client_types: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
+    preferred_client_locations: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
     project_duration_preference: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Deal Breakers & Avoidances

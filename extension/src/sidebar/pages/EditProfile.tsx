@@ -102,6 +102,7 @@ export default function EditProfilePage() {
   const [projectTypes, setProjectTypes] = useState<string[]>([]);
   const [industries, setIndustries] = useState<string[]>([]);
   const [clientTypes, setClientTypes] = useState<string[]>([]);
+  const [clientLocations, setClientLocations] = useState<string[]>([]);
   const [teamSize, setTeamSize] = useState('');
   const [duration, setDuration] = useState('');
 
@@ -136,6 +137,7 @@ export default function EditProfilePage() {
     setProjectTypes(profile.preferred_project_types || []);
     setIndustries(profile.preferred_industries || []);
     setClientTypes(profile.preferred_client_types || []);
+    setClientLocations(profile.preferred_client_locations || []);
     setTeamSize(profile.preferred_team_size || '');
     setDuration(profile.project_duration_preference || '');
     setAvoidKeywords(profile.avoid_keywords || []);
@@ -199,6 +201,7 @@ export default function EditProfilePage() {
         preferred_project_types: projectTypes,
         preferred_industries: industries,
         preferred_client_types: clientTypes,
+        preferred_client_locations: clientLocations,
         preferred_team_size: teamSize || undefined,
         project_duration_preference: duration || undefined,
       });
@@ -371,6 +374,11 @@ export default function EditProfilePage() {
               <div>
                 <label className="text-xs font-medium text-gray-600 mb-1 block">Client Types</label>
                 <CheckboxGroup options={CLIENT_TYPES} values={clientTypes} onChange={setClientTypes} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Preferred Client Locations</label>
+                <p className="text-xs text-gray-400 mb-1">Countries/regions that get a score boost (e.g. "United States", "Canada")</p>
+                <TagInput values={clientLocations} onChange={setClientLocations} placeholder="Add country or region…" />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 mb-1 block">Team Size</label>

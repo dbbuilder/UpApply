@@ -464,18 +464,23 @@ async function fillMilestones(milestones: MilestoneData[]): Promise<{ success: b
 
   const initialCount = container.querySelectorAll('[data-test="milestone"], .up-fe-milestone, [data-test^="milestone-row"]').length;
 
-  // Add milestone rows until we have enough
+  const rowSelector = '[data-test="milestone"], .up-fe-milestone, [data-test^="milestone-row"]';
+
+  // Add milestone rows until we have enough, polling for each new row to appear
   for (let i = initialCount; i < milestones.length; i++) {
+    const expectedCount = i + 1;
     addBtn?.click();
-    await new Promise(r => setTimeout(r, 700)); // give React time to mount the new row
+    await new Promise<void>(resolve => {
+      const deadline = Date.now() + 3000;
+      const check = () => {
+        if (container.querySelectorAll(rowSelector).length >= expectedCount || Date.now() >= deadline) resolve();
+        else setTimeout(check, 100);
+      };
+      setTimeout(check, 100);
+    });
   }
 
-  // Extra settle time after all additions before querying inputs
-  if (milestones.length > initialCount) {
-    await new Promise(r => setTimeout(r, 300));
-  }
-
-  const rows = container.querySelectorAll<HTMLElement>('[data-test="milestone"], .up-fe-milestone, [data-test^="milestone-row"]');
+  const rows = container.querySelectorAll<HTMLElement>(rowSelector);
   let filled = 0;
 
   for (let i = 0; i < Math.min(milestones.length, rows.length); i++) {

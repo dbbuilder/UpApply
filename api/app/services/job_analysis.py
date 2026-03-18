@@ -35,11 +35,29 @@ _GEO_LOW = {
 }
 
 
-def _geo_modifier(location: Optional[str]) -> Tuple[int, Optional[str]]:
-    """Return (score_delta, label) based on client country."""
+def _geo_modifier(
+    location: Optional[str],
+    preferred_locations: Optional[List[str]] = None,
+) -> Tuple[int, Optional[str]]:
+    """Return (score_delta, label) based on client country.
+
+    If the user has set preferred_client_locations on their profile, tier
+    membership is determined by matching against those lists instead of the
+    hardcoded defaults.  Each entry should be a country/region name (case-
+    insensitive).  Unrecognised entries are silently ignored so the hardcoded
+    tiers still apply for countries not listed.
+    """
     if not location:
         return 0, None
     loc = location.lower().strip()
+
+    # Build effective tier sets: start from hardcoded, overlay user prefs
+    if preferred_locations:
+        user_preferred = {p.lower().strip() for p in preferred_locations}
+        # Countries the user listed as preferred get the full +15 boost
+        if any(c in loc for c in user_preferred):
+            return 15, f"{location} client (+15)"
+
     if any(c in loc for c in _GEO_US):
         return 15, "US client (+15)"
     if any(c in loc for c in _GEO_TIER2):
@@ -659,7 +677,7 @@ async def run_full_analysis(
 
     # Apply geo and language modifiers to the blended score
     client_location = (client_info or {}).get("location") if client_info else None
-    geo_delta, geo_label = _geo_modifier(client_location)
+    geo_delta, geo_label = _geo_modifier(client_location, preferred_locations=profile.preferred_client_locations)
     lang_delta, lang_label = _language_modifier(job_description)
     match_score = round(min(max(match_score + geo_delta + lang_delta, 0), 100), 1)
 

@@ -325,3 +325,28 @@ export function extractTexts(selectors: readonly string[]): string[] {
     .map(el => el.textContent?.trim())
     .filter((text): text is string => !!text);
 }
+
+/**
+ * Check which key selectors still resolve on the current page.
+ * Only active in dev builds — no-ops in production.
+ * Logs a warning for each selector group where no variant matches.
+ */
+export function checkSelectorHealth(): void {
+  if (!import.meta.env.DEV) return;
+
+  const keyFields: Array<keyof typeof SELECTORS> = [
+    'jobTitle',
+    'jobDescription',
+    'budgetAmount',
+    'clientLocation',
+    'coverLetterTextarea',
+  ];
+
+  for (const field of keyFields) {
+    const variants = SELECTORS[field] as readonly string[];
+    const found = variants.some(sel => !!document.querySelector(sel));
+    if (!found) {
+      console.warn(`[UpApply] Selector health: no match for "${field}" on ${window.location.pathname}`);
+    }
+  }
+}

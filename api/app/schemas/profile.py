@@ -59,6 +59,7 @@ class ProfilePreferences(BaseModel):
     preferred_industries: Optional[List[str]] = None
     preferred_team_size: Optional[str] = None
     preferred_client_types: Optional[List[str]] = None
+    preferred_client_locations: Optional[List[str]] = None
     project_duration_preference: Optional[str] = None
 
 
@@ -143,6 +144,7 @@ class ProfileCreate(BaseModel):
     preferred_industries: Optional[List[str]] = None
     preferred_team_size: Optional[str] = None
     preferred_client_types: Optional[List[str]] = None
+    preferred_client_locations: Optional[List[str]] = None
     project_duration_preference: Optional[str] = None
 
     # Deal breakers
@@ -218,6 +220,7 @@ class ProfileResponse(BaseModel):
     preferred_industries: Optional[List[str]] = None
     preferred_team_size: Optional[str] = None
     preferred_client_types: Optional[List[str]] = None
+    preferred_client_locations: Optional[List[str]] = None
     project_duration_preference: Optional[str] = None
 
     # Deal breakers

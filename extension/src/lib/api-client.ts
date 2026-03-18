@@ -585,6 +585,11 @@ class ApiClient {
       method: 'POST',
     });
   }
+
+  // Applications / Proposals corpus backfill
+  async backfillProposalsCorpus(): Promise<{ created: number; updated: number; skipped: number }> {
+    return this.request('/api/v1/applications/backfill-proposals', { method: 'POST' });
+  }
 }
 
 export class ApiError extends Error {
@@ -616,6 +621,7 @@ export interface Profile {
   preferred_industries?: string[];
   preferred_team_size?: string;
   preferred_client_types?: string[];
+  preferred_client_locations?: string[];
   project_duration_preference?: string;
   avoid_keywords?: string[];
   avoid_industries?: string[];
@@ -649,6 +655,7 @@ export interface ProfilePreferences {
   preferred_industries?: string[];
   preferred_team_size?: string;
   preferred_client_types?: string[];
+  preferred_client_locations?: string[];
   project_duration_preference?: string;
 }
 
