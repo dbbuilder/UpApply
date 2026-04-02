@@ -609,32 +609,61 @@ async def run_full_analysis(
     client_info: Optional[Dict] = None,
 ) -> AnalysisResult:
     """Run complete job analysis pipeline and return consolidated result."""
+    import logging
+    from tenacity import RetryError
+
+    logger = logging.getLogger(__name__)
+
     skill_matches, missing_skills = await analyze_skill_match(job_skills, profile)
 
-    # Generate embedding once and reuse for both memories and win lookup
+    # Generate embedding once and reuse for both memories and win lookup.
+    # Fall back gracefully when OpenAI is rate-limited so analysis still works.
     search_text = f"{job_description}\nRequired skills: {', '.join(job_skills)}"
-    query_embedding = await generate_embedding(search_text)
+    query_embedding: Optional[List[float]] = None
+    try:
+        query_embedding = await generate_embedding(search_text)
+    except (RetryError, Exception) as exc:
+        logger.warning("Embedding generation failed, falling back to rule-based scoring: %s", exc)
 
-    relevant_memories = await find_relevant_memories_with_embedding(
-        db=db,
-        user_id=user_id,
-        query_embedding=query_embedding,
-        limit=5,
-    )
+    relevant_memories: List[Dict] = []
+    similar_wins: List[Dict] = []
+    highly_rated: List[Dict] = []
 
-    similar_wins = await find_similar_wins(
-        db=db,
-        user_id=user_id,
-        query_embedding=query_embedding,
-        limit=3,
-    )
+    if query_embedding is not None:
+        relevant_memories = await find_relevant_memories_with_embedding(
+            db=db,
+            user_id=user_id,
+            query_embedding=query_embedding,
+            limit=5,
+        )
 
-    highly_rated = await find_similar_highly_rated(
-        db=db,
-        user_id=user_id,
-        query_embedding=query_embedding,
-        limit=3,
-    )
+        similar_wins = await find_similar_wins(
+            db=db,
+            user_id=user_id,
+            query_embedding=query_embedding,
+            limit=3,
+        )
+
+        highly_rated = await find_similar_highly_rated(
+            db=db,
+            user_id=user_id,
+            query_embedding=query_embedding,
+            limit=3,
+        )
+    else:
+        # Embedding unavailable — still fetch highly_rated (doesn't use vector ranking)
+        from app.models.job_review import JobReview
+        from sqlalchemy import select as sa_select
+        result = await db.execute(
+            sa_select(JobReview).where(
+                JobReview.user_id == user_id,
+                JobReview.user_rating >= 4,
+            ).order_by(JobReview.created_at.desc()).limit(3)
+        )
+        highly_rated = [
+            {"job_title": r.job_title, "user_comment": r.user_comment or "", "ai_score": r.ai_score, "chips": r.chips or []}
+            for r in result.scalars().all()
+        ]
 
     deal_breakers = check_deal_breakers(
         job_description=job_description,
