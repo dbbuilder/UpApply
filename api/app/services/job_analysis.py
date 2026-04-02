@@ -747,7 +747,15 @@ async def find_relevant_proposals(
     """
     # Create search text combining description and skills
     search_text = f"{job_description}\nRequired skills: {', '.join(job_skills)}"
-    query_embedding = await generate_embedding(search_text)
+    try:
+        from tenacity import RetryError
+        query_embedding = await generate_embedding(search_text)
+    except (RetryError, Exception) as exc:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "Embedding unavailable in find_relevant_proposals, returning empty: %s", exc
+        )
+        return []
 
     # Vector similarity search on past proposals
     # Optionally filter to only successful proposals

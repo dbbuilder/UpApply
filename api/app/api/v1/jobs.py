@@ -128,11 +128,15 @@ async def create_job(
     job_skills = job_data.skills_required or []
     client_info = job_data.client_info.model_dump() if job_data.client_info else None
 
-    # Generate embedding for the job
+    # Generate embedding for the job (best-effort)
     job_text = f"{job_data.title}\n{job_data.description}"
     if job_skills:
         job_text += f"\nSkills: {', '.join(job_skills)}"
-    embedding = await generate_embedding(job_text)
+    try:
+        from tenacity import RetryError
+        embedding = await generate_embedding(job_text)
+    except (RetryError, Exception):
+        embedding = None
 
     # Run full analysis
     result = await run_full_analysis(
@@ -283,11 +287,15 @@ async def import_bulk_jobs(
         if existing.scalar_one_or_none():
             continue
 
-        # Generate embedding
+        # Generate embedding (best-effort)
         job_text = f"{item.title}\n{item.description}"
         if item.skills:
             job_text += f"\nSkills: {', '.join(item.skills)}"
-        embedding = await generate_embedding(job_text)
+        try:
+            from tenacity import RetryError
+            embedding = await generate_embedding(job_text)
+        except (RetryError, Exception):
+            embedding = None
 
         # Run analysis
         ar = await run_full_analysis(
@@ -499,8 +507,12 @@ async def import_contracts(
         if f"contract_{c.contract_id}" not in existing_map
         or existing_map[f"contract_{c.contract_id}"].embedding is None
     ]
-    embed_tasks = [generate_embedding(descriptions[i]) for i in needs_embedding]
-    embeddings_list = await asyncio.gather(*embed_tasks) if embed_tasks else []
+    try:
+        from tenacity import RetryError
+        embed_tasks = [generate_embedding(descriptions[i]) for i in needs_embedding]
+        embeddings_list = await asyncio.gather(*embed_tasks) if embed_tasks else []
+    except (RetryError, Exception):
+        embeddings_list = [None] * len(needs_embedding)
     embedding_by_idx = dict(zip(needs_embedding, embeddings_list))
 
     for idx, contract in enumerate(request.contracts):
@@ -568,7 +580,11 @@ async def import_contracts(
                 prop.was_hired = True
                 prop.job_id = job.id
             else:
-                prop_embedding = await generate_embedding(contract.cover_letter_text.strip())
+                try:
+                    from tenacity import RetryError
+                    prop_embedding = await generate_embedding(contract.cover_letter_text.strip())
+                except (RetryError, Exception):
+                    prop_embedding = None
                 prop = Proposal(
                     user_id=current_user.id,
                     job_id=job.id,
@@ -700,11 +716,15 @@ async def generate_cover_letter_endpoint(
         job_skills = job_data.skills_required or []
         client_info = job_data.client_info.model_dump() if job_data.client_info else None
 
-        # Generate embedding
+        # Generate embedding (best-effort — None if OpenAI quota exhausted)
         job_text = f"{job_data.title}\n{job_data.description}"
         if job_skills:
             job_text += f"\nSkills: {', '.join(job_skills)}"
-        embedding = await generate_embedding(job_text)
+        try:
+            from tenacity import RetryError
+            embedding = await generate_embedding(job_text)
+        except (RetryError, Exception):
+            embedding = None
 
         # Run full analysis
         ar = await run_full_analysis(
@@ -984,9 +1004,17 @@ async def submit_cover_letter(
         prop = existing_prop.scalar_one_or_none()
         if prop:
             prop.cover_letter_text = request.submitted_text
-            prop.embedding = await generate_embedding(request.submitted_text)
+            try:
+                from tenacity import RetryError
+                prop.embedding = await generate_embedding(request.submitted_text)
+            except (RetryError, Exception):
+                pass  # Keep existing embedding; corpus entry still saved
         else:
-            embedding = await generate_embedding(request.submitted_text)
+            try:
+                from tenacity import RetryError
+                embedding = await generate_embedding(request.submitted_text)
+            except (RetryError, Exception):
+                embedding = None
             prop = Proposal(
                 user_id=current_user.id,
                 job_id=letter.job_id,
