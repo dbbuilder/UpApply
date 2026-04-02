@@ -55,6 +55,8 @@ class Settings(BaseSettings):
 
     # Monitoring
     sentry_dsn: str = ""
+    resend_api_key: str = ""
+    alert_email: str = "info@servicevision.io"
 
     # AI
     openai_api_key: str = ""
