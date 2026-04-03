@@ -9,10 +9,17 @@
 
 import { querySelector, SELECTORS } from './upwork-selectors';
 
+interface DraftMilestone {
+  description: string;
+  amount: string;  // raw string from the input (e.g. "500.00")
+  dueDate: string; // raw MM/DD/YYYY string from the date input
+}
+
 interface DraftData {
   coverLetter: string;
   bidAmount: string;
   screeningAnswers: Record<string, string>; // label -> answer
+  milestones: DraftMilestone[];
   savedAt: number;
 }
 
@@ -36,6 +43,47 @@ function getStorageKey(): string | null {
 function isApplyPage(): boolean {
   return window.location.href.includes('/proposals/') &&
          window.location.href.includes('/apply');
+}
+
+const MILESTONE_CONTAINER_SEL = '[data-test="milestones"], .up-fe-milestones, [data-test="milestone-list"]';
+const MILESTONE_ROW_SEL = '[data-test="milestone"], .up-fe-milestone, [data-test^="milestone-row"]';
+
+/**
+ * Read all milestone rows currently in the DOM.
+ */
+function collectMilestones(): DraftMilestone[] {
+  const container = document.querySelector(MILESTONE_CONTAINER_SEL);
+  if (!container) return [];
+
+  const rows = container.querySelectorAll<HTMLElement>(MILESTONE_ROW_SEL);
+  const result: DraftMilestone[] = [];
+
+  for (const row of rows) {
+    const descInput = row.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+      '[data-test="milestone-description"], input[placeholder*="escription" i], ' +
+      'textarea[placeholder*="escription" i], input[placeholder*="Describe" i], ' +
+      'input[placeholder*="milestone" i], input[placeholder*="work to be" i], ' +
+      'input[type="text"]:not([data-test="currency-input"])'
+    );
+    const amountInput = row.querySelector<HTMLInputElement>(
+      '[data-test="milestone-amount"] [data-test="currency-input"], [data-test="currency-input"], ' +
+      'input[type="number"], input[placeholder*="amount" i]'
+    );
+    const dateInput = row.querySelector<HTMLInputElement>(
+      '[data-test="milestone-due-date"] [data-test="input"], [data-test="milestone-due-date"] input, ' +
+      'input[placeholder*="date" i], input[placeholder*="MM/DD" i]'
+    );
+
+    const description = descInput?.value?.trim() || '';
+    const amount = amountInput?.value?.trim() || '';
+    const dueDate = dateInput?.value?.trim() || '';
+
+    if (description || amount) {
+      result.push({ description, amount, dueDate });
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -67,6 +115,7 @@ function collectFormData(): DraftData | null {
     coverLetter: coverLetterEl.value || '',
     bidAmount: bidEl?.value || '',
     screeningAnswers,
+    milestones: collectMilestones(),
     savedAt: Date.now(),
   };
 }
@@ -82,7 +131,7 @@ function saveDraft(): void {
   if (!data) return;
 
   // Only save if there's actual content
-  if (!data.coverLetter && !data.bidAmount && Object.keys(data.screeningAnswers).length === 0) {
+  if (!data.coverLetter && !data.bidAmount && Object.keys(data.screeningAnswers).length === 0 && !data.milestones.length) {
     return;
   }
 
@@ -154,6 +203,77 @@ function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: strin
 }
 
 /**
+ * Re-fill milestone rows from saved draft values.
+ * Adds extra rows if there are more milestones than currently rendered.
+ */
+async function restoreMilestones(milestones: DraftMilestone[]): Promise<boolean> {
+  if (!milestones.length) return false;
+
+  const container = document.querySelector(MILESTONE_CONTAINER_SEL);
+  if (!container) return false;
+
+  // Click "Add milestone" until we have enough rows
+  const addBtn = (
+    container.querySelector<HTMLElement>(
+      '.milestone-add, [data-ev-label="milestone_add"], [data-test="add-milestone"], ' +
+      'a[class*="add"], button[class*="add"]'
+    ) || document.querySelector<HTMLElement>('[data-test="add-milestone"]')
+  );
+
+  for (let i = container.querySelectorAll(MILESTONE_ROW_SEL).length; i < milestones.length; i++) {
+    const expected = i + 1;
+    addBtn?.click();
+    await new Promise<void>(resolve => {
+      const deadline = Date.now() + 3000;
+      const check = () => {
+        if (container.querySelectorAll(MILESTONE_ROW_SEL).length >= expected || Date.now() >= deadline) resolve();
+        else setTimeout(check, 100);
+      };
+      setTimeout(check, 100);
+    });
+  }
+
+  const rows = container.querySelectorAll<HTMLElement>(MILESTONE_ROW_SEL);
+  let filled = 0;
+
+  for (let i = 0; i < Math.min(milestones.length, rows.length); i++) {
+    const ms = milestones[i];
+    const row = rows[i];
+
+    const descInput = row.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+      '[data-test="milestone-description"], input[placeholder*="escription" i], ' +
+      'textarea[placeholder*="escription" i], input[placeholder*="Describe" i], ' +
+      'input[placeholder*="milestone" i], input[placeholder*="work to be" i], ' +
+      'input[type="text"]:not([data-test="currency-input"])'
+    );
+    if (descInput && ms.description && !descInput.value) {
+      setNativeValue(descInput as HTMLInputElement, ms.description);
+    }
+
+    const amountInput = row.querySelector<HTMLInputElement>(
+      '[data-test="milestone-amount"] [data-test="currency-input"], [data-test="currency-input"], ' +
+      'input[type="number"], input[placeholder*="amount" i]'
+    );
+    if (amountInput && ms.amount && !amountInput.value) {
+      setNativeValue(amountInput, ms.amount);
+    }
+
+    const dateInput = row.querySelector<HTMLInputElement>(
+      '[data-test="milestone-due-date"] [data-test="input"], [data-test="milestone-due-date"] input, ' +
+      'input[placeholder*="date" i], input[placeholder*="MM/DD" i]'
+    );
+    if (dateInput && ms.dueDate && !dateInput.value) {
+      dateInput.removeAttribute('inputmode');
+      setNativeValue(dateInput, ms.dueDate);
+    }
+
+    if (ms.description || ms.amount) filled++;
+  }
+
+  return filled > 0;
+}
+
+/**
  * Restore draft values into the form.
  * Returns true if any values were restored.
  */
@@ -200,6 +320,13 @@ function restoreDraft(draft: DraftData): boolean {
     });
   }
 
+  // Milestones: async restore, fire-and-forget — never blocks the sync restore path
+  if (draft.milestones?.length) {
+    restoreMilestones(draft.milestones).then(didRestore => {
+      if (didRestore) updateIndicator('restored');
+    }).catch(() => {});
+  }
+
   return restored;
 }
 
@@ -235,6 +362,25 @@ function attachSaveListeners(): void {
   questionInputs.forEach((input) => {
     input.addEventListener('input', debouncedSave);
   });
+
+  // Milestone inputs — attach to existing rows and watch for newly added rows
+  const attachMilestoneListeners = (root: Element | Document = document) => {
+    root.querySelectorAll<HTMLElement>(
+      `${MILESTONE_ROW_SEL} input, ${MILESTONE_ROW_SEL} textarea`
+    ).forEach((input) => {
+      if ((input as HTMLElement & { _upapplyDraftBound?: boolean })._upapplyDraftBound) return;
+      (input as HTMLElement & { _upapplyDraftBound?: boolean })._upapplyDraftBound = true;
+      input.addEventListener('input', debouncedSave);
+    });
+  };
+  attachMilestoneListeners();
+
+  // Watch for new milestone rows added by the "Add milestone" button
+  const milestoneContainer = document.querySelector(MILESTONE_CONTAINER_SEL);
+  if (milestoneContainer) {
+    new MutationObserver(() => attachMilestoneListeners(milestoneContainer))
+      .observe(milestoneContainer, { childList: true, subtree: true });
+  }
 
   console.log('UpApply: Draft save listeners attached', {
     coverLetter: !!coverLetterEl,
