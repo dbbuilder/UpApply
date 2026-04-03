@@ -145,6 +145,9 @@ function _resetNotifState(): void {
   document.getElementById('ua-contract-import-btn')?.remove();
   document.getElementById('ua-workroom-proposal-btn')?.remove();
   document.getElementById('ua-notif-progress')?.remove();
+  document.getElementById('ua-low-connects')?.remove();
+  _cachedConnectsBalance = undefined;
+  _lowConnectsAlertShown = false;
 }
 
 // Chip colour map — specific keywords get accent colours, budget is neutral
@@ -591,6 +594,7 @@ interface JobFetchResult {
   budgetType: 'hourly' | 'fixed' | null;
   skills: string[];
   clientCountry: string | null;
+  connectsRequired: number | null;
 }
 
 /**
@@ -620,6 +624,7 @@ async function _fetchJobViaGraphQL(jobUid: string): Promise<JobFetchResult | nul
       amount{ amount currencyCode }
       skills{ prettyName }
       client{ location{ country } }
+      connectsRequired
     }
   }`;
 
@@ -662,7 +667,8 @@ async function _fetchJobViaGraphQL(jobUid: string): Promise<JobFetchResult | nul
   const skills = skillsRaw.map(s => s.prettyName || '').filter(Boolean);
   const clientData = job.client as { location?: { country?: string } } | null;
   const clientCountry = clientData?.location?.country || null;
-  return { description, pageText: description, budgetAmount, budgetType, skills, clientCountry };
+  const connectsRequired = typeof job.connectsRequired === 'number' ? job.connectsRequired : null;
+  return { description, pageText: description, budgetAmount, budgetType, skills, clientCountry, connectsRequired };
 }
 
 // _fetchJobViaHTML removed: Upwork is CSR so the HTML shell is nearly empty,
@@ -682,7 +688,7 @@ async function _fetchJobData(jobUrl: string): Promise<JobFetchResult> {
       return result;
     }
   }
-  return { description: '', pageText: '', budgetAmount: null, budgetType: null, skills: [], clientCountry: null };
+  return { description: '', pageText: '', budgetAmount: null, budgetType: null, skills: [], clientCountry: null, connectsRequired: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -712,6 +718,95 @@ async function _getAuthToken(): Promise<string | null> {
 /** Called on SPA navigation to force re-read of token on next scoring run. */
 function _clearAuthTokenCache(): void {
   _contentAuthToken = undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Connects balance — fetched once per scoring session from Upwork's GraphQL
+// ---------------------------------------------------------------------------
+
+let _cachedConnectsBalance: number | null | undefined = undefined;
+let _lowConnectsAlertShown = false;
+
+async function _fetchUserConnects(): Promise<number | null> {
+  if (_cachedConnectsBalance !== undefined) return _cachedConnectsBalance;
+
+  const authToken = _getUpworkCookie('oauth2_global_js_token');
+  const xsrfToken = _getUpworkCookie('XSRF-TOKEN') || _getUpworkCookie('x-odesk-csrf-token');
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
+  };
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  if (xsrfToken) headers['X-XSRF-TOKEN'] = xsrfToken;
+
+  const query = `query userConnects {
+    currentUserConnectsBalance { connectsBalance }
+  }`;
+  try {
+    const resp = await fetch('/api/graphql/v1', {
+      method: 'POST', headers, credentials: 'include',
+      body: JSON.stringify({ operationName: 'userConnects', query }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!resp.ok) { _cachedConnectsBalance = null; return null; }
+    const json = await resp.json() as {
+      data?: { currentUserConnectsBalance?: { connectsBalance?: number } };
+    };
+    const balance = json?.data?.currentUserConnectsBalance?.connectsBalance ?? null;
+    _cachedConnectsBalance = balance;
+    logger.log('[UpApply] connects balance:', balance);
+    return balance;
+  } catch {
+    _cachedConnectsBalance = null;
+    return null;
+  }
+}
+
+/** Show a sticky banner when available connects < connectsRequired + HIGHEST_BID.
+ *  HIGHEST_BID = 6 represents the maximum extra connects a boosted proposal costs
+ *  on top of the base job requirement — so this fires before the user genuinely
+ *  can't submit at max bid on the next job. */
+function _checkLowConnects(available: number, connectsRequired: number): void {
+  const HIGHEST_BID = 6;
+  if (available >= connectsRequired + HIGHEST_BID) return; // enough — no alert
+  if (_lowConnectsAlertShown) return;
+  if (document.getElementById('ua-low-connects')) return;
+  _lowConnectsAlertShown = true;
+
+  const el = document.createElement('div');
+  el.id = 'ua-low-connects';
+  el.style.cssText =
+    'position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:2147483647;' +
+    'background:#7c2d12;color:#fff;' +
+    'font-size:12px;font-weight:600;font-family:-apple-system,sans-serif;' +
+    'padding:6px 16px;border-radius:20px;' +
+    'box-shadow:0 2px 10px rgba(0,0,0,0.35);white-space:nowrap;' +
+    'display:flex;align-items:center;gap:10px;';
+
+  const msg = document.createElement('span');
+  msg.textContent =
+    `⚠ Low connects: ${available} available — job needs ${connectsRequired}, max bid needs ${connectsRequired + HIGHEST_BID}`;
+
+  const buyLink = document.createElement('a');
+  buyLink.textContent = 'Buy more';
+  buyLink.style.cssText =
+    'color:#fde68a;text-decoration:underline;cursor:pointer;font-size:11px;flex-shrink:0;';
+  buyLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    window.open('https://www.upwork.com/nx/account-settings/connects', '_blank');
+  });
+
+  const dismiss = document.createElement('span');
+  dismiss.textContent = '×';
+  dismiss.style.cssText =
+    'cursor:pointer;opacity:0.7;font-size:15px;line-height:1;flex-shrink:0;';
+  dismiss.addEventListener('click', () => el.remove());
+
+  el.appendChild(msg);
+  el.appendChild(buyLink);
+  el.appendChild(dismiss);
+  document.body.appendChild(el);
 }
 
 /** Score a single item and update its badge. Never throws. */
@@ -775,7 +870,14 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
     const jobData = await _fetchJobData(item.jobUrl);
     const description = jobData.description || ''; // real description; don't fall back to title
     const scoreText = description || item.title;   // scoring API needs something to analyze
-    logger.log(`[UpApply] score FETCH  ${uid} done — descLen=${description.length} budget=${jobData.budgetAmount} source=${jobData.description ? 'graphql' : 'title-fallback'}`);
+    logger.log(`[UpApply] score FETCH  ${uid} done — descLen=${description.length} budget=${jobData.budgetAmount} connects=${jobData.connectsRequired} source=${jobData.description ? 'graphql' : 'title-fallback'}`);
+
+    // Fire-and-forget connects check — never blocks scoring
+    if (jobData.connectsRequired != null) {
+      _fetchUserConnects().then(balance => {
+        if (balance != null) _checkLowConnects(balance, jobData.connectsRequired!);
+      }).catch(() => {});
+    }
 
     // 4. Score via API directly (no SW message channel — eliminates zombie channel accumulation)
     logger.log(`[UpApply] score SCORE  ${uid}`);
@@ -1067,8 +1169,12 @@ function _injectScoreButton(): void {
   document.getElementById('ua-score-btn')?.remove();
 
   const btn = document.createElement('button');
+  btn.id = 'ua-score-btn';
   btn.type = 'button';
+  // Always fixed to the viewport — never inserted into Upwork's nav DOM,
+  // which can be inside a scrollable container on the notifications page.
   btn.style.cssText =
+    'position:fixed;top:64px;right:16px;z-index:2147483647;' +
     'background:#1d4ed8;color:#fff;border:none;cursor:pointer;' +
     'padding:5px 12px;border-radius:20px;font-size:11px;font-weight:600;' +
     'font-family:-apple-system,sans-serif;white-space:nowrap;' +
@@ -1083,21 +1189,7 @@ function _injectScoreButton(): void {
     _scoreButtonInjected = false;
     _processNotificationRows();
   });
-
-  // Prefer inserting as a nav sibling right after the bell <li>
-  const bellLi = document.querySelector('[data-cy="notifications-menu"]');
-  if (bellLi?.parentNode) {
-    const li = document.createElement('li');
-    li.id = 'ua-score-btn';
-    li.style.cssText = 'list-style:none;display:flex;align-items:center;padding:0 4px;';
-    li.appendChild(btn);
-    bellLi.parentNode.insertBefore(li, bellLi.nextSibling);
-  } else {
-    // Fallback: fixed just below the nav bar on the right
-    btn.id = 'ua-score-btn';
-    btn.style.cssText += 'position:fixed;top:64px;right:16px;z-index:2147483647;';
-    document.body.appendChild(btn);
-  }
+  document.body.appendChild(btn);
 }
 
 // ---------------------------------------------------------------------------
