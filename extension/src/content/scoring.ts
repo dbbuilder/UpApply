@@ -146,6 +146,7 @@ function _resetNotifState(): void {
   document.getElementById('ua-workroom-proposal-btn')?.remove();
   document.getElementById('ua-notif-progress')?.remove();
   document.getElementById('ua-low-connects')?.remove();
+  document.getElementById('ua-login-prompt')?.remove();
   _cachedConnectsBalance = undefined;
   _lowConnectsAlertShown = false;
 }
@@ -763,6 +764,38 @@ async function _fetchUserConnects(): Promise<number | null> {
   }
 }
 
+/** Show a one-time login prompt overlay when the user clicks Score without being
+ *  logged in to UpApply. Dismissible; auto-removes after 12s. */
+function _showLoginPrompt(): void {
+  if (document.getElementById('ua-login-prompt')) return;
+
+  const el = document.createElement('div');
+  el.id = 'ua-login-prompt';
+  el.style.cssText =
+    'position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:2147483647;' +
+    'background:#1e3a5f;color:#fff;' +
+    'font-size:13px;font-weight:600;font-family:-apple-system,sans-serif;' +
+    'padding:10px 18px;border-radius:22px;' +
+    'box-shadow:0 3px 14px rgba(0,0,0,0.4);white-space:nowrap;' +
+    'display:flex;align-items:center;gap:10px;';
+
+  const msg = document.createElement('span');
+  msg.textContent = '🔒 Open the UpApply extension and log in to score jobs';
+
+  const dismiss = document.createElement('span');
+  dismiss.textContent = '×';
+  dismiss.style.cssText =
+    'cursor:pointer;opacity:0.6;font-size:16px;line-height:1;flex-shrink:0;';
+  dismiss.addEventListener('click', () => el.remove());
+
+  el.appendChild(msg);
+  el.appendChild(dismiss);
+  document.body.appendChild(el);
+
+  // Auto-remove after 12s
+  setTimeout(() => el.remove(), 12_000);
+}
+
 /** Show a sticky banner when available connects < connectsRequired + HIGHEST_BID.
  *  HIGHEST_BID = 6 represents the maximum extra connects a boosted proposal costs
  *  on top of the base job requirement — so this fires before the user genuinely
@@ -1087,6 +1120,21 @@ async function _processNotifQueue(): Promise<void> {
 
   const items = _notifQueue.splice(0);
   logger.log(`[UpApply] queue START total=${items.length}`);
+
+  // Check auth before doing any work — show a login prompt and bail if missing
+  const token = await _getAuthToken();
+  if (!token) {
+    logger.warn('[UpApply] not logged in — aborting queue');
+    items.forEach(item => {
+      item.badge.textContent = '–';
+      item.badge.style.background = '#6b7280';
+      item.badge.title = 'UpApply: not logged in';
+    });
+    _showLoginPrompt();
+    _notifProcessing = false;
+    _hideProgressBar();
+    return;
+  }
 
   // Warm up the Render server before scoring — free tier spins down after
   // inactivity and cold-starts take 30–60s, longer than the 25s API timeout.
