@@ -1049,6 +1049,33 @@ function _observeRowForHud(row: Element): void {
   _hudObserver.observe(row);
 }
 
+/** Ping /health until the server responds (handles Render free-tier cold-starts).
+ *  Shows a "Waking up…" indicator; resolves true when alive, false on timeout. */
+async function _warmupServer(): Promise<boolean> {
+  const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL']
+    || 'https://upapply-api.onrender.com';
+
+  // Quick probe first — if already awake this resolves in < 200ms
+  try {
+    const probe = await fetch(`${apiBase}/health`, { signal: AbortSignal.timeout(3000) });
+    if (probe.ok) return true;
+  } catch { /* sleeping — fall through to slow warmup */ }
+
+  // Server is asleep: show indicator and wait up to 60s for cold-start
+  const bar = _getOrCreateProgressBar();
+  const label = bar.querySelector<HTMLElement>('#ua-notif-label')!;
+  label.textContent = 'UpApply: waking up server…';
+  bar.style.opacity = '1';
+
+  try {
+    const resp = await fetch(`${apiBase}/health`, { signal: AbortSignal.timeout(60_000) });
+    return resp.ok;
+  } catch {
+    label.textContent = 'UpApply: server unreachable';
+    return false;
+  }
+}
+
 async function _processNotifQueue(): Promise<void> {
   if (_notifProcessing) {
     logger.warn('[UpApply] _processNotifQueue called while already processing — skipped');
@@ -1060,6 +1087,21 @@ async function _processNotifQueue(): Promise<void> {
 
   const items = _notifQueue.splice(0);
   logger.log(`[UpApply] queue START total=${items.length}`);
+
+  // Warm up the Render server before scoring — free tier spins down after
+  // inactivity and cold-starts take 30–60s, longer than the 25s API timeout.
+  const alive = await _warmupServer();
+  if (!alive) {
+    logger.warn('[UpApply] server unreachable — aborting queue');
+    items.forEach(item => {
+      item.badge.textContent = '✕';
+      item.badge.style.background = '#6b7280';
+      item.badge.title = 'UpApply: server unreachable';
+    });
+    _notifProcessing = false;
+    _hideProgressBar();
+    return;
+  }
 
   try {
     for (const item of items) {
