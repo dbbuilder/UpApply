@@ -427,7 +427,7 @@ function fillScreeningQuestion(selector: string, answer: string): boolean {
     input.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
   } catch (error) {
-    console.error('UpApply: Error filling screening question:', error);
+    logger.error('Error filling screening question:', error);
     return false;
   }
 }
@@ -618,7 +618,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           sendResponse({ success: true, data: jobData });
         }
       } catch (err) {
-        console.error('UpApply: Extraction error:', err);
+        logger.error('Extraction error:', err);
         sendResponse({ success: false, error: String(err) });
       }
       return true;
@@ -778,7 +778,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const postingData = extractJobPostingData();
         sendResponse({ success: true, data: postingData });
       } catch (err) {
-        console.error('UpApply: Job posting extraction error:', err);
+        logger.error('Job posting extraction error:', err);
         sendResponse({ success: false, error: String(err) });
       }
       break;

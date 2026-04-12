@@ -118,7 +118,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               logger.log('UpApply Background: DEBUG - page headings:', response.debug);
             }
             if (chrome.runtime.lastError) {
-              console.error('UpApply Background: Error:', chrome.runtime.lastError.message);
+              logger.error('Extraction callback error:', chrome.runtime.lastError.message);
               sendResponse({ success: false, error: 'Content script not loaded. Please refresh the Upwork page and try again.' });
             } else if (response?.success) {
               currentJobData = response.data;
@@ -163,7 +163,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             content: message.content,
           }, (response) => {
             if (chrome.runtime.lastError) {
-              console.error('UpApply Background: Fill error:', chrome.runtime.lastError);
+              logger.error('Fill error:', chrome.runtime.lastError);
               sendResponse({ success: false, error: 'Content script not loaded. Please refresh the page.' });
             } else {
               sendResponse(response || { success: false, error: 'No response' });
@@ -783,7 +783,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const data = await extractFullJobInBackground(message.jobPostingUrl);
           sendResponse({ success: true, data });
         } catch (err) {
-          console.error('UpApply Background: Full job extraction failed:', err);
+          logger.error('Full job extraction failed:', err);
           sendResponse({ success: false, error: String(err) });
         }
       })();
@@ -796,7 +796,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const result = await downloadAttachment(message.url);
           sendResponse({ success: true, ...result });
         } catch (err) {
-          console.error('UpApply Background: Attachment download failed:', err);
+          logger.error('Attachment download failed:', err);
           sendResponse({ success: false, error: String(err) });
         }
       })();
@@ -877,7 +877,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await chrome.storage.local.set({ [cacheKey]: { score: data.match_score, chips, ts: Date.now() } });
           sendResponse({ success: true, score: data.match_score, chips });
         } catch (err) {
-          console.error('[UpApply] SCORE_JOB_WITH_DATA error:', err);
+          logger.error('SCORE_JOB_WITH_DATA error:', err);
           sendResponse({ success: false, error: String(err) });
         } finally {
           _activeScoringCount--;
@@ -1095,7 +1095,7 @@ async function extractFullJobInBackground(jobPostingUrl: string): Promise<{
       await chrome.tabs.remove(tab.id);
       logger.log('UpApply Background: Background tab closed');
     } catch (e) {
-      console.error('UpApply Background: Failed to close tab:', e);
+      logger.error('Failed to close background tab:', e);
     }
   }
 }
@@ -1144,7 +1144,7 @@ chrome.action.onClicked.addListener((tab) => {
 // Set up side panel behavior
 chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
-  .catch((error) => console.error(error));
+  .catch((error) => logger.error('setPanelBehavior failed:', error));
 
 // Debounce extraction per tab to avoid duplicate EXTRACT_JOB_DATA messages
 const pendingExtractions = new Map<number, ReturnType<typeof setTimeout>>();
