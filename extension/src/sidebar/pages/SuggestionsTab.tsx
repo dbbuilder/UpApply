@@ -7,8 +7,8 @@
  * - Approve / Pass with rejection reason picker
  * - Learning summary banner (autonomy level + approval rate)
  */
-import { useState, useEffect, useCallback } from 'react';
-import { apiClient, ApiError, JobQueueItem, JobQueueStats } from '../../lib/api-client';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { apiClient, ApiError, DraftSubmitResult, JobQueueItem, JobQueueStats } from '../../lib/api-client';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -91,14 +91,149 @@ function RejectPicker({ onConfirm, onCancel }: RejectPickerProps) {
   );
 }
 
+// ── Draft panel ───────────────────────────────────────────────────────────────
+
+interface DraftPanelProps {
+  item: JobQueueItem;
+  onRequestDraft: (id: string) => Promise<void>;
+  onSubmitEdit: (id: string, text: string) => Promise<DraftSubmitResult>;
+}
+
+function DraftPanel({ item, onRequestDraft, onSubmitEdit }: DraftPanelProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [editedText, setEditedText] = useState(item.draft_cover_letter || '');
+  const [requesting, setRequesting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitResult, setSubmitResult] = useState<DraftSubmitResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Sync textarea when draft arrives
+  useEffect(() => {
+    if (item.draft_cover_letter && !editedText) {
+      setEditedText(item.draft_cover_letter);
+    }
+  }, [item.draft_cover_letter]);
+
+  const handleRequestDraft = async () => {
+    setRequesting(true);
+    setError(null);
+    try {
+      await onRequestDraft(item.id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setRequesting(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!editedText) return;
+    await navigator.clipboard.writeText(editedText);
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await onSubmitEdit(item.id, editedText);
+      setSubmitResult(result);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Not approved — don't show
+  if (item.status !== 'approved') return null;
+
+  // Generating
+  if (item.draft_status === 'generating') {
+    return (
+      <div className="mt-1 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2 flex items-center gap-2">
+        <span className="text-[10px] text-indigo-500 animate-pulse">Generating draft…</span>
+      </div>
+    );
+  }
+
+  // No draft yet
+  if (!item.draft_cover_letter || item.draft_status === 'none') {
+    return (
+      <div className="mt-1">
+        <button
+          type="button"
+          disabled={requesting}
+          onClick={handleRequestDraft}
+          className="w-full py-1.5 text-[11px] font-medium bg-indigo-50 text-indigo-600
+            border border-indigo-100 rounded-xl hover:bg-indigo-100 active:scale-95
+            transition-all disabled:opacity-50"
+        >
+          {requesting ? '…' : '✏️ Generate Draft'}
+        </button>
+        {error && <p className="text-[10px] text-red-500 mt-1">{error}</p>}
+      </div>
+    );
+  }
+
+  // Draft ready or sent
+  return (
+    <div className="mt-1 space-y-1.5">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-1.5 bg-indigo-50
+          border border-indigo-100 rounded-xl text-[11px] font-medium text-indigo-600
+          hover:bg-indigo-100 transition-colors"
+      >
+        <span>
+          {item.draft_status === 'sent' ? '✓ Draft sent' : '✏️ Draft ready'}
+        </span>
+        <span className="text-[10px] text-indigo-400">{expanded ? '▲' : '▼'}</span>
+      </button>
+
+      {expanded && (
+        <div className="space-y-1.5">
+          <textarea
+            ref={textareaRef}
+            value={editedText}
+            onChange={(e) => setEditedText(e.target.value)}
+            rows={10}
+            className="w-full text-[11px] leading-relaxed font-mono p-2 border border-gray-200
+              rounded-xl resize-y focus:outline-none focus:border-indigo-300 bg-gray-50"
+          />
+          {item.draft_status !== 'sent' && (
+            <button
+              type="button"
+              disabled={submitting || !editedText}
+              onClick={handleCopy}
+              className="w-full py-1.5 text-[11px] font-medium bg-emerald-500 text-white
+                rounded-xl hover:bg-emerald-600 active:scale-95 transition-all disabled:opacity-50"
+            >
+              {submitting ? '…' : '📋 Copy & Mark Sent'}
+            </button>
+          )}
+          {submitResult && (
+            <p className="text-[10px] text-indigo-500 bg-indigo-50 px-2 py-1 rounded-lg leading-snug">
+              {submitResult.message}
+            </p>
+          )}
+          {error && (
+            <p className="text-[10px] text-red-500 bg-red-50 px-2 py-1 rounded-lg">{error}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Job card ──────────────────────────────────────────────────────────────────
 
 interface JobCardProps {
   item: JobQueueItem;
   onAction: (id: string, action: 'approve' | 'reject', reason?: string) => Promise<void>;
+  onRequestDraft: (id: string) => Promise<void>;
+  onSubmitEdit: (id: string, text: string) => Promise<DraftSubmitResult>;
 }
 
-function JobCard({ item, onAction }: JobCardProps) {
+function JobCard({ item, onAction, onRequestDraft, onSubmitEdit }: JobCardProps) {
   const [acting, setActing] = useState<'approve' | 'reject' | null>(null);
   const [showRejectPicker, setShowRejectPicker] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -241,6 +376,15 @@ function JobCard({ item, onAction }: JobCardProps) {
         </div>
       )}
 
+      {/* Draft panel — visible when approved */}
+      {item.status === 'approved' && (
+        <DraftPanel
+          item={item}
+          onRequestDraft={onRequestDraft}
+          onSubmitEdit={onSubmitEdit}
+        />
+      )}
+
       {/* Error */}
       {error && (
         <p className="text-[10px] text-red-500 bg-red-50 px-2 py-1 rounded-md">{error}</p>
@@ -256,14 +400,17 @@ interface LearningBannerProps {
 }
 
 function LearningBanner({ stats }: LearningBannerProps) {
-  const { all_time, recent_30, autonomy_label, score_threshold } = stats;
+  const { all_time, recent_30, autonomy_label, score_threshold, avg_edit_distance } = stats;
   const rate = recent_30.approval_rate;
   const rateStr = rate != null ? `${Math.round(rate * 100)}%` : '—';
   const approvedRecent = recent_30.approved;
   const totalRecent = recent_30.total;
 
   let message = '';
-  if (totalRecent >= 5) {
+  if (avg_edit_distance != null && all_time.proposals_submitted >= 3) {
+    const editPct = Math.round(avg_edit_distance * 100);
+    message = `Avg edit: ${editPct}% · Approval: ${rateStr} · ${all_time.proposals_submitted} drafts sent`;
+  } else if (totalRecent >= 5) {
     if (rate != null && rate >= 0.70) {
       message = `Great signal — approving ${rateStr} of recent suggestions. Threshold may lower.`;
     } else if (rate != null && rate < 0.35) {
@@ -330,8 +477,34 @@ export default function SuggestionsTab() {
     async (id: string, action: 'approve' | 'reject', reason?: string) => {
       const updated = await apiClient.actionJobQueueItem(id, action, reason);
       setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
-      // Refresh stats in background after each decision
       apiClient.getJobQueueStats().then(setStats).catch(() => {});
+    },
+    []
+  );
+
+  const handleRequestDraft = useCallback(async (id: string) => {
+    const updated = await apiClient.generateQueueItemDraft(id);
+    setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
+    // Poll once after 8 seconds to pick up completed draft
+    setTimeout(async () => {
+      try {
+        const all = await apiClient.getJobQueue();
+        setItems(all);
+      } catch { /* ignore */ }
+    }, 8000);
+  }, []);
+
+  const handleSubmitEdit = useCallback(
+    async (id: string, text: string) => {
+      const result = await apiClient.submitQueueItemEdit(id, text);
+      // Refresh queue + stats
+      const [all, queueStats] = await Promise.all([
+        apiClient.getJobQueue(),
+        apiClient.getJobQueueStats(),
+      ]);
+      setItems(all);
+      setStats(queueStats);
+      return result;
     },
     []
   );
@@ -415,7 +588,13 @@ export default function SuggestionsTab() {
 
       {/* Job cards */}
       {!loading && displayed.map((item) => (
-        <JobCard key={item.id} item={item} onAction={handleAction} />
+        <JobCard
+          key={item.id}
+          item={item}
+          onAction={handleAction}
+          onRequestDraft={handleRequestDraft}
+          onSubmitEdit={handleSubmitEdit}
+        />
       ))}
 
       {/* Footer hint */}

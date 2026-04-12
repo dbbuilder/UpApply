@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -58,6 +58,12 @@ class JobQueueItem(Base):
         nullable=True,
     )
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Draft cover letter (generated when job is approved at Level 3+)
+    # draft_status: none | generating | ready | sent
+    draft_cover_letter: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    draft_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default="none")
+    draft_generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

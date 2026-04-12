@@ -31,6 +31,17 @@ class JobQueueActionRequest(BaseModel):
     rejection_reason: Optional[str] = None
 
 
+class DraftSubmitRequest(BaseModel):
+    """Body for POST /api/v1/job-queue/{id}/submit-edit.
+
+    Called when the user copies/sends the (possibly edited) cover letter.
+    The server computes edit distance vs. the stored draft and records it.
+    """
+
+    final_text: str  # The text the user actually sent
+    auto_filled: bool = False  # True when extension auto-filled without user editing
+
+
 # ── Response schema ──────────────────────────────────────────────────────────
 
 class JobQueueItemResponse(BaseModel):
@@ -52,8 +63,17 @@ class JobQueueItemResponse(BaseModel):
     source: str
     source_query_id: Optional[str] = None
     rejection_reason: Optional[str] = None
+    draft_cover_letter: Optional[str] = None
+    draft_status: Optional[str] = None
+    draft_generated_at: Optional[datetime] = None
     created_at: datetime
     reviewed_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+
+class DraftSubmitResponse(BaseModel):
+    edit_distance_pct: float
+    avg_edit_distance: Optional[float]
+    message: str

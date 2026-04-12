@@ -195,3 +195,36 @@ async def record_suggestion_rejected(user_id: str, db: AsyncSession) -> dict:
     """Re-evaluate level after a rejection (no counter increment — already shown)."""
     ap = await get_or_create_autonomy_profile(user_id, db)
     return await evaluate_user(ap, db)
+
+
+async def record_proposal_drafted(user_id: str, db: AsyncSession) -> None:
+    """Increment proposals_submitted counter (used as drafted proxy for Level 3 gate)."""
+    ap = await get_or_create_autonomy_profile(user_id, db)
+    ap.proposals_submitted += 1
+    await db.flush()
+
+
+async def update_avg_edit_distance(
+    user_id: str, new_distance_pct: float, db: AsyncSession
+) -> dict:
+    """Update rolling average edit distance and re-evaluate level.
+
+    Uses an exponential moving average with alpha=0.3 so recent edits
+    matter more than old ones, but the metric is stable enough not to
+    flip levels on a single outlier.
+    """
+    ap = await get_or_create_autonomy_profile(user_id, db)
+
+    ALPHA = 0.3
+    if ap.avg_edit_distance is None:
+        ap.avg_edit_distance = new_distance_pct
+    else:
+        ap.avg_edit_distance = round(
+            ALPHA * new_distance_pct + (1 - ALPHA) * ap.avg_edit_distance, 4
+        )
+
+    logger.info(
+        "User %s: avg_edit_distance → %.1f%% (latest=%.1f%%)",
+        user_id, ap.avg_edit_distance * 100, new_distance_pct * 100,
+    )
+    return await evaluate_user(ap, db)

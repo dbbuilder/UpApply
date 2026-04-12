@@ -611,6 +611,17 @@ class ApiClient {
   async getJobQueueStats(): Promise<JobQueueStats> {
     return this.request<JobQueueStats>('/api/v1/job-queue/stats');
   }
+
+  async generateQueueItemDraft(id: string): Promise<JobQueueItem> {
+    return this.request<JobQueueItem>(`/api/v1/job-queue/${id}/draft`, { method: 'POST' });
+  }
+
+  async submitQueueItemEdit(id: string, finalText: string, autoFilled = false): Promise<DraftSubmitResult> {
+    return this.request<DraftSubmitResult>(`/api/v1/job-queue/${id}/submit-edit`, {
+      method: 'POST',
+      body: { final_text: finalText, auto_filled: autoFilled },
+    });
+  }
 }
 
 export class ApiError extends Error {
@@ -1252,6 +1263,10 @@ export interface JobQueueItem {
   source: string;
   source_query_id?: string;
   rejection_reason?: string;
+  /** none | generating | ready | sent */
+  draft_status?: string;
+  draft_cover_letter?: string;
+  draft_generated_at?: string;
   created_at: string;
   reviewed_at?: string;
   expires_at?: string;
@@ -1264,9 +1279,11 @@ export interface JobQueueStats {
   autonomy_label: string;
   level_since: string | null;
   score_threshold: number;
+  avg_edit_distance: number | null;
   all_time: {
     suggestions_shown: number;
     suggestions_approved: number;
+    proposals_submitted: number;
     approval_rate: number;
   };
   recent_30: {
@@ -1275,6 +1292,14 @@ export interface JobQueueStats {
     approval_rate: number | null;
   };
   top_rejection_reasons: Array<{ reason: string; count: number }>;
+}
+
+// ── Draft submit result ──────────────────────────────────────────────────────
+
+export interface DraftSubmitResult {
+  edit_distance_pct: number;
+  avg_edit_distance: number | null;
+  message: string;
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);
