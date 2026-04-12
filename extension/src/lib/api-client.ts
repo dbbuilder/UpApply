@@ -590,6 +590,23 @@ class ApiClient {
   async backfillProposalsCorpus(): Promise<{ created: number; updated: number; skipped: number }> {
     return this.request('/api/v1/applications/backfill-proposals', { method: 'POST' });
   }
+
+  // Job Queue (agent suggestions)
+  async getJobQueue(statusFilter?: string): Promise<JobQueueItem[]> {
+    const qs = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+    return this.request<JobQueueItem[]>(`/api/v1/job-queue${qs}`);
+  }
+
+  async actionJobQueueItem(
+    id: string,
+    action: 'approve' | 'reject',
+    rejectionReason?: string
+  ): Promise<JobQueueItem> {
+    return this.request<JobQueueItem>(`/api/v1/job-queue/${id}/action`, {
+      method: 'PUT',
+      body: { action, rejection_reason: rejectionReason },
+    });
+  }
 }
 
 export class ApiError extends Error {
@@ -1209,6 +1226,31 @@ export interface ProfileOptimizeResponse {
   may_2026_checklist: May2026Item[];
   cached: boolean;
   cached_at?: string;
+}
+
+// ── Job Queue (agent suggestions) ──────────────────────────────────────────
+
+export interface JobQueueItem {
+  id: string;
+  user_id: string;
+  upwork_url: string;
+  title: string;
+  description?: string;
+  skills?: string[];
+  budget_amount?: string;
+  budget_type?: string;
+  client_info?: Record<string, unknown>;
+  ai_score?: number;
+  ai_reasoning?: string;
+  chips?: string[];
+  /** suggested | approved | rejected | applied | expired */
+  status: string;
+  source: string;
+  source_query_id?: string;
+  rejection_reason?: string;
+  created_at: string;
+  reviewed_at?: string;
+  expires_at?: string;
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

@@ -1,37 +1,40 @@
 import { useAppStore } from '../store';
 
-type NavMode = 'me' | 'find' | 'apply' | 'queue' | 'track' | 'insights' | 'import';
+type NavMode = 'me' | 'find' | 'apply' | 'queue' | 'track' | 'insights' | 'import' | 'suggestions';
 
 type ViewType =
   | 'auth' | 'setup' | 'generator' | 'me' | 'find' | 'track' | 'queue' | 'go'
   | 'memories' | 'history' | 'analytics' | 'feedback' | 'skills' | 'profile'
-  | 'insights' | 'import';
+  | 'insights' | 'import' | 'suggestions';
 
-const ME_VIEWS: string[]       = ['me', 'profile', 'skills', 'memories', 'setup'];
-const FIND_VIEWS: string[]     = ['find', 'scored'];
-const QUEUE_VIEWS: string[]    = ['queue'];
-const TRACK_VIEWS: string[]    = ['track', 'history', 'analytics', 'feedback'];
-const INSIGHTS_VIEWS: string[] = ['insights'];
-const IMPORT_VIEWS: string[]   = ['import'];
+const ME_VIEWS: string[]          = ['me', 'profile', 'skills', 'memories', 'setup'];
+const FIND_VIEWS: string[]        = ['find', 'scored'];
+const QUEUE_VIEWS: string[]       = ['queue'];
+const TRACK_VIEWS: string[]       = ['track', 'history', 'analytics', 'feedback'];
+const INSIGHTS_VIEWS: string[]    = ['insights'];
+const IMPORT_VIEWS: string[]      = ['import'];
+const SUGGESTIONS_VIEWS: string[] = ['suggestions'];
 
 export function getNavMode(view: string): NavMode {
-  if (ME_VIEWS.includes(view))       return 'me';
-  if (FIND_VIEWS.includes(view))     return 'find';
-  if (QUEUE_VIEWS.includes(view))    return 'queue';
-  if (TRACK_VIEWS.includes(view))    return 'track';
-  if (INSIGHTS_VIEWS.includes(view)) return 'insights';
-  if (IMPORT_VIEWS.includes(view))   return 'import';
+  if (ME_VIEWS.includes(view))          return 'me';
+  if (FIND_VIEWS.includes(view))        return 'find';
+  if (QUEUE_VIEWS.includes(view))       return 'queue';
+  if (TRACK_VIEWS.includes(view))       return 'track';
+  if (INSIGHTS_VIEWS.includes(view))    return 'insights';
+  if (IMPORT_VIEWS.includes(view))      return 'import';
+  if (SUGGESTIONS_VIEWS.includes(view)) return 'suggestions';
   return 'apply';
 }
 
 export const HELP_CONTENT: Record<NavMode, string> = {
-  me:       'Edit your profile, skills, and memories that AI uses to write cover letters.',
-  find:     'Browse scored jobs. Stars = match strength. Rate jobs to train your profile.',
-  apply:    'Score the current Upwork job and generate a tailored cover letter.',
-  queue:    'Jobs you\'ve saved or are actively applying to. Use Apply → to open with your cover letter pre-filled.',
-  track:    'Pipeline funnel, work log, proposal history, and activity trends.',
-  insights: 'AI analysis of your proposal history — what\'s landing, what to target, and how to position.',
-  import:   'Sync — corpus overview (totals, funnel stats) and import tools to seed from Upwork.',
+  me:          'Edit your profile, skills, and memories that AI uses to write cover letters.',
+  find:        'Browse scored jobs. Stars = match strength. Rate jobs to train your profile.',
+  apply:       'Score the current Upwork job and generate a tailored cover letter.',
+  queue:       'Jobs you\'ve saved or are actively applying to. Use Apply → to open with your cover letter pre-filled.',
+  track:       'Pipeline funnel, work log, proposal history, and activity trends.',
+  insights:    'AI analysis of your proposal history — what\'s landing, what to target, and how to position.',
+  import:      'Sync — corpus overview (totals, funnel stats) and import tools to seed from Upwork.',
+  suggestions: 'Agent-discovered jobs. Approve to move to Queue, pass to skip. Runs daily at 6am PT.',
 };
 
 interface NavItem {
@@ -48,13 +51,13 @@ export default function PersistentNav() {
   const hasJob = !!currentJob?.title;
 
   const items: NavItem[] = [
-    { mode: 'me',       icon: '👤', label: 'Me',      targetView: 'me' },
-    { mode: 'find',     icon: '🔍', label: 'Find',    targetView: 'find' },
-    { mode: 'apply',    icon: '✍️', label: 'Apply',   targetView: 'generator', dot: hasJob },
-    { mode: 'queue',    icon: '📋', label: 'Queue',   targetView: 'queue' },
-    { mode: 'track',    icon: '📊', label: 'Track',   targetView: 'track' },
-    { mode: 'insights', icon: '💡', label: 'Insight', targetView: 'insights' },
-    { mode: 'import',   icon: '⇅',  label: 'Sync',    targetView: 'import' },
+    { mode: 'me',          icon: '👤', label: 'Me',       targetView: 'me' },
+    { mode: 'find',        icon: '🔍', label: 'Find',     targetView: 'find' },
+    { mode: 'apply',       icon: '✍️', label: 'Apply',    targetView: 'generator', dot: hasJob },
+    { mode: 'suggestions', icon: '🤖', label: 'Agent',    targetView: 'suggestions' },
+    { mode: 'queue',       icon: '📋', label: 'Queue',    targetView: 'queue' },
+    { mode: 'track',       icon: '📊', label: 'Track',    targetView: 'track' },
+    { mode: 'import',      icon: '⇅',  label: 'Sync',     targetView: 'import' },
   ];
 
   return (

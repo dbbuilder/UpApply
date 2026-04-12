@@ -17,6 +17,7 @@ import TrackPage from './pages/TrackPage';
 import QueuePage from './pages/QueuePage';
 import InsightsPage from './pages/InsightsPage';
 import ImportPage from './pages/ImportPage';
+import SuggestionsTab from './pages/SuggestionsTab';
 
 
 function App() {
@@ -68,6 +69,8 @@ function App() {
         return <InsightsPage />;
       case 'import':
         return <ImportPage />;
+      case 'suggestions':
+        return <SuggestionsTab />;
       default:
         return <GeneratorPage />;
     }

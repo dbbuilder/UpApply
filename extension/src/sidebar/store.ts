@@ -38,7 +38,7 @@ interface AppState {
   applicationId: string | null;
 
   // UI
-  currentView: 'auth' | 'setup' | 'generator' | 'me' | 'find' | 'track' | 'queue' | 'go' | 'memories' | 'history' | 'analytics' | 'feedback' | 'skills' | 'profile' | 'insights' | 'import';
+  currentView: 'auth' | 'setup' | 'generator' | 'me' | 'find' | 'track' | 'queue' | 'go' | 'memories' | 'history' | 'analytics' | 'feedback' | 'skills' | 'profile' | 'insights' | 'import' | 'suggestions';
   setupStep: number;
 
   // Actions
