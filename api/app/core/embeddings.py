@@ -1,5 +1,7 @@
 """OpenAI embeddings service for semantic search."""
+import hashlib
 import logging
+from collections import OrderedDict
 from typing import List
 from openai import AsyncOpenAI, RateLimitError
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -10,6 +12,16 @@ logger = logging.getLogger(__name__)
 
 # Guard: only send the quota alert once per process lifetime.
 _quota_alert_sent = False
+
+# In-process LRU cache for embeddings — eliminates duplicate API calls within
+# the same server instance (e.g. job saved then immediately re-analyzed).
+# Keyed on sha256 of the first 2 000 chars of the input text.
+_EMBED_CACHE: "OrderedDict[str, List[float]]" = OrderedDict()
+_EMBED_CACHE_MAX = 512
+
+
+def _embed_cache_key(text: str) -> str:
+    return hashlib.sha256(text[:2000].encode()).hexdigest()
 
 
 def _send_quota_alert() -> None:
@@ -55,8 +67,8 @@ def get_openai_client() -> AsyncOpenAI:
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=10),
 )
-async def generate_embedding(text: str) -> List[float]:
-    """Generate embedding for a text string using OpenAI."""
+async def _generate_embedding_api(text: str) -> List[float]:
+    """Call the OpenAI embeddings API (retried on transient errors)."""
     client = get_openai_client()
     try:
         response = await client.embeddings.create(
@@ -69,6 +81,21 @@ async def generate_embedding(text: str) -> List[float]:
         if "insufficient_quota" in str(exc):
             _send_quota_alert()
         raise
+
+
+async def generate_embedding(text: str) -> List[float]:
+    """Generate embedding for a text string, with in-process LRU caching."""
+    key = _embed_cache_key(text)
+    if key in _EMBED_CACHE:
+        _EMBED_CACHE.move_to_end(key)
+        return _EMBED_CACHE[key]
+
+    result = await _generate_embedding_api(text)
+
+    _EMBED_CACHE[key] = result
+    if len(_EMBED_CACHE) > _EMBED_CACHE_MAX:
+        _EMBED_CACHE.popitem(last=False)
+    return result
 
 
 @retry(

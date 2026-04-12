@@ -138,7 +138,8 @@ async def create_job(
     except (RetryError, Exception):
         embedding = None
 
-    # Run full analysis
+    # Run full analysis — pass the embedding we just computed so run_full_analysis
+    # doesn't make a second identical OpenAI call for the same text.
     result = await run_full_analysis(
         db=db,
         user_id=current_user.id,
@@ -148,6 +149,7 @@ async def create_job(
         budget_amount=job_data.budget_amount,
         budget_min=job_data.budget_min,
         client_info=client_info,
+        precomputed_embedding=embedding,
     )
 
     # Build analysis dict

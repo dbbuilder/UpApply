@@ -607,8 +607,13 @@ async def run_full_analysis(
     budget_amount: Optional[str] = None,
     budget_min: Optional[float] = None,
     client_info: Optional[Dict] = None,
+    precomputed_embedding: Optional[List[float]] = None,
 ) -> AnalysisResult:
-    """Run complete job analysis pipeline and return consolidated result."""
+    """Run complete job analysis pipeline and return consolidated result.
+
+    Pass ``precomputed_embedding`` to skip the OpenAI embedding call when the
+    caller has already computed one (e.g. create_job stores it on the Job row).
+    """
     import logging
     from tenacity import RetryError
 
@@ -616,14 +621,15 @@ async def run_full_analysis(
 
     skill_matches, missing_skills = await analyze_skill_match(job_skills, profile)
 
-    # Generate embedding once and reuse for both memories and win lookup.
+    # Use caller-supplied embedding when available; otherwise generate one.
     # Fall back gracefully when OpenAI is rate-limited so analysis still works.
-    search_text = f"{job_description}\nRequired skills: {', '.join(job_skills)}"
-    query_embedding: Optional[List[float]] = None
-    try:
-        query_embedding = await generate_embedding(search_text)
-    except (RetryError, Exception) as exc:
-        logger.warning("Embedding generation failed, falling back to rule-based scoring: %s", exc)
+    query_embedding: Optional[List[float]] = precomputed_embedding
+    if query_embedding is None:
+        search_text = f"{job_description}\nRequired skills: {', '.join(job_skills)}"
+        try:
+            query_embedding = await generate_embedding(search_text)
+        except (RetryError, Exception) as exc:
+            logger.warning("Embedding generation failed, falling back to rule-based scoring: %s", exc)
 
     relevant_memories: List[Dict] = []
     similar_wins: List[Dict] = []

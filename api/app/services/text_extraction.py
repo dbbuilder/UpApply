@@ -5,6 +5,7 @@ import logging
 from typing import Tuple
 
 from app.core.embeddings import get_openai_client
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ async def extract_text_from_image(file_bytes: bytes, content_type: str = "image/
 
     try:
         response = await client.chat.completions.create(
-            model="gpt-4o",
+            model=settings.default_model,
             messages=[
                 {
                     "role": "user",
