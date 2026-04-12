@@ -21,6 +21,7 @@ const PAGE_TITLES: Record<string, string> = {
   feedback: '📊 Track',
   insights: '💡 Insights',
   import: '⇅ Sync',
+  suggestions: '🤖 Agent',
 };
 
 const UPWORK = 'https://www.upwork.com';
@@ -36,13 +37,14 @@ const UPWORK_LINKS = [
 ];
 
 const NAV_ITEMS = [
-  { icon: '👤', label: 'Me',      view: 'me' },
-  { icon: '🔍', label: 'Find',    view: 'find' },
-  { icon: '✍️', label: 'Apply',   view: 'generator' },
-  { icon: '📋', label: 'Queue',   view: 'queue' },
-  { icon: '📊', label: 'Track',   view: 'track' },
-  { icon: '💡', label: 'Insight', view: 'insights' },
-  { icon: '⇅',  label: 'Sync',    view: 'import' },
+  { icon: '👤', label: 'Me',         view: 'me' },
+  { icon: '🔍', label: 'Find',       view: 'find' },
+  { icon: '✍️', label: 'Apply',      view: 'generator' },
+  { icon: '🤖', label: 'Agent',      view: 'suggestions' },
+  { icon: '📋', label: 'Queue',      view: 'queue' },
+  { icon: '📊', label: 'Track',      view: 'track' },
+  { icon: '💡', label: 'Insight',    view: 'insights' },
+  { icon: '⇅',  label: 'Sync',       view: 'import' },
 ] as const;
 
 function navigateTo(url: string, onDone?: () => void) {

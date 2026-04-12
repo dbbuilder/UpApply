@@ -345,7 +345,7 @@ async def score_job_with_llm(
     similar_wins: List[Dict],
     highly_rated: List[Dict] = [],
 ) -> Tuple[Optional[float], Optional[str]]:
-    """Use gpt-4o-mini to score 0-100 with win rubric. Returns (None, None) on failure."""
+    """Use gpt-4.1-nano to score 0-100 with win rubric. Returns (None, None) on failure."""
     import json
     from openai import AsyncOpenAI
     from app.core.config import settings
@@ -403,7 +403,7 @@ Respond with JSON only (no markdown): {{"score": <integer 0-100>, "reason": "<on
 
     try:
         response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=settings.scoring_model,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             max_tokens=80,

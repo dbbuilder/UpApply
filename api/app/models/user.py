@@ -54,6 +54,18 @@ class User(Base):
     search_queries: Mapped[List["SearchQuery"]] = relationship(
         "SearchQuery", back_populates="user", cascade="all, delete-orphan"
     )
+    job_queue_items: Mapped[List["JobQueueItem"]] = relationship(
+        "JobQueueItem", back_populates="user", cascade="all, delete-orphan"
+    )
+    autonomy_profile: Mapped[Optional["UserAutonomyProfile"]] = relationship(
+        "UserAutonomyProfile", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+    outcome_events: Mapped[List["OutcomeEvent"]] = relationship(
+        "OutcomeEvent", back_populates="user", cascade="all, delete-orphan"
+    )
+    guardrail_config: Mapped[Optional["UserGuardrailConfig"]] = relationship(
+        "UserGuardrailConfig", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
 
 
 class UserProfile(Base):

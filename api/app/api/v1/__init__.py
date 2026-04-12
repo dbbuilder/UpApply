@@ -14,6 +14,10 @@ from app.api.v1.search_queries import router as search_queries_router
 from app.api.v1.job_reviews import router as job_reviews_router
 from app.api.v1.work_logs import router as work_logs_router
 from app.api.v1.import_chatgpt import router as import_chatgpt_router
+from app.api.v1.job_queue import router as job_queue_router
+from app.api.v1.guardrails import router as guardrails_router
+from app.api.v1.agent import router as agent_router
+from app.api.v1.admin import router as admin_router
 
 router = APIRouter()
 
@@ -30,3 +34,7 @@ router.include_router(search_queries_router, prefix="/search-queries", tags=["Se
 router.include_router(job_reviews_router, prefix="/job-reviews", tags=["Job Reviews"])
 router.include_router(work_logs_router, prefix="/work-logs", tags=["Work Logs"])
 router.include_router(import_chatgpt_router, prefix="/import", tags=["Import"])
+router.include_router(job_queue_router, prefix="/job-queue", tags=["Job Queue"])
+router.include_router(guardrails_router, prefix="/guardrails", tags=["Guardrails"])
+router.include_router(agent_router, prefix="/agent", tags=["Agent"])
+router.include_router(admin_router, prefix="/admin", tags=["Admin"])

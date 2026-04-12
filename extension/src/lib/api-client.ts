@@ -590,6 +590,86 @@ class ApiClient {
   async backfillProposalsCorpus(): Promise<{ created: number; updated: number; skipped: number }> {
     return this.request('/api/v1/applications/backfill-proposals', { method: 'POST' });
   }
+
+  // Job Queue (agent suggestions)
+  async getJobQueue(statusFilter?: string): Promise<JobQueueItem[]> {
+    const qs = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+    return this.request<JobQueueItem[]>(`/api/v1/job-queue${qs}`);
+  }
+
+  async actionJobQueueItem(
+    id: string,
+    action: 'approve' | 'reject',
+    rejectionReason?: string
+  ): Promise<JobQueueItem> {
+    return this.request<JobQueueItem>(`/api/v1/job-queue/${id}/action`, {
+      method: 'PUT',
+      body: { action, rejection_reason: rejectionReason },
+    });
+  }
+
+  async getJobQueueStats(): Promise<JobQueueStats> {
+    return this.request<JobQueueStats>('/api/v1/job-queue/stats');
+  }
+
+  async generateQueueItemDraft(id: string): Promise<JobQueueItem> {
+    return this.request<JobQueueItem>(`/api/v1/job-queue/${id}/draft`, { method: 'POST' });
+  }
+
+  async submitQueueItemEdit(id: string, finalText: string, autoFilled = false): Promise<DraftSubmitResult> {
+    return this.request<DraftSubmitResult>(`/api/v1/job-queue/${id}/submit-edit`, {
+      method: 'POST',
+      body: { final_text: finalText, auto_filled: autoFilled },
+    });
+  }
+
+  async confirmQueueItemSubmit(
+    id: string,
+    opts: { bid_amount?: number; connects_spent?: number; upwork_proposal_id?: string }
+  ): Promise<ConfirmSubmitResult> {
+    return this.request<ConfirmSubmitResult>(`/api/v1/job-queue/${id}/confirm-submit`, {
+      method: 'POST',
+      body: opts,
+    });
+  }
+
+  async reportProposalResponse(
+    id: string,
+    responseType: 'viewed' | 'responded' | 'invited' | 'declined',
+    upworkProposalId?: string
+  ): Promise<JobQueueItem> {
+    return this.request<JobQueueItem>(`/api/v1/job-queue/${id}/proposal-response`, {
+      method: 'POST',
+      body: { response_type: responseType, upwork_proposal_id: upworkProposalId },
+    });
+  }
+
+  // ── Guardrails ──────────────────────────────────────────────────────────────
+
+  async getGuardrails(): Promise<GuardrailConfig> {
+    return this.request<GuardrailConfig>('/api/v1/guardrails');
+  }
+
+  async updateGuardrails(update: GuardrailConfigUpdate): Promise<GuardrailConfig> {
+    return this.request<GuardrailConfig>('/api/v1/guardrails', {
+      method: 'PUT',
+      body: update,
+    });
+  }
+
+  async checkGuardrails(): Promise<GuardrailCheckResult> {
+    return this.request<GuardrailCheckResult>('/api/v1/guardrails/check');
+  }
+
+  // ── Agent digest ─────────────────────────────────────────────────────────────
+
+  async getAgentDigest(): Promise<AgentDigest> {
+    return this.request<AgentDigest>('/api/v1/agent/digest');
+  }
+
+  async getAgentRoi(): Promise<Pick<AgentDigest, 'autonomy' | 'learning' | 'roi_30d' | 'pipeline'> & { autonomy_level: number; autonomy_label: string }> {
+    return this.request('/api/v1/agent/roi');
+  }
 }
 
 export class ApiError extends Error {
@@ -1209,6 +1289,154 @@ export interface ProfileOptimizeResponse {
   may_2026_checklist: May2026Item[];
   cached: boolean;
   cached_at?: string;
+}
+
+// ── Job Queue (agent suggestions) ──────────────────────────────────────────
+
+export interface JobQueueItem {
+  id: string;
+  user_id: string;
+  upwork_url: string;
+  title: string;
+  description?: string;
+  skills?: string[];
+  budget_amount?: string;
+  budget_type?: string;
+  client_info?: Record<string, unknown>;
+  ai_score?: number;
+  ai_reasoning?: string;
+  chips?: string[];
+  /** suggested | approved | rejected | applied | expired */
+  status: string;
+  source: string;
+  source_query_id?: string;
+  rejection_reason?: string;
+  /** none | generating | ready | sent */
+  draft_status?: string;
+  draft_cover_letter?: string;
+  draft_generated_at?: string;
+  created_at: string;
+  reviewed_at?: string;
+  expires_at?: string;
+}
+
+// ── Job Queue Stats ─────────────────────────────────────────────────────────
+
+export interface JobQueueStats {
+  autonomy_level: number;
+  autonomy_label: string;
+  level_since: string | null;
+  score_threshold: number;
+  avg_edit_distance: number | null;
+  all_time: {
+    suggestions_shown: number;
+    suggestions_approved: number;
+    proposals_submitted: number;
+    approval_rate: number;
+  };
+  recent_30: {
+    total: number;
+    approved: number;
+    approval_rate: number | null;
+  };
+  top_rejection_reasons: Array<{ reason: string; count: number }>;
+}
+
+// ── Draft submit result ──────────────────────────────────────────────────────
+
+export interface DraftSubmitResult {
+  edit_distance_pct: number;
+  avg_edit_distance: number | null;
+  message: string;
+}
+
+// ── Confirm submit result ────────────────────────────────────────────────────
+
+export interface ConfirmSubmitResult {
+  status: string;
+  message: string;
+  autonomy_level: number;
+}
+
+// ── Guardrail config ─────────────────────────────────────────────────────────
+
+export interface GuardrailConfig {
+  enabled: boolean;
+  max_proposals_per_day: number;
+  min_connects_reserve: number;
+  max_bid_hourly: number | null;
+  max_bid_fixed: number | null;
+  min_score_threshold: number;
+  pause_start_hour: number | null;
+  pause_end_hour: number | null;
+  connects_balance: number | null;
+  digest_email: string | null;
+}
+
+export interface GuardrailConfigUpdate {
+  enabled?: boolean;
+  max_proposals_per_day?: number;
+  min_connects_reserve?: number;
+  max_bid_hourly?: number | null;
+  max_bid_fixed?: number | null;
+  min_score_threshold?: number;
+  pause_start_hour?: number | null;
+  pause_end_hour?: number | null;
+  connects_balance?: number;
+  digest_email?: string | null;
+}
+
+export interface GuardrailCheckResult {
+  passed: boolean;
+  violations: Array<{ guard: string; reason: string }>;
+  warnings: string[];
+}
+
+// ── Agent digest ─────────────────────────────────────────────────────────────
+
+export interface AgentDigest {
+  generated_at: string;
+  autonomy: {
+    level: number;
+    label: string;
+    days_at_level: number;
+    score_threshold: number;
+    next_level_hint: string | null;
+    locked: boolean;
+  };
+  today: {
+    surfaced: number;
+    approved: number;
+    rejected: number;
+    drafted: number;
+    submitted: number;
+    responses: number;
+  };
+  pipeline: {
+    pending_review: number;
+    drafts_ready: number;
+    awaiting_response: number;
+  };
+  learning: {
+    approval_rate: number;
+    avg_edit_distance: number | null;
+    response_rate: number;
+    all_time_submitted: number;
+    all_time_responded: number;
+  };
+  roi_30d: {
+    connects_invested: number;
+    submissions: number;
+    responses: number;
+    response_rate: number | null;
+    connects_balance: number | null;
+    min_reserve: number | null;
+  };
+  recent_activity: Array<{
+    event: string;
+    job_title: string | null;
+    at: string;
+  }>;
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);
