@@ -23,6 +23,8 @@ class JobQueueCreate(BaseModel):
     chips: Optional[List[str]] = Field(default_factory=list)
     source: str = "agent"
     source_query_id: Optional[str] = None
+    # If set, item is created with status=pre_filtered; rejection_reason stores this value
+    filter_reason: Optional[str] = None
 
 
 class JobQueueActionRequest(BaseModel):
@@ -84,6 +86,8 @@ class JobQueueItemResponse(BaseModel):
     source: str
     source_query_id: Optional[str] = None
     rejection_reason: Optional[str] = None
+    # When status="pre_filtered", rejection_reason holds the filter reason code
+    # e.g. "blocked_country (India)", "budget_too_low ($300 < $500)"
     draft_cover_letter: Optional[str] = None
     draft_status: Optional[str] = None
     draft_generated_at: Optional[datetime] = None

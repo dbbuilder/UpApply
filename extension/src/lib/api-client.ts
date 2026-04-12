@@ -616,6 +616,10 @@ class ApiClient {
     return this.request<JobQueueItem>(`/api/v1/job-queue/${id}/draft`, { method: 'POST' });
   }
 
+  async scoreAnyway(id: string): Promise<JobQueueItem> {
+    return this.request<JobQueueItem>(`/api/v1/job-queue/${id}/score-anyway`, { method: 'POST' });
+  }
+
   async submitQueueItemEdit(id: string, finalText: string, autoFilled = false): Promise<DraftSubmitResult> {
     return this.request<DraftSubmitResult>(`/api/v1/job-queue/${id}/submit-edit`, {
       method: 'POST',
@@ -1306,10 +1310,11 @@ export interface JobQueueItem {
   ai_score?: number;
   ai_reasoning?: string;
   chips?: string[];
-  /** suggested | approved | rejected | applied | expired */
+  /** suggested | approved | rejected | applied | expired | pre_filtered */
   status: string;
   source: string;
   source_query_id?: string;
+  /** For pre_filtered items: the filter reason code, e.g. "blocked_country (India)" */
   rejection_reason?: string;
   /** none | generating | ready | sent */
   draft_status?: string;

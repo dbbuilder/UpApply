@@ -47,7 +47,7 @@ from agent.learning_engine import contribute_signal, winning_proposal_to_memory
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-VALID_STATUSES = {"suggested", "approved", "rejected", "applied", "expired"}
+VALID_STATUSES = {"suggested", "approved", "rejected", "applied", "expired", "pre_filtered"}
 VALID_ACTIONS = {"approve", "reject"}
 
 
@@ -104,6 +104,7 @@ async def create_job_queue_item(
     if existing:
         return _to_response(existing)
 
+    is_pre_filtered = bool(data.filter_reason)
     item = JobQueueItem(
         id=str(uuid4()),
         user_id=current_user.id,
@@ -117,7 +118,8 @@ async def create_job_queue_item(
         ai_score=data.ai_score,
         ai_reasoning=data.ai_reasoning,
         chips=data.chips or [],
-        status="suggested",
+        status="pre_filtered" if is_pre_filtered else "suggested",
+        rejection_reason=data.filter_reason if is_pre_filtered else None,
         source=data.source,
         source_query_id=data.source_query_id,
         draft_status="none",
@@ -127,10 +129,11 @@ async def create_job_queue_item(
     await db.flush()
     await db.refresh(item)
 
-    await _record_outcome(db, current_user.id, item.id, "suggested")
-    ap = await get_or_create_autonomy_profile(current_user.id, db)
-    ap.suggestions_shown += 1
-    await db.flush()
+    if not is_pre_filtered:
+        await _record_outcome(db, current_user.id, item.id, "suggested")
+        ap = await get_or_create_autonomy_profile(current_user.id, db)
+        ap.suggestions_shown += 1
+        await db.flush()
 
     logger.info(
         "Added job_queue item %s for user %s (score=%.1f)",
@@ -586,6 +589,105 @@ async def confirm_submit(
 # ── POST /api/v1/job-queue/{id}/proposal-response ──────────────────────────
 
 VALID_RESPONSE_TYPES = {"viewed", "responded", "invited", "declined"}
+
+
+# ── POST /api/v1/job-queue/{id}/score-anyway ──────────────────────────────────
+
+@router.post("/{item_id}/score-anyway", response_model=JobQueueItemResponse)
+async def score_anyway(
+    item_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Override a pre-filter block and score the job against the user's profile.
+
+    Transitions status: pre_filtered → suggested
+    Clears rejection_reason (which held the filter reason code).
+    Triggers background scoring — ai_score/ai_reasoning will be populated shortly.
+    """
+    result = await db.execute(
+        select(JobQueueItem).where(
+            JobQueueItem.id == item_id,
+            JobQueueItem.user_id == current_user.id,
+        )
+    )
+    item = result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Queue item not found.")
+
+    if item.status != "pre_filtered":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Item is not pre-filtered (current status: {item.status}).",
+        )
+
+    item.status = "suggested"
+    item.rejection_reason = None
+    await db.flush()
+
+    await _record_outcome(db, current_user.id, item_id, "score_anyway")
+    ap = await get_or_create_autonomy_profile(current_user.id, db)
+    ap.suggestions_shown += 1
+    await db.flush()
+    await db.refresh(item)
+
+    # Score in background — will update ai_score / ai_reasoning on the item
+    background_tasks.add_task(
+        _score_pre_filtered_background,
+        item_id=item_id,
+        user_id=current_user.id,
+    )
+
+    logger.info("score-anyway for item %s (user %s)", item_id, current_user.id)
+    return _to_response(item)
+
+
+async def _score_pre_filtered_background(item_id: str, user_id: str) -> None:
+    """Background task: score a pre-filtered job that the user chose to evaluate."""
+    from app.core.database import async_session_maker as AsyncSessionLocal
+    from app.services.job_analysis import run_full_analysis
+
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await db.execute(
+                select(JobQueueItem).where(JobQueueItem.id == item_id)
+            )
+            item = result.scalar_one_or_none()
+            if item is None:
+                return
+
+            profile = await _get_user_profile(user_id, db)
+            if profile is None:
+                logger.warning("No profile for user %s — cannot score pre-filtered job", user_id)
+                return
+
+            ar = await run_full_analysis(
+                title=item.title,
+                description=item.description or "",
+                skills=item.skills or [],
+                budget=item.budget_amount,
+                client_info=item.client_info,
+                profile=profile,
+                db=db,
+            )
+
+            item.ai_score = ar.match_score
+            # Build a brief reasoning string from the analysis result
+            strengths_str = ", ".join(ar.strengths[:2]) if ar.strengths else ""
+            item.ai_reasoning = (
+                f"Score: {ar.match_score}. "
+                + (f"Strengths: {strengths_str}. " if strengths_str else "")
+                + (f"Missing: {', '.join(ar.missing_skills[:3])}." if ar.missing_skills else "")
+            ).strip()
+
+            await db.commit()
+            logger.info(
+                "Scored pre-filtered item %s (user %s): score=%.1f",
+                item_id, user_id, ar.match_score,
+            )
+        except Exception as exc:
+            logger.error("Background scoring failed for item %s: %s", item_id, exc)
 
 
 @router.post("/{item_id}/proposal-response", response_model=JobQueueItemResponse)

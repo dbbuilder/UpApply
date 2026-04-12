@@ -30,6 +30,42 @@ function scoreColor(score: number): string {
   return 'bg-red-100 text-red-600';
 }
 
+/** Return Tailwind classes for a pre-filter reason chip based on its prefix. */
+function filterReasonChipClass(reason: string): string {
+  if (reason.startsWith('blocked_country')) return 'bg-orange-100 text-orange-700';
+  if (reason.startsWith('budget_too_low') || reason.startsWith('hourly_top_too_low'))
+    return 'bg-amber-100 text-amber-700';
+  if (reason.startsWith('avoid_keyword')) return 'bg-red-100 text-red-600';
+  // too_old, score_cap_reached
+  return 'bg-gray-100 text-gray-500';
+}
+
+/** Convert a raw filter_reason code into a human-readable label. */
+function formatFilterReason(reason: string): string {
+  if (reason.startsWith('blocked_country')) {
+    const country = reason.match(/\(([^)]+)\)/)?.[1];
+    return country ? `📍 ${country}` : 'Geo blocked';
+  }
+  if (reason.startsWith('budget_too_low')) {
+    const detail = reason.match(/\(([^)]+)\)/)?.[1];
+    return detail ? `💰 Budget ${detail}` : 'Budget too low';
+  }
+  if (reason.startsWith('hourly_top_too_low')) {
+    const detail = reason.match(/\(([^)]+)\)/)?.[1];
+    return detail ? `⏱ ${detail}` : 'Hourly too low';
+  }
+  if (reason.startsWith('too_old')) {
+    const detail = reason.match(/\(([^)]+)\)/)?.[1];
+    return detail ? `🕐 ${detail} old` : 'Too old';
+  }
+  if (reason.startsWith('avoid_keyword')) {
+    const kw = reason.match(/\(([^)]+)\)/)?.[1];
+    return kw ? `🚫 "${kw.replace(/'/g, '')}"` : 'Blocked keyword';
+  }
+  if (reason.startsWith('score_cap_reached')) return '🔢 Score cap';
+  return reason;
+}
+
 function formatRelative(isoStr: string): string {
   const d = new Date(isoStr);
   const diffMs = Date.now() - d.getTime();
@@ -557,6 +593,73 @@ function JobCard({ item, onAction, onRequestDraft, onSubmitEdit, onConfirmSubmit
   );
 }
 
+// ── Filtered card ─────────────────────────────────────────────────────────────
+
+interface FilteredCardProps {
+  item: JobQueueItem;
+  onScoreAnyway: (id: string) => Promise<void>;
+}
+
+function FilteredCard({ item, onScoreAnyway }: FilteredCardProps) {
+  const [scoring, setScoring] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const reason = item.rejection_reason ?? 'filtered';
+
+  const handleScoreAnyway = async () => {
+    setScoring(true);
+    setError(null);
+    try {
+      await onScoreAnyway(item.id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+      setScoring(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl p-2.5 space-y-1.5">
+      {/* Title */}
+      <a
+        href={item.upwork_url}
+        target="_blank"
+        rel="noreferrer"
+        className="text-[11px] font-medium text-gray-700 hover:text-emerald-700 leading-snug line-clamp-2 block"
+      >
+        {item.title}
+      </a>
+
+      {/* Filter reason chip + budget */}
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium leading-none ${filterReasonChipClass(reason)}`}
+        >
+          {formatFilterReason(reason)}
+        </span>
+        {item.budget_amount && (
+          <span className="text-[10px] text-gray-400">
+            {item.budget_amount}{item.budget_type === 'hourly' ? '/hr' : ''}
+          </span>
+        )}
+      </div>
+
+      {/* Score anyway button */}
+      <button
+        type="button"
+        disabled={scoring}
+        onClick={handleScoreAnyway}
+        className="w-full py-1 text-[10px] font-medium text-indigo-600 bg-indigo-50
+          hover:bg-indigo-100 rounded-lg active:scale-95 transition-all disabled:opacity-50"
+      >
+        {scoring ? 'Scoring…' : 'Score anyway'}
+      </button>
+
+      {error && (
+        <p className="text-[10px] text-red-500 bg-red-50 px-2 py-0.5 rounded">{error}</p>
+      )}
+    </div>
+  );
+}
+
 // ── Digest panel ──────────────────────────────────────────────────────────────
 
 interface DigestPanelProps {
@@ -684,6 +787,7 @@ export default function SuggestionsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterMode>('pending');
+  const [showFiltered, setShowFiltered] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -779,11 +883,26 @@ export default function SuggestionsTab() {
     return result;
   }, [items]);
 
-  const displayed = filter === 'pending'
-    ? items.filter((i) => i.status === 'suggested')
-    : items;
+  const handleScoreAnyway = useCallback(async (id: string) => {
+    const updated = await apiClient.scoreAnyway(id);
+    setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
+    // Poll once after 8s to pick up the scored result
+    setTimeout(async () => {
+      try {
+        const all = await apiClient.getJobQueue();
+        setItems(all);
+      } catch { /* ignore */ }
+    }, 8000);
+  }, []);
 
-  const pendingCount = items.filter((i) => i.status === 'suggested').length;
+  const nonFiltered = items.filter((i) => i.status !== 'pre_filtered');
+  const filteredItems = items.filter((i) => i.status === 'pre_filtered');
+
+  const displayed = filter === 'pending'
+    ? nonFiltered.filter((i) => i.status === 'suggested')
+    : nonFiltered;
+
+  const pendingCount = nonFiltered.filter((i) => i.status === 'suggested').length;
 
   return (
     <div className="p-4 space-y-3">
@@ -880,6 +999,35 @@ export default function SuggestionsTab() {
           onConfirmSubmit={handleConfirmSubmit}
         />
       ))}
+
+      {/* Filtered section — collapsible */}
+      {!loading && filteredItems.length > 0 && (
+        <div className="space-y-1.5">
+          <button
+            type="button"
+            onClick={() => setShowFiltered((v) => !v)}
+            className="w-full flex items-center justify-between px-2 py-1.5
+              bg-gray-50 border border-gray-100 rounded-xl text-[10px] text-gray-500
+              hover:bg-gray-100 transition-colors"
+          >
+            <span className="font-medium">
+              {showFiltered ? '▾' : '▸'} Pre-filtered ({filteredItems.length})
+            </span>
+            <span className="text-gray-400">blocked by geo / budget / keyword</span>
+          </button>
+          {showFiltered && (
+            <div className="space-y-1.5 pl-1">
+              {filteredItems.map((item) => (
+                <FilteredCard
+                  key={item.id}
+                  item={item}
+                  onScoreAnyway={handleScoreAnyway}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Footer hint */}
       {!loading && items.length > 0 && (

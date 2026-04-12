@@ -233,11 +233,34 @@ class JobDiscoveryAgent:
         ]
         return json.dumps(active)
 
+    async def _add_pre_filtered_to_queue(self, job: RawJob, filter_reason: str) -> None:
+        """Store a pre-filtered job in the queue with status=pre_filtered.
+
+        These items are visible in the extension's "Filtered" section where the
+        user can choose to score them anyway.  Errors are non-fatal.
+        """
+        payload = {
+            "upwork_url": job.upwork_url,
+            "title": job.title,
+            "description": job.description[:800],
+            "skills": job.skills,
+            "budget_amount": job.budget_amount,
+            "budget_type": job.budget_type,
+            "source": "agent",
+            "filter_reason": filter_reason,
+        }
+        try:
+            await self._api_post("/api/v1/job-queue", payload)
+        except Exception as exc:
+            logger.debug("Could not store pre-filtered job '%s': %s", job.title[:60], exc)
+
     async def _tool_fetch_jobs_from_rss(self, url_params: str, limit: int = 20) -> str:
         """Fetch jobs from the Upwork RSS feed for given url_params.
 
         Applies cheap pre-filters (age, budget, avoid-keywords) before returning
         jobs to the agent — filtered jobs never reach analyze_job.
+        Jobs that fail pre-filter are stored in the queue with status=pre_filtered
+        so the user can inspect reasons and optionally score them anyway.
         """
         jobs = await fetch_jobs_from_rss(url_params, limit=limit)
         self._stats["jobs_fetched"] += len(jobs)
@@ -248,6 +271,8 @@ class JobDiscoveryAgent:
             if skip_reason:
                 self._stats["jobs_pre_filtered"] += 1
                 logger.debug("Pre-filtered '%s': %s", j.title[:60], skip_reason)
+                # Store in queue so user can inspect and optionally score
+                await self._add_pre_filtered_to_queue(j, skip_reason)
                 continue
             result.append({
                 "title": j.title,
@@ -524,7 +549,7 @@ class JobDiscoveryAgent:
             try:
                 resp = await http.get(
                     f"{self.api_base}/api/v1/profile",
-                    headers={"Authorization": f"Bearer {token}"},
+                    headers={"Authorization": f"Bearer {self.token}"},
                 )
                 if resp.status_code == 200:
                     profile = resp.json()
