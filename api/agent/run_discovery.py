@@ -129,9 +129,10 @@ async def run() -> None:
             total_queued += result.jobs_queued
             total_errors += len(result.errors)
             logger.info(
-                "User %s: fetched=%d skipped=%d scored=%d queued=%d errors=%d",
+                "User %s: fetched=%d pre_filtered=%d skipped=%d scored=%d queued=%d errors=%d",
                 user_id,
                 result.jobs_fetched,
+                result.jobs_pre_filtered,
                 result.jobs_skipped_duplicate,
                 result.jobs_scored,
                 result.jobs_queued,

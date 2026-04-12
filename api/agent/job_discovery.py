@@ -18,13 +18,15 @@ Usage:
 """
 import json
 import logging
+import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import anthropic
 import httpx
 
-from agent.rss_adapter import fetch_jobs_from_rss
+from agent.rss_adapter import RawJob, fetch_jobs_from_rss
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,11 @@ logger = logging.getLogger(__name__)
 DISCOVERY_MODEL = "claude-sonnet-4-6"
 MAX_QUEUED_PER_RUN = 15
 DEFAULT_SCORE_THRESHOLD = 55.0
+MAX_JOB_AGE_DAYS = 7       # skip jobs older than this
+MAX_JOBS_TO_SCORE = 40     # hard cap on LLM calls per run across all queries
+
+# Extracts the first dollar figure from a budget string like "$500", "$25/hr"
+_BUDGET_VALUE_RE = re.compile(r'\$\s*([\d,]+(?:\.\d+)?)')
 
 SYSTEM_PROMPT = """\
 You are the UpApply Job Discovery Agent. Your job is to find relevant freelance
@@ -77,6 +84,7 @@ class DiscoveryResult:
 
     user_id: str
     jobs_fetched: int
+    jobs_pre_filtered: int
     jobs_skipped_duplicate: int
     jobs_scored: int
     jobs_queued: int
@@ -95,6 +103,10 @@ class JobDiscoveryAgent:
         self.token = token
         self._client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
         self._http: Optional[httpx.AsyncClient] = None
+        # Loaded once at run() start from the user's profile
+        self._min_budget: Optional[float] = None
+        self._min_hourly: Optional[float] = None
+        self._avoid_keywords: list[str] = []
 
     def _auth_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.token}"}
@@ -115,6 +127,51 @@ class JobDiscoveryAgent:
         resp.raise_for_status()
         return resp.json()
 
+    # ── Pre-filter (no LLM, runs before analyze_job) ──────────────────────
+
+    def _pre_filter(self, job: RawJob) -> Optional[str]:
+        """Return a skip reason string if the job should not be scored, else None.
+
+        Checks (in order):
+          1. Age — posted_date older than MAX_JOB_AGE_DAYS
+          2. Budget floor — fixed price below minimum_budget, hourly below minimum_hourly_rate
+          3. Avoid keywords — any of profile.avoid_keywords in title or description
+          4. Per-run LLM cap — stop once MAX_JOBS_TO_SCORE have been sent to analyze_job
+        """
+        # 1. Age gate
+        if job.posted_date:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=MAX_JOB_AGE_DAYS)
+            posted = job.posted_date
+            if posted.tzinfo is None:
+                posted = posted.replace(tzinfo=timezone.utc)
+            if posted < cutoff:
+                return f"too_old ({(datetime.now(timezone.utc) - posted).days}d)"
+
+        # 2. Budget gate
+        if job.budget_amount:
+            m = _BUDGET_VALUE_RE.search(job.budget_amount)
+            if m:
+                raw_val = float(m.group(1).replace(",", ""))
+                if job.budget_type == "hourly":
+                    if self._min_hourly and raw_val < self._min_hourly:
+                        return f"hourly_too_low (${raw_val:.0f}/hr < ${self._min_hourly:.0f})"
+                else:
+                    if self._min_budget and raw_val < self._min_budget:
+                        return f"budget_too_low (${raw_val:.0f} < ${self._min_budget:.0f})"
+
+        # 3. Avoid keywords (title + description, case-insensitive)
+        if self._avoid_keywords:
+            text = f"{job.title} {job.description}".lower()
+            for kw in self._avoid_keywords:
+                if kw.lower() in text:
+                    return f"avoid_keyword ({kw!r})"
+
+        # 4. Per-run LLM cap
+        if self._stats.get("jobs_scored", 0) >= MAX_JOBS_TO_SCORE:
+            return f"score_cap_reached ({MAX_JOBS_TO_SCORE})"
+
+        return None
+
     # ── Tool implementations ───────────────────────────────────────────────
 
     async def _tool_get_search_queries(self) -> str:
@@ -132,10 +189,22 @@ class JobDiscoveryAgent:
         return json.dumps(active)
 
     async def _tool_fetch_jobs_from_rss(self, url_params: str, limit: int = 20) -> str:
-        """Fetch jobs from the Upwork RSS feed for given url_params."""
+        """Fetch jobs from the Upwork RSS feed for given url_params.
+
+        Applies cheap pre-filters (age, budget, avoid-keywords) before returning
+        jobs to the agent — filtered jobs never reach analyze_job.
+        """
         jobs = await fetch_jobs_from_rss(url_params, limit=limit)
-        result = [
-            {
+        self._stats["jobs_fetched"] += len(jobs)
+
+        result = []
+        for j in jobs:
+            skip_reason = self._pre_filter(j)
+            if skip_reason:
+                self._stats["jobs_pre_filtered"] += 1
+                logger.debug("Pre-filtered '%s': %s", j.title[:60], skip_reason)
+                continue
+            result.append({
                 "title": j.title,
                 "description": j.description[:800],
                 "upwork_url": j.upwork_url,
@@ -143,10 +212,12 @@ class JobDiscoveryAgent:
                 "budget_amount": j.budget_amount,
                 "budget_type": j.budget_type,
                 "posted_date": j.posted_date.isoformat() if j.posted_date else None,
-            }
-            for j in jobs
-        ]
-        self._stats["jobs_fetched"] += len(result)
+            })
+
+        logger.info(
+            "RSS fetch: %d fetched, %d passed pre-filter, %d dropped",
+            len(jobs), len(result), len(jobs) - len(result),
+        )
         return json.dumps(result)
 
     async def _tool_check_already_queued(self, upwork_url: str) -> str:
@@ -396,11 +467,31 @@ class JobDiscoveryAgent:
         """
         self._stats: dict = {
             "jobs_fetched": 0,
+            "jobs_pre_filtered": 0,
             "jobs_skipped_duplicate": 0,
             "jobs_scored": 0,
             "jobs_queued": 0,
             "errors": [],
         }
+
+        # Load profile thresholds for pre-filtering (non-fatal if unavailable)
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            try:
+                resp = await http.get(
+                    f"{self.api_base}/api/v1/profile",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if resp.status_code == 200:
+                    profile = resp.json()
+                    self._min_budget = profile.get("minimum_budget")
+                    self._min_hourly = profile.get("minimum_hourly_rate")
+                    self._avoid_keywords = profile.get("avoid_keywords") or []
+                    logger.debug(
+                        "Pre-filter profile loaded: min_budget=%s min_hourly=%s avoid_kw=%d",
+                        self._min_budget, self._min_hourly, len(self._avoid_keywords),
+                    )
+            except Exception as exc:
+                logger.warning("Could not load profile for pre-filtering: %s", exc)
 
         system = SYSTEM_PROMPT.format(
             threshold=score_threshold,
@@ -436,9 +527,10 @@ class JobDiscoveryAgent:
                 if response.stop_reason == "end_turn":
                     logger.info(
                         "Discovery run complete for user %s after %d turns: "
-                        "fetched=%d skipped=%d scored=%d queued=%d",
+                        "fetched=%d pre_filtered=%d skipped=%d scored=%d queued=%d",
                         user_id, turn + 1,
                         self._stats["jobs_fetched"],
+                        self._stats["jobs_pre_filtered"],
                         self._stats["jobs_skipped_duplicate"],
                         self._stats["jobs_scored"],
                         self._stats["jobs_queued"],
@@ -481,6 +573,7 @@ class JobDiscoveryAgent:
         return DiscoveryResult(
             user_id=user_id,
             jobs_fetched=self._stats["jobs_fetched"],
+            jobs_pre_filtered=self._stats["jobs_pre_filtered"],
             jobs_skipped_duplicate=self._stats["jobs_skipped_duplicate"],
             jobs_scored=self._stats["jobs_scored"],
             jobs_queued=self._stats["jobs_queued"],
