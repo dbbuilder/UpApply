@@ -5,7 +5,7 @@ type NavMode = 'me' | 'find' | 'apply' | 'queue' | 'track' | 'insights' | 'impor
 type ViewType =
   | 'auth' | 'setup' | 'generator' | 'me' | 'find' | 'track' | 'queue' | 'go'
   | 'memories' | 'history' | 'analytics' | 'feedback' | 'skills' | 'profile'
-  | 'insights' | 'import' | 'suggestions';
+  | 'insights' | 'import' | 'suggestions' | 'guardrails';
 
 const ME_VIEWS: string[]          = ['me', 'profile', 'skills', 'memories', 'setup'];
 const FIND_VIEWS: string[]        = ['find', 'scored'];
@@ -13,7 +13,7 @@ const QUEUE_VIEWS: string[]       = ['queue'];
 const TRACK_VIEWS: string[]       = ['track', 'history', 'analytics', 'feedback'];
 const INSIGHTS_VIEWS: string[]    = ['insights'];
 const IMPORT_VIEWS: string[]      = ['import'];
-const SUGGESTIONS_VIEWS: string[] = ['suggestions'];
+const SUGGESTIONS_VIEWS: string[] = ['suggestions', 'guardrails'];
 
 export function getNavMode(view: string): NavMode {
   if (ME_VIEWS.includes(view))          return 'me';

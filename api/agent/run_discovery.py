@@ -32,7 +32,9 @@ from jose import jwt
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
+from agent.autonomy_governor import evaluate_user, get_or_create_autonomy_profile
 from agent.job_discovery import JobDiscoveryAgent
+from agent.proposal_submission_agent import run_autonomous_prep
 
 logging.basicConfig(
     level=logging.INFO,
@@ -108,8 +110,6 @@ async def run() -> None:
     async with session_factory() as session:
         user_ids = await _get_active_user_ids(session)
 
-    await engine.dispose()
-
     if not user_ids:
         logger.info("No active users with completed profiles — nothing to do")
         return
@@ -118,6 +118,7 @@ async def run() -> None:
 
     total_queued = 0
     total_errors = 0
+    total_prepped = 0
 
     for user_id in user_ids:
         token = _mint_service_jwt(user_id)
@@ -142,10 +143,46 @@ async def run() -> None:
         except Exception as exc:
             logger.error("Discovery failed for user %s: %s", user_id, exc, exc_info=True)
             total_errors += 1
+            continue
 
+        # Run daily autonomy evaluation and Level 5 autonomous prep
+        async with session_factory() as session:
+            try:
+                # Daily level evaluation (adjusts score_threshold ±2-3 pts)
+                ap = await get_or_create_autonomy_profile(user_id, session)
+                level_change = await evaluate_user(ap, session)
+                if level_change["level_before"] != level_change["level_after"]:
+                    logger.info(
+                        "User %s: autonomy level %d → %d (daily eval)",
+                        user_id, level_change["level_before"], level_change["level_after"],
+                    )
+
+                # Level 5+: autonomous submission prep
+                ap = await get_or_create_autonomy_profile(user_id, session)
+                if ap.level >= 5:
+                    prep_result = await run_autonomous_prep(user_id, session)
+                    total_prepped += prep_result.items_prepped
+                    if prep_result.items_prepped > 0:
+                        logger.info(
+                            "User %s: autonomous prep — prepped=%d blocked=%d skipped=%d",
+                            user_id,
+                            prep_result.items_prepped,
+                            prep_result.items_blocked,
+                            prep_result.skipped_low_score,
+                        )
+
+                await session.commit()
+            except Exception as exc:
+                logger.error(
+                    "Post-discovery processing failed for user %s: %s",
+                    user_id, exc, exc_info=True,
+                )
+                await session.rollback()
+
+    await engine.dispose()
     logger.info(
-        "Discovery run complete. total_queued=%d total_errors=%d",
-        total_queued, total_errors,
+        "Discovery run complete. total_queued=%d total_prepped=%d total_errors=%d",
+        total_queued, total_prepped, total_errors,
     )
 
 

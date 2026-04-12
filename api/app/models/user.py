@@ -63,6 +63,9 @@ class User(Base):
     outcome_events: Mapped[List["OutcomeEvent"]] = relationship(
         "OutcomeEvent", back_populates="user", cascade="all, delete-orphan"
     )
+    guardrail_config: Mapped[Optional["UserGuardrailConfig"]] = relationship(
+        "UserGuardrailConfig", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
 
 
 class UserProfile(Base):

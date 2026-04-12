@@ -8,7 +8,8 @@
  * - Learning summary banner (autonomy level + approval rate)
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { apiClient, ApiError, ConfirmSubmitResult, DraftSubmitResult, JobQueueItem, JobQueueStats } from '../../lib/api-client';
+import { apiClient, AgentDigest, ApiError, ConfirmSubmitResult, DraftSubmitResult, JobQueueItem, JobQueueStats } from '../../lib/api-client';
+import { useAppStore } from '../store';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -556,6 +557,73 @@ function JobCard({ item, onAction, onRequestDraft, onSubmitEdit, onConfirmSubmit
   );
 }
 
+// ── Digest panel ──────────────────────────────────────────────────────────────
+
+interface DigestPanelProps {
+  digest: AgentDigest;
+}
+
+function DigestPanel({ digest }: DigestPanelProps) {
+  const { today, pipeline, roi_30d, autonomy } = digest;
+  const hasTodayActivity = Object.values(today).some((v) => v > 0);
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl p-3 space-y-2">
+      {/* Level header */}
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-semibold text-gray-700">
+          Level {autonomy.level} · {autonomy.label}
+        </span>
+        <span className="text-[9px] text-gray-400">
+          {autonomy.days_at_level}d at this level
+        </span>
+      </div>
+
+      {/* Pipeline row */}
+      <div className="flex gap-2 text-center">
+        {[
+          { label: 'Pending', value: pipeline.pending_review, color: 'text-amber-600' },
+          { label: 'Drafts ready', value: pipeline.drafts_ready, color: 'text-indigo-600' },
+          { label: 'Awaiting reply', value: pipeline.awaiting_response, color: 'text-emerald-600' },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="flex-1 bg-gray-50 rounded-lg py-1.5 px-1">
+            <p className={`text-sm font-bold ${color}`}>{value}</p>
+            <p className="text-[9px] text-gray-400 leading-tight">{label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Today row */}
+      {hasTodayActivity && (
+        <div className="flex flex-wrap gap-1 text-[10px] text-gray-500 pt-0.5">
+          <span className="font-medium text-gray-600 mr-0.5">Today:</span>
+          {today.surfaced > 0 && <span>{today.surfaced} surfaced</span>}
+          {today.approved > 0 && <span>· {today.approved} approved</span>}
+          {today.drafted > 0 && <span>· {today.drafted} drafted</span>}
+          {today.submitted > 0 && <span>· {today.submitted} sent</span>}
+          {today.responses > 0 && <span>· {today.responses} responses</span>}
+        </div>
+      )}
+
+      {/* Connects warning */}
+      {roi_30d.connects_balance != null && roi_30d.min_reserve != null && (
+        roi_30d.connects_balance - roi_30d.min_reserve < 10 && (
+          <p className="text-[10px] text-amber-600 bg-amber-50 px-2 py-1 rounded-lg leading-snug">
+            Low connects: {roi_30d.connects_balance} remaining (reserve {roi_30d.min_reserve})
+          </p>
+        )
+      )}
+
+      {/* Next level hint */}
+      {autonomy.next_level_hint && (
+        <p className="text-[9px] text-gray-400 leading-snug border-t border-gray-50 pt-1.5">
+          {autonomy.next_level_hint}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Learning banner ───────────────────────────────────────────────────────────
 
 interface LearningBannerProps {
@@ -609,8 +677,10 @@ type FilterMode = 'pending' | 'all';
 // ── SuggestionsTab ────────────────────────────────────────────────────────────
 
 export default function SuggestionsTab() {
+  const { setCurrentView } = useAppStore();
   const [items, setItems] = useState<JobQueueItem[]>([]);
   const [stats, setStats] = useState<JobQueueStats | null>(null);
+  const [digest, setDigest] = useState<AgentDigest | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterMode>('pending');
@@ -625,6 +695,8 @@ export default function SuggestionsTab() {
       ]);
       setItems(all);
       setStats(queueStats);
+      // Load digest in background — non-blocking
+      apiClient.getAgentDigest().then(setDigest).catch(() => {});
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load suggestions.');
     } finally {
@@ -717,21 +789,34 @@ export default function SuggestionsTab() {
     <div className="p-4 space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <p className="text-[11px] text-gray-500 leading-snug">
+        <p className="text-[11px] text-gray-500 leading-snug flex-1 min-w-0">
           Jobs discovered by the agent. Approve to move to Queue, pass to skip.
         </p>
-        <button
-          type="button"
-          onClick={load}
-          disabled={loading}
-          className="text-[10px] text-gray-400 hover:text-gray-600 px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 flex-shrink-0"
-        >
-          {loading ? '…' : '↻'}
-        </button>
+        <div className="flex gap-1 flex-shrink-0 ml-1">
+          <button
+            type="button"
+            onClick={() => setCurrentView('guardrails')}
+            title="Guardrail settings"
+            className="text-[12px] text-gray-400 hover:text-gray-600 px-1.5 py-1 rounded-lg hover:bg-gray-100 transition-colors"
+          >
+            ⚙
+          </button>
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            className="text-[10px] text-gray-400 hover:text-gray-600 px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
+          >
+            {loading ? '…' : '↻'}
+          </button>
+        </div>
       </div>
 
-      {/* Learning banner */}
-      {stats && !loading && <LearningBanner stats={stats} />}
+      {/* Digest panel — richer view when digest loaded */}
+      {digest && !loading && <DigestPanel digest={digest} />}
+
+      {/* Learning banner — fallback when digest not yet loaded */}
+      {stats && !loading && !digest && <LearningBanner stats={stats} />}
 
       {/* Filter tabs */}
       <div className="flex gap-1">

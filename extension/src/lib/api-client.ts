@@ -643,6 +643,33 @@ class ApiClient {
       body: { response_type: responseType, upwork_proposal_id: upworkProposalId },
     });
   }
+
+  // ── Guardrails ──────────────────────────────────────────────────────────────
+
+  async getGuardrails(): Promise<GuardrailConfig> {
+    return this.request<GuardrailConfig>('/api/v1/guardrails');
+  }
+
+  async updateGuardrails(update: GuardrailConfigUpdate): Promise<GuardrailConfig> {
+    return this.request<GuardrailConfig>('/api/v1/guardrails', {
+      method: 'PUT',
+      body: update,
+    });
+  }
+
+  async checkGuardrails(): Promise<GuardrailCheckResult> {
+    return this.request<GuardrailCheckResult>('/api/v1/guardrails/check');
+  }
+
+  // ── Agent digest ─────────────────────────────────────────────────────────────
+
+  async getAgentDigest(): Promise<AgentDigest> {
+    return this.request<AgentDigest>('/api/v1/agent/digest');
+  }
+
+  async getAgentRoi(): Promise<Pick<AgentDigest, 'autonomy' | 'learning' | 'roi_30d' | 'pipeline'> & { autonomy_level: number; autonomy_label: string }> {
+    return this.request('/api/v1/agent/roi');
+  }
 }
 
 export class ApiError extends Error {
@@ -1329,6 +1356,87 @@ export interface ConfirmSubmitResult {
   status: string;
   message: string;
   autonomy_level: number;
+}
+
+// ── Guardrail config ─────────────────────────────────────────────────────────
+
+export interface GuardrailConfig {
+  enabled: boolean;
+  max_proposals_per_day: number;
+  min_connects_reserve: number;
+  max_bid_hourly: number | null;
+  max_bid_fixed: number | null;
+  min_score_threshold: number;
+  pause_start_hour: number | null;
+  pause_end_hour: number | null;
+  connects_balance: number | null;
+  digest_email: string | null;
+}
+
+export interface GuardrailConfigUpdate {
+  enabled?: boolean;
+  max_proposals_per_day?: number;
+  min_connects_reserve?: number;
+  max_bid_hourly?: number | null;
+  max_bid_fixed?: number | null;
+  min_score_threshold?: number;
+  pause_start_hour?: number | null;
+  pause_end_hour?: number | null;
+  connects_balance?: number;
+  digest_email?: string | null;
+}
+
+export interface GuardrailCheckResult {
+  passed: boolean;
+  violations: Array<{ guard: string; reason: string }>;
+  warnings: string[];
+}
+
+// ── Agent digest ─────────────────────────────────────────────────────────────
+
+export interface AgentDigest {
+  generated_at: string;
+  autonomy: {
+    level: number;
+    label: string;
+    days_at_level: number;
+    score_threshold: number;
+    next_level_hint: string | null;
+    locked: boolean;
+  };
+  today: {
+    surfaced: number;
+    approved: number;
+    rejected: number;
+    drafted: number;
+    submitted: number;
+    responses: number;
+  };
+  pipeline: {
+    pending_review: number;
+    drafts_ready: number;
+    awaiting_response: number;
+  };
+  learning: {
+    approval_rate: number;
+    avg_edit_distance: number | null;
+    response_rate: number;
+    all_time_submitted: number;
+    all_time_responded: number;
+  };
+  roi_30d: {
+    connects_invested: number;
+    submissions: number;
+    responses: number;
+    response_rate: number | null;
+    connects_balance: number | null;
+    min_reserve: number | null;
+  };
+  recent_activity: Array<{
+    event: string;
+    job_title: string | null;
+    at: string;
+  }>;
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

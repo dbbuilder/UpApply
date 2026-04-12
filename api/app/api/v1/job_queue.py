@@ -42,6 +42,7 @@ from agent.autonomy_governor import (
     record_suggestion_rejected,
     update_avg_edit_distance,
 )
+from agent.learning_engine import contribute_signal, winning_proposal_to_memory
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -481,6 +482,20 @@ async def submit_edit(
     item.status = "applied"
     await db.flush()
 
+    # Contribute anonymized signal for this submission
+    item_skills = item.skills or []
+    if item_skills:
+        try:
+            await contribute_signal(
+                skills=item_skills,
+                outcome_code="submitted",
+                score_at_submission=item.ai_score,
+                edit_distance_pct=dist,
+                db=db,
+            )
+        except Exception as exc:
+            logger.warning("Signal contribution failed on submit-edit: %s", exc)
+
     ap_result = await db.execute(
         select(UserProfile).where(UserProfile.user_id == current_user.id)
     )
@@ -632,6 +647,34 @@ async def record_proposal_response(
                 "User %s: autonomy level %d → %d (response signal)",
                 current_user.id, level_change["level_before"], level_change["level_after"],
             )
+
+    # Contribute anonymized signal to global pool
+    item_skills = item.skills or []
+    if item_skills:
+        ap = await get_or_create_autonomy_profile(current_user.id, db)
+        try:
+            await contribute_signal(
+                skills=item_skills,
+                outcome_code=body.response_type,
+                score_at_submission=item.ai_score,
+                edit_distance_pct=ap.avg_edit_distance,
+                db=db,
+            )
+        except Exception as exc:
+            logger.warning("Signal contribution failed for item %s: %s", item_id, exc)
+
+    # If hired: add winning cover letter to memory corpus
+    if body.response_type == "invited" and item.draft_cover_letter:
+        try:
+            await winning_proposal_to_memory(
+                user_id=current_user.id,
+                job_title=item.title,
+                job_description=item.description or "",
+                cover_letter_text=item.draft_cover_letter,
+                db=db,
+            )
+        except Exception as exc:
+            logger.warning("winning_proposal_to_memory failed for item %s: %s", item_id, exc)
 
     await db.flush()
     await db.refresh(item)
