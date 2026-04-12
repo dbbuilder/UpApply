@@ -72,6 +72,23 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
 
+    @field_validator("anthropic_api_key", mode="after")
+    @classmethod
+    def warn_if_anthropic_key_missing(cls, v: str) -> str:
+        """Emit a startup warning when the Anthropic key is absent.
+
+        Cover letter generation will fail at request time, but the server
+        should still start so other endpoints remain available.
+        """
+        if not v:
+            import warnings
+            warnings.warn(
+                "ANTHROPIC_API_KEY is not set — cover letter generation will be unavailable.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        return v
+
     @field_validator("secret_key", mode="after")
     @classmethod
     def check_secret_key_in_production(cls, v: str, info) -> str:
