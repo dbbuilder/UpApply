@@ -13,6 +13,7 @@ from app.models.job_review import JobReview
 from app.models.work_log import WorkLog
 from app.models.job_queue import JobQueueItem
 from app.models.user_autonomy_profile import UserAutonomyProfile
+from app.models.outcome_event import OutcomeEvent
 
 __all__ = [
     "User",
@@ -31,4 +32,5 @@ __all__ = [
     "WorkLog",
     "JobQueueItem",
     "UserAutonomyProfile",
+    "OutcomeEvent",
 ]

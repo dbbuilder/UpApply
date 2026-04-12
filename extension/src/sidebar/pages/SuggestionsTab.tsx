@@ -1,11 +1,25 @@
 /**
  * SuggestionsTab — shows agent-discovered jobs awaiting user review.
  *
- * Each card shows: title, AI score badge, chips, AI reasoning, budget, posted date.
- * Approve (green check) / Reject (red X) buttons update the job's status via API.
+ * Features:
+ * - Score badge (green ≥75, amber ≥55, red <55)
+ * - Skill chips, AI reasoning, budget/date
+ * - Approve / Pass with rejection reason picker
+ * - Learning summary banner (autonomy level + approval rate)
  */
 import { useState, useEffect, useCallback } from 'react';
-import { apiClient, ApiError, JobQueueItem } from '../../lib/api-client';
+import { apiClient, ApiError, JobQueueItem, JobQueueStats } from '../../lib/api-client';
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const REJECTION_REASONS = [
+  'Budget too low',
+  'Not my specialty',
+  'Too large / long',
+  'Client looks risky',
+  'Already applied',
+  'Other',
+];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -28,25 +42,92 @@ function formatRelative(isoStr: string): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+// ── Rejection reason picker ───────────────────────────────────────────────────
+
+interface RejectPickerProps {
+  onConfirm: (reason: string) => void;
+  onCancel: () => void;
+}
+
+function RejectPicker({ onConfirm, onCancel }: RejectPickerProps) {
+  const [selected, setSelected] = useState<string>('');
+
+  return (
+    <div className="mt-1 space-y-1.5 bg-red-50 border border-red-100 rounded-xl p-2.5">
+      <p className="text-[10px] font-medium text-red-600">Why are you passing?</p>
+      <div className="flex flex-wrap gap-1">
+        {REJECTION_REASONS.map((r) => (
+          <button
+            key={r}
+            type="button"
+            onClick={() => setSelected(selected === r ? '' : r)}
+            className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
+              selected === r
+                ? 'bg-red-500 text-white border-red-500'
+                : 'bg-white text-red-500 border-red-200 hover:border-red-400'
+            }`}
+          >
+            {r}
+          </button>
+        ))}
+      </div>
+      <div className="flex gap-1.5 pt-0.5">
+        <button
+          type="button"
+          onClick={() => onConfirm(selected || 'Other')}
+          className="flex-1 py-1 text-[10px] font-medium bg-red-500 text-white rounded-lg hover:bg-red-600 active:scale-95 transition-all"
+        >
+          Confirm Pass
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-3 py-1 text-[10px] text-gray-500 bg-gray-100 rounded-lg hover:bg-gray-200 active:scale-95 transition-all"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Job card ──────────────────────────────────────────────────────────────────
 
 interface JobCardProps {
   item: JobQueueItem;
-  onAction: (id: string, action: 'approve' | 'reject') => Promise<void>;
+  onAction: (id: string, action: 'approve' | 'reject', reason?: string) => Promise<void>;
 }
 
 function JobCard({ item, onAction }: JobCardProps) {
   const [acting, setActing] = useState<'approve' | 'reject' | null>(null);
+  const [showRejectPicker, setShowRejectPicker] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isReviewed = item.status === 'approved' || item.status === 'rejected';
 
-  const handleAction = async (action: 'approve' | 'reject') => {
+  const handleApprove = async () => {
     if (acting) return;
-    setActing(action);
+    setActing('approve');
     setError(null);
     try {
-      await onAction(item.id, action);
+      await onAction(item.id, 'approve');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+      setActing(null);
+    }
+  };
+
+  const handleRejectClick = () => {
+    if (acting) return;
+    setShowRejectPicker(true);
+  };
+
+  const handleRejectConfirm = async (reason: string) => {
+    setShowRejectPicker(false);
+    setActing('reject');
+    setError(null);
+    try {
+      await onAction(item.id, 'reject', reason);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
       setActing(null);
@@ -111,13 +192,13 @@ function JobCard({ item, onAction }: JobCardProps) {
         <span>{formatRelative(item.created_at)}</span>
       </div>
 
-      {/* Action buttons — hidden once reviewed */}
-      {!isReviewed && (
+      {/* Action buttons */}
+      {!isReviewed && !showRejectPicker && (
         <div className="flex gap-2 pt-0.5">
           <button
             type="button"
             disabled={!!acting}
-            onClick={() => handleAction('approve')}
+            onClick={handleApprove}
             className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg
               bg-emerald-50 text-emerald-700 hover:bg-emerald-100 active:scale-95
               text-[11px] font-medium transition-all disabled:opacity-50"
@@ -127,7 +208,7 @@ function JobCard({ item, onAction }: JobCardProps) {
           <button
             type="button"
             disabled={!!acting}
-            onClick={() => handleAction('reject')}
+            onClick={handleRejectClick}
             className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg
               bg-red-50 text-red-600 hover:bg-red-100 active:scale-95
               text-[11px] font-medium transition-all disabled:opacity-50"
@@ -135,6 +216,14 @@ function JobCard({ item, onAction }: JobCardProps) {
             {acting === 'reject' ? '…' : '✕ Pass'}
           </button>
         </div>
+      )}
+
+      {/* Rejection reason picker */}
+      {showRejectPicker && (
+        <RejectPicker
+          onConfirm={handleRejectConfirm}
+          onCancel={() => setShowRejectPicker(false)}
+        />
       )}
 
       {/* Reviewed badge */}
@@ -146,7 +235,9 @@ function JobCard({ item, onAction }: JobCardProps) {
               : 'bg-gray-50 text-gray-400'
           }`}
         >
-          {item.status === 'approved' ? '✓ Approved' : '✕ Passed'}
+          {item.status === 'approved'
+            ? '✓ Approved'
+            : `✕ Passed${item.rejection_reason ? ` · ${item.rejection_reason}` : ''}`}
         </div>
       )}
 
@@ -154,6 +245,49 @@ function JobCard({ item, onAction }: JobCardProps) {
       {error && (
         <p className="text-[10px] text-red-500 bg-red-50 px-2 py-1 rounded-md">{error}</p>
       )}
+    </div>
+  );
+}
+
+// ── Learning banner ───────────────────────────────────────────────────────────
+
+interface LearningBannerProps {
+  stats: JobQueueStats;
+}
+
+function LearningBanner({ stats }: LearningBannerProps) {
+  const { all_time, recent_30, autonomy_label, score_threshold } = stats;
+  const rate = recent_30.approval_rate;
+  const rateStr = rate != null ? `${Math.round(rate * 100)}%` : '—';
+  const approvedRecent = recent_30.approved;
+  const totalRecent = recent_30.total;
+
+  let message = '';
+  if (totalRecent >= 5) {
+    if (rate != null && rate >= 0.70) {
+      message = `Great signal — approving ${rateStr} of recent suggestions. Threshold may lower.`;
+    } else if (rate != null && rate < 0.35) {
+      message = `Low approval rate (${rateStr}). Threshold raised to be more selective.`;
+    } else {
+      message = `Approved ${approvedRecent}/${totalRecent} recent suggestions (${rateStr}).`;
+    }
+  } else if (all_time.suggestions_shown > 0) {
+    message = `${all_time.suggestions_shown} jobs seen so far — keep reviewing to calibrate.`;
+  } else {
+    message = 'Agent runs daily. Review suggestions to teach it your preferences.';
+  }
+
+  return (
+    <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2 space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-semibold text-indigo-600">
+          🤖 {autonomy_label}
+        </span>
+        <span className="text-[10px] text-indigo-400">
+          threshold ≥ {score_threshold}
+        </span>
+      </div>
+      <p className="text-[10px] text-indigo-500 leading-snug">{message}</p>
     </div>
   );
 }
@@ -166,6 +300,7 @@ type FilterMode = 'pending' | 'all';
 
 export default function SuggestionsTab() {
   const [items, setItems] = useState<JobQueueItem[]>([]);
+  const [stats, setStats] = useState<JobQueueStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterMode>('pending');
@@ -174,8 +309,12 @@ export default function SuggestionsTab() {
     setLoading(true);
     setError(null);
     try {
-      const all = await apiClient.getJobQueue();
+      const [all, queueStats] = await Promise.all([
+        apiClient.getJobQueue(),
+        apiClient.getJobQueueStats(),
+      ]);
       setItems(all);
+      setStats(queueStats);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load suggestions.');
     } finally {
@@ -188,9 +327,11 @@ export default function SuggestionsTab() {
   }, [load]);
 
   const handleAction = useCallback(
-    async (id: string, action: 'approve' | 'reject') => {
-      const updated = await apiClient.actionJobQueueItem(id, action);
+    async (id: string, action: 'approve' | 'reject', reason?: string) => {
+      const updated = await apiClient.actionJobQueueItem(id, action, reason);
       setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
+      // Refresh stats in background after each decision
+      apiClient.getJobQueueStats().then(setStats).catch(() => {});
     },
     []
   );
@@ -205,11 +346,9 @@ export default function SuggestionsTab() {
     <div className="p-4 space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-[11px] text-gray-500 leading-snug">
-            Jobs discovered by the agent. Approve to move to Queue, pass to skip.
-          </p>
-        </div>
+        <p className="text-[11px] text-gray-500 leading-snug">
+          Jobs discovered by the agent. Approve to move to Queue, pass to skip.
+        </p>
         <button
           type="button"
           onClick={load}
@@ -219,6 +358,9 @@ export default function SuggestionsTab() {
           {loading ? '…' : '↻'}
         </button>
       </div>
+
+      {/* Learning banner */}
+      {stats && !loading && <LearningBanner stats={stats} />}
 
       {/* Filter tabs */}
       <div className="flex gap-1">
@@ -279,7 +421,7 @@ export default function SuggestionsTab() {
       {/* Footer hint */}
       {!loading && items.length > 0 && (
         <p className="text-[9px] text-gray-200 text-center select-none pt-1">
-          Agent runs daily · threshold ≥ 55
+          Agent learns from every Approve / Pass decision
         </p>
       )}
     </div>

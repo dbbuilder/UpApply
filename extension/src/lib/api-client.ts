@@ -607,6 +607,10 @@ class ApiClient {
       body: { action, rejection_reason: rejectionReason },
     });
   }
+
+  async getJobQueueStats(): Promise<JobQueueStats> {
+    return this.request<JobQueueStats>('/api/v1/job-queue/stats');
+  }
 }
 
 export class ApiError extends Error {
@@ -1251,6 +1255,26 @@ export interface JobQueueItem {
   created_at: string;
   reviewed_at?: string;
   expires_at?: string;
+}
+
+// ── Job Queue Stats ─────────────────────────────────────────────────────────
+
+export interface JobQueueStats {
+  autonomy_level: number;
+  autonomy_label: string;
+  level_since: string | null;
+  score_threshold: number;
+  all_time: {
+    suggestions_shown: number;
+    suggestions_approved: number;
+    approval_rate: number;
+  };
+  recent_30: {
+    total: number;
+    approved: number;
+    approval_rate: number | null;
+  };
+  top_rejection_reasons: Array<{ reason: string; count: number }>;
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

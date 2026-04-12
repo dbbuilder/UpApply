@@ -60,6 +60,9 @@ class User(Base):
     autonomy_profile: Mapped[Optional["UserAutonomyProfile"]] = relationship(
         "UserAutonomyProfile", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
+    outcome_events: Mapped[List["OutcomeEvent"]] = relationship(
+        "OutcomeEvent", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class UserProfile(Base):
