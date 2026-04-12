@@ -28,7 +28,18 @@ TestSessionLocal = async_sessionmaker(
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def setup_database():
-    """Create test database tables once per session."""
+    """Create test database tables once per session.
+
+    Skips automatically when PostgreSQL is unreachable so the unit-test suite
+    (which uses mocks) can pass in CI without a local database.
+    """
+    try:
+        async with test_engine.connect() as probe:
+            await probe.execute(text("SELECT 1"))
+    except Exception as exc:
+        pytest.skip(f"PostgreSQL unavailable — skipping DB integration tests ({exc})")
+        return
+
     async with test_engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.drop_all)
