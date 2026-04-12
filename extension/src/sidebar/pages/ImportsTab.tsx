@@ -363,6 +363,9 @@ export default function ImportsTab() {
       <p className="text-[10px] text-gray-300 text-center pt-1">
         Imports deduplicate — safe to run multiple times
       </p>
+      <p className="text-[9px] text-gray-200 text-center select-none">
+        v{chrome.runtime.getManifest().version} · {new Date(__BUILD_DATE__).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+      </p>
     </div>
   );
 }

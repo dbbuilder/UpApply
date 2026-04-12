@@ -4,6 +4,9 @@ import { crx } from '@crxjs/vite-plugin';
 import manifest from './public/manifest.json';
 
 export default defineConfig({
+  define: {
+    __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
+  },
   plugins: [
     react(),
     crx({ manifest }),

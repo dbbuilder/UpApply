@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "UpApply - AI Cover Letters for Upwork",
-  "version": "1.0.1",
+  "version": "1.0.4",
   "description": "Generate personalized cover letters for Upwork jobs using AI and your experience memories",
   "permissions": [
     "storage",
