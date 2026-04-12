@@ -1,7 +1,8 @@
 """Screening answer endpoints with pgvector semantic search."""
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from app.core.rate_limit import limiter
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -239,8 +240,10 @@ async def search_screening_answers(
 
 
 @router.post("/generate", response_model=ScreeningAnswerGenerateResponse)
+@limiter.limit("5/hour")
 async def generate_screening_answer(
-    request: ScreeningAnswerGenerateRequest,
+    request: Request,
+    body: ScreeningAnswerGenerateRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -254,7 +257,7 @@ async def generate_screening_answer(
     # Fetch past answers to similar questions via semantic search
     past_answers_text = ""
     try:
-        q_embedding = await generate_embedding(request.question)
+        q_embedding = await generate_embedding(body.question)
         sql = text("""
             SELECT question, answer, was_successful
             FROM screening_answers
@@ -289,11 +292,11 @@ async def generate_screening_answer(
 
     profile_ctx = "\n".join(profile_lines) if profile_lines else "No profile available."
     job_ctx_parts = []
-    if request.job_title:
+    if body.job_title:
         job_ctx_parts.append(f"Job: {request.job_title}")
-    if request.job_skills:
+    if body.job_skills:
         job_ctx_parts.append(f"Required skills: {', '.join(request.job_skills[:10])}")
-    if request.job_description:
+    if body.job_description:
         job_ctx_parts.append(f"Description excerpt: {request.job_description[:400]}")
     job_ctx = "\n".join(job_ctx_parts) if job_ctx_parts else ""
 
@@ -304,7 +307,7 @@ async def generate_screening_answer(
         "'Great question!' or 'I'd be happy to'. Get straight to the answer."
     )
 
-    user_prompt = f"""QUESTION: {request.question}
+    user_prompt = f"""QUESTION: {body.question}
 
 MY PROFILE:
 {profile_ctx}

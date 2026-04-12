@@ -1,6 +1,12 @@
 """Tests for cover letter service functions."""
 import pytest
-from app.services.cover_letter import clean_cover_letter, append_closing, append_prototype_url
+from unittest.mock import MagicMock
+from app.services.cover_letter import (
+    append_closing,
+    append_prototype_url,
+    build_system_prompt,
+    clean_cover_letter,
+)
 
 
 def test_clean_removes_subject_line():
@@ -180,3 +186,53 @@ def test_warm_regards_preserved_when_present_with_other_signoffs():
     text = "Body.\n\nSincerely,\nSomeone\n\nWarm regards,"
     result = clean_cover_letter(text)
     assert "Warm regards," in result
+
+
+# ── build_system_prompt — banned phrases documented in prompt ─────────────────
+
+def _mock_profile(**kwargs):
+    p = MagicMock()
+    p.full_name = kwargs.get("full_name", "Chris Therriault")
+    p.professional_title = kwargs.get("professional_title", "Senior Developer")
+    p.bio = kwargs.get("bio", "20 years building SaaS products.")
+    p.career_goals = kwargs.get("career_goals", None)
+    p.communication_style = kwargs.get("communication_style", None)
+    p.unique_strengths = kwargs.get("unique_strengths", [])
+    p.proposal_anchors = kwargs.get("proposal_anchors", {})
+    return p
+
+
+@pytest.mark.parametrize("phrase", BANNED_PHRASES)
+def test_system_prompt_documents_each_banned_phrase(phrase):
+    """Every banned phrase must appear in the system prompt so the model sees it."""
+    prompt = build_system_prompt(_mock_profile())
+    assert phrase in prompt, f"Banned phrase missing from system prompt: {phrase!r}"
+
+
+def test_system_prompt_requires_warm_regards_close():
+    prompt = build_system_prompt(_mock_profile())
+    assert "Warm regards," in prompt
+
+
+def test_system_prompt_forbids_opening_with_i():
+    prompt = build_system_prompt(_mock_profile())
+    assert "NEVER" in prompt and '"I"' in prompt
+
+
+def test_system_prompt_includes_call_offer_by_default():
+    prompt = build_system_prompt(_mock_profile())
+    assert "no-cost call" in prompt.lower() or "no cost" in prompt.lower()
+
+
+def test_system_prompt_omits_call_offer_when_disabled():
+    prompt = build_system_prompt(_mock_profile(), include_call_offer=False)
+    assert "Skip the call offer" in prompt
+
+
+def test_system_prompt_includes_always_include_items():
+    profile = _mock_profile(
+        proposal_anchors={"always_include": ["SchoolVision 20yr SaaS", "MBA"]}
+    )
+    prompt = build_system_prompt(profile)
+    assert "SchoolVision 20yr SaaS" in prompt
+    assert "MBA" in prompt

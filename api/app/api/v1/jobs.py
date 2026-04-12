@@ -2,7 +2,8 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from app.core.rate_limit import limiter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -679,8 +680,10 @@ Return a JSON object with a "milestones" array. Each milestone has:
 # Cover Letter endpoints
 
 @router.post("/cover-letters/generate", response_model=CoverLetterResponse)
+@limiter.limit("5/hour")
 async def generate_cover_letter_endpoint(
-    request: CoverLetterGenerateRequest,
+    request: Request,
+    body: CoverLetterGenerateRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -688,9 +691,9 @@ async def generate_cover_letter_endpoint(
     profile = await get_user_profile(current_user, db)
 
     # Get job data
-    if request.job_id:
+    if body.job_id:
         result = await db.execute(
-            select(Job).where(Job.id == request.job_id, Job.user_id == current_user.id)
+            select(Job).where(Job.id == body.job_id, Job.user_id == current_user.id)
         )
         job = result.scalar_one_or_none()
         if not job:
@@ -712,9 +715,9 @@ async def generate_cover_letter_endpoint(
             budget_amount=job.budget_amount,
             client_info=job.client_info,
         )
-    elif request.job_data:
+    elif body.job_data:
         # Create job first
-        job_data = request.job_data
+        job_data = body.job_data
         job_skills = job_data.skills_required or []
         client_info = job_data.client_info.model_dump() if job_data.client_info else None
 
@@ -808,9 +811,9 @@ async def generate_cover_letter_endpoint(
         relevant_memories=relevant_memories,
         profile=profile,
         past_proposals=past_proposals,
-        inclusions=request.custom_instructions,
-        prototype_url=request.prototype_url,
-        include_call_offer=request.include_call_offer,
+        inclusions=body.custom_instructions,
+        prototype_url=body.prototype_url,
+        include_call_offer=body.include_call_offer,
     )
 
     # Save cover letter
@@ -828,7 +831,7 @@ async def generate_cover_letter_endpoint(
 
     # Get match score
     match_score = None
-    if request.job_id:
+    if body.job_id:
         result = await db.execute(
             select(Job).where(Job.id == job_id)
         )
@@ -853,9 +856,11 @@ async def generate_cover_letter_endpoint(
 
 
 @router.post("/cover-letters/{letter_id}/regenerate", response_model=CoverLetterResponse)
+@limiter.limit("5/hour")
 async def regenerate_cover_letter_endpoint(
+    request: Request,
     letter_id: str,
-    request: CoverLetterRegenerateRequest,
+    body: CoverLetterRegenerateRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -890,14 +895,14 @@ async def regenerate_cover_letter_endpoint(
         )
 
     # Regenerate
-    if request.feedback:
+    if body.feedback:
         content = await regenerate_cover_letter(
             original_letter=existing.content,
-            feedback=request.feedback,
+            feedback=body.feedback,
             job_title=job.title,
             job_description=job.description,
             profile=profile,
-            include_call_offer=request.include_call_offer,
+            include_call_offer=body.include_call_offer,
         )
     else:
         # Generate fresh
@@ -928,7 +933,7 @@ async def regenerate_cover_letter_endpoint(
             relevant_memories=ar.relevant_memories,
             profile=profile,
             past_proposals=past_proposals,
-            include_call_offer=request.include_call_offer,
+            include_call_offer=body.include_call_offer,
         )
 
     # Create new version

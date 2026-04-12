@@ -79,6 +79,8 @@ async def client(setup_database):
             "TRUNCATE TABLE beta_feedback, feedback, screening_answers, proposals, "
             "applications, cover_letters, jobs, search_queries, memories, "
             "job_reviews, work_logs, "
+            "outcome_events, job_queue, user_autonomy_profiles, "
+            "user_guardrail_configs, global_signal_pool, "
             "user_profiles, users RESTART IDENTITY CASCADE"
         ))
 
