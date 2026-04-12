@@ -3,7 +3,8 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from decimal import Decimal
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -64,6 +65,18 @@ class JobQueueItem(Base):
     draft_cover_letter: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     draft_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default="none")
     draft_generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Submission tracking (recorded when user confirms auto-fill)
+    bid_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
+    connects_spent: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Post-submit monitoring (background script updates these)
+    upwork_proposal_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    last_status_check: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # none | viewed | responded | invited | declined
+    client_response_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    client_response_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

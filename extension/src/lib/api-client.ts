@@ -622,6 +622,27 @@ class ApiClient {
       body: { final_text: finalText, auto_filled: autoFilled },
     });
   }
+
+  async confirmQueueItemSubmit(
+    id: string,
+    opts: { bid_amount?: number; connects_spent?: number; upwork_proposal_id?: string }
+  ): Promise<ConfirmSubmitResult> {
+    return this.request<ConfirmSubmitResult>(`/api/v1/job-queue/${id}/confirm-submit`, {
+      method: 'POST',
+      body: opts,
+    });
+  }
+
+  async reportProposalResponse(
+    id: string,
+    responseType: 'viewed' | 'responded' | 'invited' | 'declined',
+    upworkProposalId?: string
+  ): Promise<JobQueueItem> {
+    return this.request<JobQueueItem>(`/api/v1/job-queue/${id}/proposal-response`, {
+      method: 'POST',
+      body: { response_type: responseType, upwork_proposal_id: upworkProposalId },
+    });
+  }
 }
 
 export class ApiError extends Error {
@@ -1300,6 +1321,14 @@ export interface DraftSubmitResult {
   edit_distance_pct: number;
   avg_edit_distance: number | null;
   message: string;
+}
+
+// ── Confirm submit result ────────────────────────────────────────────────────
+
+export interface ConfirmSubmitResult {
+  status: string;
+  message: string;
+  autonomy_level: number;
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

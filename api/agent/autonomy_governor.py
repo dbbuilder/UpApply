@@ -204,6 +204,13 @@ async def record_proposal_drafted(user_id: str, db: AsyncSession) -> None:
     await db.flush()
 
 
+async def record_proposal_responded(user_id: str, db: AsyncSession) -> dict:
+    """Increment proposals_responded and re-evaluate level (feeds response_rate for Level 4→5)."""
+    ap = await get_or_create_autonomy_profile(user_id, db)
+    ap.proposals_responded += 1
+    return await evaluate_user(ap, db)
+
+
 async def update_avg_edit_distance(
     user_id: str, new_distance_pct: float, db: AsyncSession
 ) -> dict:

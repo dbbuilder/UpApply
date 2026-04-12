@@ -8,7 +8,7 @@
  * - Learning summary banner (autonomy level + approval rate)
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { apiClient, ApiError, DraftSubmitResult, JobQueueItem, JobQueueStats } from '../../lib/api-client';
+import { apiClient, ApiError, ConfirmSubmitResult, DraftSubmitResult, JobQueueItem, JobQueueStats } from '../../lib/api-client';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -91,19 +91,155 @@ function RejectPicker({ onConfirm, onCancel }: RejectPickerProps) {
   );
 }
 
+// ── Confirm send modal ────────────────────────────────────────────────────────
+
+const COUNTDOWN_SECONDS = 60;
+
+interface ConfirmSendModalProps {
+  item: JobQueueItem;
+  onConfirm: (bidAmount?: number, connectsSpent?: number) => Promise<ConfirmSubmitResult>;
+  onAbort: () => void;
+}
+
+function ConfirmSendModal({ onConfirm, onAbort }: ConfirmSendModalProps) {
+  const [seconds, setSeconds] = useState(COUNTDOWN_SECONDS);
+  const [bidAmount, setBidAmount] = useState('');
+  const [connectsSpent, setConnectsSpent] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    intervalRef.current = setInterval(() => {
+      setSeconds((s) => {
+        if (s <= 1) {
+          clearInterval(intervalRef.current!);
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, []);
+
+  const handleConfirm = async () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    setConfirming(true);
+    setError(null);
+    try {
+      const bid = bidAmount ? parseFloat(bidAmount) : undefined;
+      const connects = connectsSpent ? parseInt(connectsSpent, 10) : undefined;
+      await onConfirm(bid, connects);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+      setConfirming(false);
+    }
+  };
+
+  const handleAbort = () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    onAbort();
+  };
+
+  const pct = ((seconds / COUNTDOWN_SECONDS) * 100).toFixed(1);
+
+  return (
+    <div className="mt-2 bg-white border border-indigo-200 rounded-xl p-3 space-y-3 shadow-sm">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-semibold text-indigo-700">Ready to auto-fill?</p>
+        <span className="text-[11px] font-mono text-indigo-400">{seconds}s</span>
+      </div>
+
+      {/* Countdown bar */}
+      <div className="h-1 bg-indigo-100 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-indigo-400 transition-all duration-1000"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      <p className="text-[10px] text-gray-500 leading-snug">
+        The agent will open the apply page and fill your cover letter.
+        Add your bid details below, then confirm — or abort to review first.
+      </p>
+
+      {/* Optional bid fields */}
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <label className="text-[9px] text-gray-400 uppercase tracking-wide">Bid ($)</label>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={bidAmount}
+            onChange={(e) => setBidAmount(e.target.value)}
+            placeholder="e.g. 85"
+            className="w-full mt-0.5 px-2 py-1 text-[11px] border border-gray-200 rounded-lg
+              focus:outline-none focus:border-indigo-300 bg-gray-50"
+          />
+        </div>
+        <div className="flex-1">
+          <label className="text-[9px] text-gray-400 uppercase tracking-wide">Connects</label>
+          <input
+            type="number"
+            min="0"
+            value={connectsSpent}
+            onChange={(e) => setConnectsSpent(e.target.value)}
+            placeholder="e.g. 6"
+            className="w-full mt-0.5 px-2 py-1 text-[11px] border border-gray-200 rounded-lg
+              focus:outline-none focus:border-indigo-300 bg-gray-50"
+          />
+        </div>
+      </div>
+
+      {error && (
+        <p className="text-[10px] text-red-500 bg-red-50 px-2 py-1 rounded-lg">{error}</p>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={confirming || seconds === 0}
+          onClick={handleConfirm}
+          className="flex-1 py-1.5 text-[11px] font-medium bg-indigo-500 text-white
+            rounded-lg hover:bg-indigo-600 active:scale-95 transition-all disabled:opacity-50"
+        >
+          {confirming ? 'Opening…' : '✓ Send Now'}
+        </button>
+        <button
+          type="button"
+          onClick={handleAbort}
+          className="px-3 py-1.5 text-[11px] text-gray-500 bg-gray-100
+            rounded-lg hover:bg-gray-200 active:scale-95 transition-all"
+        >
+          Abort
+        </button>
+      </div>
+
+      {seconds === 0 && !confirming && (
+        <p className="text-[10px] text-center text-gray-400">
+          Countdown expired — review the draft or confirm manually.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Draft panel ───────────────────────────────────────────────────────────────
 
 interface DraftPanelProps {
   item: JobQueueItem;
   onRequestDraft: (id: string) => Promise<void>;
   onSubmitEdit: (id: string, text: string) => Promise<DraftSubmitResult>;
+  onConfirmSubmit: (id: string, bid?: number, connects?: number) => Promise<ConfirmSubmitResult>;
 }
 
-function DraftPanel({ item, onRequestDraft, onSubmitEdit }: DraftPanelProps) {
+function DraftPanel({ item, onRequestDraft, onSubmitEdit, onConfirmSubmit }: DraftPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [editedText, setEditedText] = useState(item.draft_cover_letter || '');
   const [requesting, setRequesting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [submitResult, setSubmitResult] = useState<DraftSubmitResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -140,6 +276,11 @@ function DraftPanel({ item, onRequestDraft, onSubmitEdit }: DraftPanelProps) {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleConfirmSend = async (bid?: number, connects?: number): Promise<ConfirmSubmitResult> => {
+    setShowConfirmModal(false);
+    return onConfirmSubmit(item.id, bid, connects);
   };
 
   // Not approved — don't show
@@ -199,16 +340,36 @@ function DraftPanel({ item, onRequestDraft, onSubmitEdit }: DraftPanelProps) {
             className="w-full text-[11px] leading-relaxed font-mono p-2 border border-gray-200
               rounded-xl resize-y focus:outline-none focus:border-indigo-300 bg-gray-50"
           />
-          {item.draft_status !== 'sent' && (
-            <button
-              type="button"
-              disabled={submitting || !editedText}
-              onClick={handleCopy}
-              className="w-full py-1.5 text-[11px] font-medium bg-emerald-500 text-white
-                rounded-xl hover:bg-emerald-600 active:scale-95 transition-all disabled:opacity-50"
-            >
-              {submitting ? '…' : '📋 Copy & Mark Sent'}
-            </button>
+          {item.draft_status !== 'sent' && !showConfirmModal && (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={submitting || !editedText}
+                onClick={handleCopy}
+                className="flex-1 py-1.5 text-[11px] font-medium bg-emerald-50 text-emerald-700
+                  border border-emerald-200 rounded-xl hover:bg-emerald-100 active:scale-95
+                  transition-all disabled:opacity-50"
+              >
+                {submitting ? '…' : '📋 Copy & Mark Sent'}
+              </button>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => setShowConfirmModal(true)}
+                className="flex-1 py-1.5 text-[11px] font-medium bg-indigo-500 text-white
+                  rounded-xl hover:bg-indigo-600 active:scale-95 transition-all disabled:opacity-50"
+              >
+                🚀 Send with Auto-fill
+              </button>
+            </div>
+          )}
+
+          {showConfirmModal && (
+            <ConfirmSendModal
+              item={item}
+              onConfirm={handleConfirmSend}
+              onAbort={() => setShowConfirmModal(false)}
+            />
           )}
           {submitResult && (
             <p className="text-[10px] text-indigo-500 bg-indigo-50 px-2 py-1 rounded-lg leading-snug">
@@ -231,9 +392,10 @@ interface JobCardProps {
   onAction: (id: string, action: 'approve' | 'reject', reason?: string) => Promise<void>;
   onRequestDraft: (id: string) => Promise<void>;
   onSubmitEdit: (id: string, text: string) => Promise<DraftSubmitResult>;
+  onConfirmSubmit: (id: string, bid?: number, connects?: number) => Promise<ConfirmSubmitResult>;
 }
 
-function JobCard({ item, onAction, onRequestDraft, onSubmitEdit }: JobCardProps) {
+function JobCard({ item, onAction, onRequestDraft, onSubmitEdit, onConfirmSubmit }: JobCardProps) {
   const [acting, setActing] = useState<'approve' | 'reject' | null>(null);
   const [showRejectPicker, setShowRejectPicker] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -382,6 +544,7 @@ function JobCard({ item, onAction, onRequestDraft, onSubmitEdit }: JobCardProps)
           item={item}
           onRequestDraft={onRequestDraft}
           onSubmitEdit={onSubmitEdit}
+          onConfirmSubmit={onConfirmSubmit}
         />
       )}
 
@@ -497,7 +660,6 @@ export default function SuggestionsTab() {
   const handleSubmitEdit = useCallback(
     async (id: string, text: string) => {
       const result = await apiClient.submitQueueItemEdit(id, text);
-      // Refresh queue + stats
       const [all, queueStats] = await Promise.all([
         apiClient.getJobQueue(),
         apiClient.getJobQueueStats(),
@@ -508,6 +670,42 @@ export default function SuggestionsTab() {
     },
     []
   );
+
+  const handleConfirmSubmit = useCallback(async (
+    id: string, bid?: number, connects?: number
+  ): Promise<ConfirmSubmitResult> => {
+    const item = items.find((i) => i.id === id);
+    if (!item?.draft_cover_letter || !item.upwork_url) {
+      return { status: 'error', message: 'Draft or URL missing', autonomy_level: 0 };
+    }
+
+    // 1. Record confirmation on backend
+    const result = await apiClient.confirmQueueItemSubmit(id, {
+      bid_amount: bid,
+      connects_spent: connects,
+    });
+
+    // 2. Store pendingAutoFill in chrome.storage so content script fills the textarea
+    await chrome.storage.local.set({
+      pendingAutoFill: {
+        jobUrl: item.upwork_url,
+        jobId: id,
+        coverLetter: item.draft_cover_letter,
+        timestamp: Date.now(),
+      },
+    });
+
+    // 3. Open the apply page in a new tab
+    const applyUrl = item.upwork_url.includes('/apply')
+      ? item.upwork_url
+      : item.upwork_url.replace(/\/?$/, '/apply');
+    await chrome.tabs.create({ url: applyUrl, active: true });
+
+    // 4. Refresh queue in background
+    apiClient.getJobQueue().then(setItems).catch(() => {});
+
+    return result;
+  }, [items]);
 
   const displayed = filter === 'pending'
     ? items.filter((i) => i.status === 'suggested')
@@ -594,6 +792,7 @@ export default function SuggestionsTab() {
           onAction={handleAction}
           onRequestDraft={handleRequestDraft}
           onSubmitEdit={handleSubmitEdit}
+          onConfirmSubmit={handleConfirmSubmit}
         />
       ))}
 

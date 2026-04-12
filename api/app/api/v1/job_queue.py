@@ -1,12 +1,14 @@
 """Job queue endpoints — agent-discovered jobs awaiting user review.
 
 Routes:
-  POST   /api/v1/job-queue                — add a job (agent or manual)
-  GET    /api/v1/job-queue/stats          — learning summary (last 30 decisions)
-  GET    /api/v1/job-queue                — list queued jobs for current user
-  PUT    /api/v1/job-queue/{id}/action    — approve or reject a queued job
-  POST   /api/v1/job-queue/{id}/draft     — generate cover letter draft
-  POST   /api/v1/job-queue/{id}/submit-edit — record final text + compute edit distance
+  POST   /api/v1/job-queue                    — add a job (agent or manual)
+  GET    /api/v1/job-queue/stats              — learning summary (last 30 decisions)
+  GET    /api/v1/job-queue                    — list queued jobs for current user
+  PUT    /api/v1/job-queue/{id}/action        — approve or reject a queued job
+  POST   /api/v1/job-queue/{id}/draft         — generate cover letter draft
+  POST   /api/v1/job-queue/{id}/submit-edit   — record final text + compute edit distance
+  POST   /api/v1/job-queue/{id}/confirm-submit — user confirmed auto-fill, record bid/connects
+  POST   /api/v1/job-queue/{id}/proposal-response — background script reports status change
 """
 import logging
 from datetime import datetime, timedelta, timezone
@@ -23,15 +25,19 @@ from app.models.job_queue import JobQueueItem
 from app.models.outcome_event import OutcomeEvent
 from app.models.user import User, UserProfile
 from app.schemas.job_queue import (
+    ConfirmSubmitRequest,
+    ConfirmSubmitResponse,
     DraftSubmitRequest,
     DraftSubmitResponse,
     JobQueueActionRequest,
     JobQueueCreate,
     JobQueueItemResponse,
+    ProposalResponseRequest,
 )
 from agent.autonomy_governor import (
     get_or_create_autonomy_profile,
     record_proposal_drafted,
+    record_proposal_responded,
     record_suggestion_approved,
     record_suggestion_rejected,
     update_avg_edit_distance,
@@ -504,3 +510,133 @@ async def submit_edit(
         avg_edit_distance=ap.avg_edit_distance if ap else None,
         message=msg,
     )
+
+# ── POST /api/v1/job-queue/{id}/confirm-submit ─────────────────────────────
+
+@router.post("/{item_id}/confirm-submit", response_model=ConfirmSubmitResponse)
+async def confirm_submit(
+    item_id: str,
+    body: ConfirmSubmitRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record the user's confirmation to auto-fill and submit a proposal.
+
+    Called immediately before the extension opens the apply tab.
+    Stores bid_amount, connects_spent, and sets confirmed_at.
+    The extension then writes pendingAutoFill to chrome.storage and opens the tab.
+    """
+    result = await db.execute(
+        select(JobQueueItem).where(
+            JobQueueItem.id == item_id,
+            JobQueueItem.user_id == current_user.id,
+        )
+    )
+    item = result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Queue item not found.")
+
+    if item.draft_status not in ("ready", "sent"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Draft must be ready before confirming submission.",
+        )
+
+    item.bid_amount = body.bid_amount
+    item.connects_spent = body.connects_spent
+    item.confirmed_at = datetime.now(timezone.utc)
+    if body.upwork_proposal_id:
+        item.upwork_proposal_id = body.upwork_proposal_id
+
+    meta = {
+        "bid_amount": float(body.bid_amount) if body.bid_amount else None,
+        "connects_spent": body.connects_spent,
+    }
+    await _record_outcome(db, current_user.id, item_id, "confirmed_submit", meta)
+    await db.flush()
+
+    ap = await get_or_create_autonomy_profile(current_user.id, db)
+    logger.info(
+        "Confirmed submission for queue item %s (user %s, level %d)",
+        item_id, current_user.id, ap.level,
+    )
+
+    return ConfirmSubmitResponse(
+        status="confirmed",
+        message="Auto-fill confirmed. Opening apply page now.",
+        autonomy_level=ap.level,
+    )
+
+
+# ── POST /api/v1/job-queue/{id}/proposal-response ──────────────────────────
+
+VALID_RESPONSE_TYPES = {"viewed", "responded", "invited", "declined"}
+
+
+@router.post("/{item_id}/proposal-response", response_model=JobQueueItemResponse)
+async def record_proposal_response(
+    item_id: str,
+    body: ProposalResponseRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record a client action on a submitted proposal.
+
+    Called by the background script when it detects a proposal status change
+    on the Upwork proposals page. Also used to record the Upwork proposal ID
+    once it's known (on the first call after submission).
+
+    response_type: viewed | responded | invited | declined
+    """
+    if body.response_type not in VALID_RESPONSE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid response_type '{body.response_type}'. Valid: {VALID_RESPONSE_TYPES}",
+        )
+
+    result = await db.execute(
+        select(JobQueueItem).where(
+            JobQueueItem.id == item_id,
+            JobQueueItem.user_id == current_user.id,
+        )
+    )
+    item = result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Queue item not found.")
+
+    # Only upgrade client_response_type (don't downgrade responded → viewed)
+    RESPONSE_RANK = {"viewed": 1, "responded": 2, "invited": 3, "declined": 0}
+    current_rank = RESPONSE_RANK.get(item.client_response_type or "", -1)
+    new_rank = RESPONSE_RANK.get(body.response_type, 0)
+
+    if new_rank > current_rank:
+        item.client_response_type = body.response_type
+        item.client_response_at = datetime.now(timezone.utc)
+
+    if body.upwork_proposal_id and not item.upwork_proposal_id:
+        item.upwork_proposal_id = body.upwork_proposal_id
+
+    item.last_status_check = datetime.now(timezone.utc)
+
+    # Record outcome event
+    await _record_outcome(
+        db, current_user.id, item_id, body.response_type,
+        meta={"upwork_proposal_id": body.upwork_proposal_id},
+    )
+
+    # For responded/invited → increment proposals_responded on autonomy profile
+    if body.response_type in ("responded", "invited"):
+        level_change = await record_proposal_responded(current_user.id, db)
+        if level_change["level_before"] != level_change["level_after"]:
+            logger.info(
+                "User %s: autonomy level %d → %d (response signal)",
+                current_user.id, level_change["level_before"], level_change["level_after"],
+            )
+
+    await db.flush()
+    await db.refresh(item)
+    logger.info(
+        "Proposal response '%s' for item %s (user %s)",
+        body.response_type, item_id, current_user.id,
+    )
+    return _to_response(item)

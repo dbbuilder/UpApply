@@ -364,6 +364,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       return true;
 
+    case 'REPORT_PROPOSAL_RESPONSE': {
+      // Called by content script when it detects a proposal status change on upwork.com/nx/proposals
+      // message.data: { queueItemId, responseType, upworkProposalId? }
+      const { queueItemId, responseType, upworkProposalId } = message.data ?? {};
+      if (!queueItemId || !responseType) {
+        sendResponse({ success: false, error: 'Missing queueItemId or responseType' });
+        break;
+      }
+      chrome.storage.local.get('authToken').then(async (stored) => {
+        const token = stored.authToken as string | undefined;
+        if (!token) { sendResponse({ success: false, error: 'Not authenticated' }); return; }
+        const apiBase = import.meta.env.VITE_API_URL ?? 'https://upapply-api.onrender.com';
+        try {
+          const res = await fetch(`${apiBase}/api/v1/job-queue/${queueItemId}/proposal-response`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ response_type: responseType, upwork_proposal_id: upworkProposalId }),
+          });
+          sendResponse({ success: res.ok });
+        } catch (e) {
+          sendResponse({ success: false, error: String(e) });
+        }
+      });
+      return true; // async
+    }
+
     case 'SCRAPE_JOB_CARDS':
       // Forward to active tab's content script (user should be on saved jobs or search page)
       chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {

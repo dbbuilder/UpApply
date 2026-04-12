@@ -1,5 +1,6 @@
 """Pydantic schemas for the job_queue endpoint."""
 from datetime import datetime
+from decimal import Decimal
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -32,17 +33,37 @@ class JobQueueActionRequest(BaseModel):
 
 
 class DraftSubmitRequest(BaseModel):
-    """Body for POST /api/v1/job-queue/{id}/submit-edit.
+    """Body for POST /api/v1/job-queue/{id}/submit-edit."""
 
-    Called when the user copies/sends the (possibly edited) cover letter.
-    The server computes edit distance vs. the stored draft and records it.
+    final_text: str
+    auto_filled: bool = False
+
+
+class ConfirmSubmitRequest(BaseModel):
+    """Body for POST /api/v1/job-queue/{id}/confirm-submit.
+
+    Called when the user confirms the auto-fill modal (before the apply tab opens).
+    Records the bid amount and connects the user intends to spend.
     """
 
-    final_text: str  # The text the user actually sent
-    auto_filled: bool = False  # True when extension auto-filled without user editing
+    bid_amount: Optional[Decimal] = None
+    connects_spent: Optional[int] = None
+    # Upwork proposal ID may not be available until after submission; can be patched later
+    upwork_proposal_id: Optional[str] = None
 
 
-# ── Response schema ──────────────────────────────────────────────────────────
+class ProposalResponseRequest(BaseModel):
+    """Body for POST /api/v1/job-queue/{id}/proposal-response.
+
+    Called by the background script when it detects a status change on a proposal.
+    response_type: viewed | responded | invited | declined
+    """
+
+    response_type: str
+    upwork_proposal_id: Optional[str] = None
+
+
+# ── Response schemas ─────────────────────────────────────────────────────────
 
 class JobQueueItemResponse(BaseModel):
     """Full representation of a job_queue row."""
@@ -66,6 +87,12 @@ class JobQueueItemResponse(BaseModel):
     draft_cover_letter: Optional[str] = None
     draft_status: Optional[str] = None
     draft_generated_at: Optional[datetime] = None
+    bid_amount: Optional[Decimal] = None
+    connects_spent: Optional[int] = None
+    confirmed_at: Optional[datetime] = None
+    upwork_proposal_id: Optional[str] = None
+    client_response_type: Optional[str] = None
+    client_response_at: Optional[datetime] = None
     created_at: datetime
     reviewed_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
@@ -77,3 +104,9 @@ class DraftSubmitResponse(BaseModel):
     edit_distance_pct: float
     avg_edit_distance: Optional[float]
     message: str
+
+
+class ConfirmSubmitResponse(BaseModel):
+    status: str
+    message: str
+    autonomy_level: int
