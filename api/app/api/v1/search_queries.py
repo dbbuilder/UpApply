@@ -8,7 +8,9 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import uuid4
 
+from openai import AsyncOpenAI
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from app.core.config import settings
 from sqlalchemy import select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
