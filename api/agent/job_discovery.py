@@ -40,7 +40,34 @@ DEFAULT_SCORE_THRESHOLD = 55.0
 MAX_JOB_AGE_DAYS = 7       # skip jobs older than this
 MAX_JOBS_TO_SCORE = 40     # hard cap on LLM calls per run across all queries
 
-# Extracts the first dollar figure from a budget string like "$500", "$25/hr"
+# Budget rules
+FIXED_BUDGET_MIN = 500.0
+# Placeholder values many clients use when they don't know the budget yet
+FIXED_BUDGET_PLACEHOLDERS = {5.0, 100.0}
+HOURLY_MIN_TOP_RATE = 60.0  # top-end of range must be at least this
+
+# Client geography blocks — skip jobs from these countries
+# Only applied when country is detectable from the RSS description
+_BLOCKED_COUNTRIES: frozenset[str] = frozenset({
+    # Indian subcontinent
+    "india", "pakistan",
+    # Middle East
+    "saudi arabia", "uae", "united arab emirates", "qatar", "kuwait",
+    "bahrain", "oman", "jordan", "lebanon", "iraq", "iran", "yemen",
+    "syria", "israel", "palestine", "turkey",
+    # North Africa
+    "egypt", "algeria", "morocco", "tunisia", "libya", "sudan", "south sudan",
+    # Sub-Saharan Africa
+    "nigeria", "kenya", "ghana", "ethiopia", "tanzania", "south africa",
+    "uganda", "cameroon", "senegal", "zimbabwe", "somalia", "mozambique",
+    "madagascar", "ivory coast", "côte d'ivoire", "mali", "burkina faso",
+    "niger", "chad", "angola", "democratic republic of congo", "congo",
+    "rwanda", "burundi", "zambia", "malawi", "botswana", "namibia",
+    "lesotho", "eswatini", "mauritius", "cape verde", "seychelles",
+    "djibouti", "eritrea",
+})
+
+# Extracts ALL dollar figures from a budget string
 _BUDGET_VALUE_RE = re.compile(r'\$\s*([\d,]+(?:\.\d+)?)')
 
 SYSTEM_PROMPT = """\
@@ -133,10 +160,12 @@ class JobDiscoveryAgent:
         """Return a skip reason string if the job should not be scored, else None.
 
         Checks (in order):
-          1. Age — posted_date older than MAX_JOB_AGE_DAYS
-          2. Budget floor — fixed price below minimum_budget, hourly below minimum_hourly_rate
-          3. Avoid keywords — any of profile.avoid_keywords in title or description
-          4. Per-run LLM cap — stop once MAX_JOBS_TO_SCORE have been sent to analyze_job
+          1. Age         — posted_date older than MAX_JOB_AGE_DAYS
+          2. Geography   — client country in blocked list (only when detectable)
+          3. Fixed price — below FIXED_BUDGET_MIN, unless a known placeholder value
+          4. Hourly rate — top end of range below HOURLY_MIN_TOP_RATE
+          5. Avoid kw    — any profile.avoid_keywords in title or description
+          6. Score cap   — hard stop at MAX_JOBS_TO_SCORE LLM calls per run
         """
         # 1. Age gate
         if job.posted_date:
@@ -147,26 +176,42 @@ class JobDiscoveryAgent:
             if posted < cutoff:
                 return f"too_old ({(datetime.now(timezone.utc) - posted).days}d)"
 
-        # 2. Budget gate
-        if job.budget_amount:
-            m = _BUDGET_VALUE_RE.search(job.budget_amount)
-            if m:
-                raw_val = float(m.group(1).replace(",", ""))
-                if job.budget_type == "hourly":
-                    if self._min_hourly and raw_val < self._min_hourly:
-                        return f"hourly_too_low (${raw_val:.0f}/hr < ${self._min_hourly:.0f})"
-                else:
-                    if self._min_budget and raw_val < self._min_budget:
-                        return f"budget_too_low (${raw_val:.0f} < ${self._min_budget:.0f})"
+        # 2. Geography gate (only when country is detectable)
+        if job.client_country:
+            country_lower = job.client_country.lower()
+            # Check exact match and substring match (e.g. "united arab emirates")
+            if country_lower in _BLOCKED_COUNTRIES or any(
+                blocked in country_lower for blocked in _BLOCKED_COUNTRIES
+            ):
+                return f"blocked_country ({job.client_country})"
 
-        # 3. Avoid keywords (title + description, case-insensitive)
+        # 3 & 4. Budget gate
+        if job.budget_amount:
+            all_values = [
+                float(v.replace(",", ""))
+                for v in _BUDGET_VALUE_RE.findall(job.budget_amount)
+            ]
+            if all_values:
+                min_val = min(all_values)
+                max_val = max(all_values)
+
+                if job.budget_type == "hourly":
+                    # Check the TOP of the range — what the client is willing to pay
+                    if max_val < HOURLY_MIN_TOP_RATE:
+                        return f"hourly_top_too_low (${max_val:.0f}/hr < ${HOURLY_MIN_TOP_RATE:.0f})"
+                else:
+                    # Fixed price: skip if below floor, but allow placeholder values
+                    if min_val not in FIXED_BUDGET_PLACEHOLDERS and min_val < FIXED_BUDGET_MIN:
+                        return f"budget_too_low (${min_val:.0f} < ${FIXED_BUDGET_MIN:.0f})"
+
+        # 5. Avoid keywords (title + first 400 chars of description, case-insensitive)
         if self._avoid_keywords:
-            text = f"{job.title} {job.description}".lower()
+            text = f"{job.title} {job.description[:400]}".lower()
             for kw in self._avoid_keywords:
                 if kw.lower() in text:
                     return f"avoid_keyword ({kw!r})"
 
-        # 4. Per-run LLM cap
+        # 6. Per-run LLM cap
         if self._stats.get("jobs_scored", 0) >= MAX_JOBS_TO_SCORE:
             return f"score_cap_reached ({MAX_JOBS_TO_SCORE})"
 

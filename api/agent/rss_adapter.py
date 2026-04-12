@@ -45,6 +45,7 @@ class RawJob:
     budget_amount: Optional[str]
     budget_type: Optional[str]
     skills: list[str]
+    client_country: Optional[str] = None  # extracted from RSS description if present
 
 
 def _strip_html(text: str) -> str:
@@ -74,6 +75,29 @@ def _parse_budget(description: str) -> tuple[Optional[str], Optional[str]]:
         # Range — show "low - high"
         budget_amount = f"{amounts[0]} - {amounts[-1]}"
     return budget_amount, budget_type
+
+
+_COUNTRY_RE = re.compile(
+    r'(?:country|client\s+location|location)[:\s]+([A-Za-z\s,]+?)(?:\s*<|\s*\n|$)',
+    re.IGNORECASE,
+)
+
+
+def _parse_country(raw_description: str) -> Optional[str]:
+    """Extract client country from raw RSS HTML description.
+
+    Upwork RSS typically includes one of:
+      <b>Country</b>: India
+      Country: United States
+      Client location: Pakistan
+    Returns the country string lowercased and stripped, or None if not found.
+    """
+    m = _COUNTRY_RE.search(raw_description)
+    if m:
+        country = m.group(1).strip().rstrip(",").lower()
+        if country and len(country) < 60:  # sanity: not a giant blob
+            return country
+    return None
 
 
 def _parse_skills(description: str) -> list[str]:
@@ -108,9 +132,10 @@ def _parse_item(item_el: ET.Element, ns: dict) -> Optional[RawJob]:
     if not title or not link:
         return None
 
-    # Clean description — strip HTML before further processing
+    # Parse from raw HTML before stripping (country tag is in the HTML)
     skills = _parse_skills(raw_description)
     budget_amount, budget_type = _parse_budget(raw_description)
+    client_country = _parse_country(raw_description)
     description = _strip_html(raw_description)
 
     # Parse pub date
@@ -132,6 +157,7 @@ def _parse_item(item_el: ET.Element, ns: dict) -> Optional[RawJob]:
         budget_amount=budget_amount,
         budget_type=budget_type,
         skills=skills,
+        client_country=client_country,
     )
 
 
