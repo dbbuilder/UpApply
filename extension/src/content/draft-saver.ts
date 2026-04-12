@@ -8,6 +8,7 @@
  */
 
 import { querySelector, SELECTORS } from './upwork-selectors';
+import { logger } from '../lib/logger';
 
 interface DraftMilestone {
   description: string;
@@ -138,7 +139,7 @@ function saveDraft(): void {
   try {
     sessionStorage.setItem(key, JSON.stringify(data));
     updateIndicator('saved');
-    console.log('UpApply: Draft saved');
+    logger.log('Draft saved');
   } catch {
     // sessionStorage full or unavailable
   }
@@ -177,7 +178,7 @@ function clearDraft(): void {
   if (key) {
     sessionStorage.removeItem(key);
     updateIndicator('cleared');
-    console.log('UpApply: Draft cleared');
+    logger.log('Draft cleared');
   }
 }
 
@@ -286,7 +287,7 @@ function restoreDraft(draft: DraftData): boolean {
     if (coverLetterEl && !coverLetterEl.value) {
       setNativeValue(coverLetterEl, draft.coverLetter);
       restored = true;
-      console.log('UpApply: Restored cover letter draft');
+      logger.log('Restored cover letter draft');
     }
   }
 
@@ -296,7 +297,7 @@ function restoreDraft(draft: DraftData): boolean {
     if (bidEl && !bidEl.value) {
       setNativeValue(bidEl, draft.bidAmount);
       restored = true;
-      console.log('UpApply: Restored bid amount draft');
+      logger.log('Restored bid amount draft');
     }
   }
 
@@ -314,7 +315,7 @@ function restoreDraft(draft: DraftData): boolean {
         if (savedAnswer && !input.value) {
           setNativeValue(input, savedAnswer);
           restored = true;
-          console.log('UpApply: Restored screening answer for:', key.substring(0, 50));
+          logger.log('Restored screening answer for:', key.substring(0, 50));
         }
       }
     });
@@ -382,7 +383,7 @@ function attachSaveListeners(): void {
       .observe(milestoneContainer, { childList: true, subtree: true });
   }
 
-  console.log('UpApply: Draft save listeners attached', {
+  logger.log('Draft save listeners attached', {
     coverLetter: !!coverLetterEl,
     bid: !!bidEl,
     questions: questionInputs.length,
@@ -516,7 +517,7 @@ function updateIndicator(state: 'saved' | 'restored' | 'cleared' | 'active'): vo
 export function initDraftSaver(): void {
   if (!isApplyPage()) return;
 
-  console.log('UpApply: Draft saver initializing on apply page');
+  logger.log('Draft saver initializing on apply page');
 
   const draft = loadDraft();
   let hasRestored = false;
@@ -560,7 +561,7 @@ export function initDraftSaver(): void {
   setTimeout(() => {
     observer.disconnect();
     if (!hasAttached) {
-      console.log('UpApply: Draft saver timed out waiting for form');
+      logger.log('Draft saver timed out waiting for form');
     }
   }, 30000);
 }
