@@ -74,6 +74,7 @@ async def list_proposals(
     status: Optional[str] = None,
     was_hired: Optional[bool] = None,
     source: Optional[str] = None,
+    job_url: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
     current_user: User = Depends(get_current_user),
@@ -88,6 +89,11 @@ async def list_proposals(
         query = query.where(Proposal.was_hired == was_hired)
     if source:
         query = query.where(Proposal.source == source)
+    if job_url:
+        import re as _re
+        uid_m = _re.search(r'~[0-9a-f]+', job_url, _re.IGNORECASE)
+        if uid_m:
+            query = query.where(Proposal.upwork_job_url.contains(uid_m.group(0)))
 
     query = query.order_by(Proposal.created_at.desc())
     query = query.limit(limit).offset(offset)

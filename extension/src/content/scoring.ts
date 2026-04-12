@@ -149,6 +149,7 @@ function _resetNotifState(): void {
   document.getElementById('ua-login-prompt')?.remove();
   _cachedConnectsBalance = undefined;
   _lowConnectsAlertShown = false;
+  _saveIconInjected.clear();
 }
 
 // Chip colour map — specific keywords get accent colours, budget is neutral
@@ -794,6 +795,129 @@ function _showLoginPrompt(): void {
 
   // Auto-remove after 12s
   setTimeout(() => el.remove(), 12_000);
+}
+
+// ---------------------------------------------------------------------------
+// 💾 Save icon — injected after every a[href*="/jobs/~"] on any Upwork page
+// ---------------------------------------------------------------------------
+
+const _saveIconInjected = new Set<string>(); // tracks normalized URLs already injected
+
+async function _handleSaveJob(jobUrl: string, title: string, icon: HTMLElement): Promise<void> {
+  const token = await _getAuthToken();
+  if (!token) { _showLoginPrompt(); return; }
+
+  const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL']
+    || 'https://upapply-api.onrender.com';
+
+  icon.textContent = '⟳';
+  icon.title = 'Saving…';
+  icon.style.cursor = 'default';
+  icon.style.opacity = '1';
+
+  try {
+    // Fetch full job data via GraphQL so we store description + skills
+    const jobData = await _fetchJobData(jobUrl);
+    const description = jobData.description || title;
+
+    // Save (idempotent — returns existing job if already saved)
+    const saveResp = await fetch(`${apiBase}/api/v1/jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({
+        upwork_url: jobUrl,
+        title: title || 'Job',
+        description,
+        skills_required: jobData.skills.length ? jobData.skills : undefined,
+        client_info: jobData.clientCountry ? { location: jobData.clientCountry } : undefined,
+      }),
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!saveResp.ok) throw new Error(`save ${saveResp.status}`);
+    const job = await saveResp.json() as { id: string };
+
+    // Check if we already have a past proposal for this job URL
+    const propResp = await fetch(
+      `${apiBase}/api/v1/proposals?job_url=${encodeURIComponent(jobUrl)}&limit=1`,
+      { headers: { 'Authorization': `Bearer ${token}` }, signal: AbortSignal.timeout(5_000) },
+    ).catch(() => null);
+    const proposals = (propResp?.ok ? await propResp.json() : []) as unknown[];
+    const hasPastProposal = Array.isArray(proposals) && proposals.length > 0;
+
+    if (hasPastProposal) {
+      // Already in our corpus — surface as past reference, no re-queue
+      icon.textContent = '📁';
+      icon.style.cssText += 'background:#7c3aed;color:#fff;border-radius:4px;padding:0 3px;font-size:10px;';
+      icon.title = 'UpApply: saved — past proposal exists';
+    } else {
+      // New job — add to apply queue
+      await fetch(`${apiBase}/api/v1/applications`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ job_id: job.id }),
+        signal: AbortSignal.timeout(10_000),
+      }).catch(() => {});
+      icon.textContent = '✓';
+      icon.style.cssText += 'background:#16a34a;color:#fff;border-radius:4px;padding:0 3px;font-size:10px;';
+      icon.title = 'UpApply: saved & queued for apply';
+    }
+    icon.dataset.done = '1';
+
+    // Also stash job data so preview/action panel work without re-fetching
+    if (!_jobDataStore.has(jobUrl)) {
+      _jobDataStore.set(jobUrl, { title: title || 'Job', description, skills: jobData.skills });
+    }
+  } catch {
+    icon.textContent = '!';
+    icon.style.cssText += 'background:#dc2626;color:#fff;border-radius:4px;padding:0 3px;font-size:10px;';
+    icon.title = 'UpApply: save failed — click to retry';
+    icon.style.cursor = 'pointer';
+    icon.dataset.done = '';  // allow retry
+  }
+}
+
+function _injectSaveIcon(link: HTMLAnchorElement): void {
+  // Never inject inside UpApply's own elements
+  if (link.closest('[data-upapply-job],[data-upapply-chip],[data-upapply-actions],[data-upapply-toggle]')) return;
+  // Already injected next to this exact link element
+  if (link.nextElementSibling?.getAttribute?.('data-upapply-save') === '1') return;
+
+  const jobUrl = _normalizeJobUrl(link.href);
+  const dedupeKey = jobUrl;
+  if (_saveIconInjected.has(dedupeKey)) return;
+  _saveIconInjected.add(dedupeKey);
+
+  const title = link.textContent?.trim() || '';
+
+  const icon = document.createElement('span');
+  icon.setAttribute('data-upapply-save', '1');
+  icon.textContent = '💾';
+  icon.title = 'UpApply: save this job';
+  icon.style.cssText =
+    'display:inline-flex;align-items:center;justify-content:center;' +
+    'min-width:16px;height:16px;font-size:11px;line-height:1;cursor:pointer;' +
+    'margin-left:4px;vertical-align:middle;flex-shrink:0;' +
+    'opacity:0.45;transition:opacity 0.15s;';
+
+  icon.addEventListener('mouseenter', () => { if (!icon.dataset.done) icon.style.opacity = '1'; });
+  icon.addEventListener('mouseleave', () => { if (icon.dataset.done !== '1') icon.style.opacity = '0.45'; });
+
+  let running = false;
+  icon.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (running || icon.dataset.done === '1') return;
+    running = true;
+    await _handleSaveJob(jobUrl, title, icon);
+    running = false;
+  });
+
+  link.after(icon);
+}
+
+/** Attach save icons to all job links on the current page (safe to call repeatedly). */
+function _attachSaveIcons(): void {
+  document.querySelectorAll<HTMLAnchorElement>('a[href*="/jobs/~"]').forEach(_injectSaveIcon);
 }
 
 /** Show a sticky banner when available connects < connectsRequired + HIGHEST_BID.
@@ -1447,6 +1571,9 @@ function _handleMutations(): void {
     document.getElementById('ua-workroom-proposal-btn')?.remove();
     _workroomProposalBtnInjected = false;
   }
+
+  // 💾 Save icons — attach to every job link on every page (tiles, rows, detail, search)
+  _attachSaveIcons();
 }
 
 // Guard: only the NEWEST content script instance may score notifications.
