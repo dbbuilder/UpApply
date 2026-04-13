@@ -67,10 +67,13 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Run migrations in 'online' mode with async engine."""
+    # Explicitly set search_path=public so FK references (e.g. REFERENCES users)
+    # resolve correctly regardless of the database user's default search_path.
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args={"server_settings": {"search_path": "public"}},
     )
 
     async with connectable.connect() as connection:
