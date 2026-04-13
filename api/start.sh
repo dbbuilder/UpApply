@@ -9,6 +9,48 @@ elif [[ $DATABASE_URL == postgresql://* ]]; then
 fi
 
 echo "Starting UpApply API..."
+
+# Pre-flight: detect stale alembic_version (version stamp exists but schema is
+# missing). This happens when the DB was replaced/reset but the version table
+# survived, causing Alembic to skip early migrations that built the base schema.
+echo "Checking migration state..."
+python3 - <<'PYEOF'
+import asyncio, os, sys
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import text
+
+async def repair_if_stale():
+    engine = create_async_engine(os.environ["DATABASE_URL"], echo=False)
+    try:
+        async with engine.begin() as conn:
+            row = await conn.execute(text("""
+                SELECT
+                  (SELECT EXISTS(
+                    SELECT 1 FROM pg_tables
+                    WHERE schemaname = 'public' AND tablename = 'alembic_version'
+                  )) AS av_exists,
+                  (SELECT EXISTS(
+                    SELECT 1 FROM pg_tables
+                    WHERE schemaname = 'public' AND tablename = 'users'
+                  )) AS users_exists
+            """))
+            av_exists, users_exists = row.fetchone()
+
+            if av_exists and not users_exists:
+                print("[start.sh] Stale alembic_version detected (version stamp present "
+                      "but schema is missing). Resetting to base so all migrations "
+                      "run from scratch.", flush=True)
+                await conn.execute(text("DELETE FROM alembic_version"))
+            elif not av_exists:
+                print("[start.sh] Fresh database — no alembic_version table yet.", flush=True)
+            else:
+                print("[start.sh] Schema looks healthy — proceeding normally.", flush=True)
+    finally:
+        await engine.dispose()
+
+asyncio.run(repair_if_stale())
+PYEOF
+
 echo "Running database migrations..."
 
 # Run database migrations
