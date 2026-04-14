@@ -1,0 +1,19 @@
+name: Keep API alive
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'   # every 10 minutes
+  workflow_dispatch:           # allow manual trigger
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" https://upapply-api.onrender.com/health)
+          echo "Health status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "WARNING: API returned $STATUS"
+            exit 1
+          fi
