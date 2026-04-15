@@ -573,39 +573,36 @@ async def import_contracts(
             workroom_url = f"https://www.upwork.com/nx/wm/workroom/{contract.contract_id}/overview"
             existing_prop = await db.execute(
                 select(Proposal).where(
-                        Proposal.user_id == current_user.id,
-                        Proposal.upwork_job_url == workroom_url,
-                    )
+                    Proposal.user_id == current_user.id,
+                    Proposal.upwork_job_url == workroom_url,
                 )
-                prop = existing_prop.scalar_one_or_none()
-                if prop:
-                    prop.cover_letter_text = contract.cover_letter_text.strip()
-                    prop.was_hired = True
-                    prop.job_id = job.id
-                else:
-                    try:
-                        from tenacity import RetryError
-                        prop_embedding = await generate_embedding(contract.cover_letter_text.strip())
-                    except (RetryError, Exception):
-                        prop_embedding = None
-                    prop = Proposal(
-                        user_id=current_user.id,
-                        job_id=job.id,
-                        upwork_job_url=workroom_url,
-                        job_title=contract.title,
-                        cover_letter_text=contract.cover_letter_text.strip(),
-                        was_hired=True,
-                        status="hired",
-                        source="contract_import",
-                        embedding=prop_embedding,
-                    )
-                    db.add(prop)
+            )
+            prop = existing_prop.scalar_one_or_none()
+            if prop:
+                prop.cover_letter_text = contract.cover_letter_text.strip()
+                prop.was_hired = True
+                prop.job_id = job.id
+            else:
+                try:
+                    from tenacity import RetryError
+                    prop_embedding = await generate_embedding(contract.cover_letter_text.strip())
+                except (RetryError, Exception):
+                    prop_embedding = None
+                prop = Proposal(
+                    user_id=current_user.id,
+                    job_id=job.id,
+                    upwork_job_url=workroom_url,
+                    job_title=contract.title,
+                    cover_letter_text=contract.cover_letter_text.strip(),
+                    was_hired=True,
+                    status="hired",
+                    source="contract_import",
+                    embedding=prop_embedding,
+                )
+                db.add(prop)
 
-        await db.commit()
-        return ContractImportResponse(imported=imported, updated=updated, total=len(request.contracts))
-    except Exception as _exc:  # DEBUG: surface real error temporarily
-        logger.exception("import_contracts debug: %s", _exc)
-        raise HTTPException(status_code=500, detail=f"DEBUG: {type(_exc).__name__}: {_exc}")
+    await db.commit()
+    return ContractImportResponse(imported=imported, updated=updated, total=len(request.contracts))
 
 
 # Milestone suggestion endpoint
