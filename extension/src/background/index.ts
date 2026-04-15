@@ -10,6 +10,68 @@ import { logger } from '../lib/logger';
 let currentJobData: JobData | null = null;
 
 // ---------------------------------------------------------------------------
+// URL pre-check — once per browser session on first activation.
+// Detects hardcoded Upwork navigation URLs that have been silently redirected
+// (e.g. /nx/search/jobs/saved/ → /nx/find-work/), which would cause import
+// operations to scrape the wrong page.
+// ---------------------------------------------------------------------------
+
+const URL_CHECKS: Array<{ label: string; url: string; expectedPath: string }> = [
+  { label: 'Saved Jobs',         url: 'https://www.upwork.com/nx/find-work/saved/',       expectedPath: '/nx/find-work/saved' },
+  { label: 'Proposals',          url: 'https://www.upwork.com/nx/proposals/',              expectedPath: '/nx/proposals' },
+  { label: 'Archived Proposals', url: 'https://www.upwork.com/nx/proposals/archived',      expectedPath: '/nx/proposals' },
+  { label: 'Find Work',          url: 'https://www.upwork.com/nx/find-work/',              expectedPath: '/nx/find-work' },
+  { label: 'Contracts',          url: 'https://www.upwork.com/nx/wm/freelancer/contracts', expectedPath: '/nx/wm/freelancer/contracts' },
+];
+
+const AUTH_PATH_HINTS = ['/login', '/account-security', '/ab/account-security'];
+
+async function runUrlPreCheck(): Promise<void> {
+  // Only once per browser session (session storage is cleared on browser close)
+  const session = await chrome.storage.session.get('urlCheckDone').catch(() => ({}));
+  if ((session as Record<string, unknown>)['urlCheckDone']) return;
+  await chrome.storage.session.set({ urlCheckDone: true }).catch(() => {});
+
+  logger.log('UpApply: Running URL pre-check...');
+  const issues: string[] = [];
+
+  await Promise.all(URL_CHECKS.map(async ({ label, url, expectedPath }) => {
+    try {
+      const resp = await fetch(url, { redirect: 'follow' });
+      const finalPath = new URL(resp.url || url).pathname;
+
+      if (AUTH_PATH_HINTS.some(h => finalPath.includes(h))) {
+        // Auth redirect — expected when service worker has no session cookies
+        logger.log(`UpApply URL check [${label}]: auth redirect (OK — cannot verify without session)`);
+        return;
+      }
+
+      if (!finalPath.startsWith(expectedPath)) {
+        const msg = `[${label}] expected path starting with "${expectedPath}", got "${finalPath}" (from: ${url})`;
+        logger.warn(`UpApply URL pre-check ISSUE: ${msg}`);
+        issues.push(msg);
+      } else {
+        logger.log(`UpApply URL check [${label}]: OK`);
+      }
+    } catch {
+      logger.log(`UpApply URL check [${label}]: skipped (fetch error — extension may be offline)`);
+    }
+  }));
+
+  if (issues.length > 0) {
+    console.warn(
+      `[UpApply] URL Pre-Check: ${issues.length} issue(s) — hardcoded Upwork URLs may have changed:\n` +
+      issues.map(i => `  • ${i}`).join('\n')
+    );
+  } else {
+    logger.log('UpApply URL pre-check: all OK');
+  }
+}
+
+chrome.runtime.onStartup.addListener(() => { runUrlPreCheck().catch(() => {}); });
+chrome.runtime.onInstalled.addListener(() => { runUrlPreCheck().catch(() => {}); });
+
+// ---------------------------------------------------------------------------
 // SW keepalive — MV3 service workers are terminated after ~30s of inactivity.
 // During active scoring we touch chrome.storage every 20s to reset the timer.
 // ---------------------------------------------------------------------------
@@ -29,6 +91,9 @@ function _stopKeepAlive(): void {
 
 // Listen for messages from content script and sidebar
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Fire pre-check on first message of each SW activation (session flag prevents re-runs)
+  runUrlPreCheck().catch(() => {});
+
   logger.log('UpApply Background: Received message', message.type);
 
   switch (message.type) {
