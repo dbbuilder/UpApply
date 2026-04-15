@@ -229,9 +229,27 @@ async function _ensureJobSaved(jobUrl: string, token: string, apiBase: string, f
   let skills = rec?.skills || [];
   if (!description) {
     const d = await _fetchJobData(jobUrl);
-    description = d.description || title;
+    description = d.description || '';
     skills = d.skills || [];
   }
+  // Fallback: if description is a stub (< 150 chars), open posting page in background tab
+  if (description.length < 150) {
+    try {
+      const bgResp = await new Promise<{ success: boolean; description?: string }>((resolve) => {
+        chrome.runtime.sendMessage({ type: 'FETCH_JOB_FULL_DESCRIPTION', jobUrl }, (resp) => {
+          if (chrome.runtime.lastError) { resolve({ success: false }); return; }
+          resolve((resp as { success: boolean; description?: string }) || { success: false });
+        });
+      });
+      if (bgResp.success && bgResp.description && bgResp.description.length > description.length) {
+        description = bgResp.description;
+        logger.log('[UpApply] _ensureJobSaved fallback description:', description.length, 'chars');
+      }
+    } catch {
+      // non-critical
+    }
+  }
+  if (!description) description = title;
 
   const resp = await fetch(`${apiBase}/api/v1/jobs`, {
     method: 'POST',
@@ -818,16 +836,38 @@ async function _handleSaveJob(jobUrl: string, title: string, icon: HTMLElement):
   try {
     // Fetch full job data via GraphQL so we store description + skills
     const jobData = await _fetchJobData(jobUrl);
-    const description = jobData.description || title;
+    let description = jobData.description || '';
 
-    // Save (idempotent — returns existing job if already saved)
+    // Fallback: if GraphQL returned a stub (< 150 chars), open the posting
+    // page in a background tab and read the full description from the DOM.
+    if (description.length < 150) {
+      try {
+        icon.title = 'Reading full posting…';
+        const bgResp = await new Promise<{ success: boolean; description?: string }>((resolve) => {
+          chrome.runtime.sendMessage({ type: 'FETCH_JOB_FULL_DESCRIPTION', jobUrl }, (resp) => {
+            if (chrome.runtime.lastError) { resolve({ success: false }); return; }
+            resolve((resp as { success: boolean; description?: string }) || { success: false });
+          });
+        });
+        if (bgResp.success && bgResp.description && bgResp.description.length > description.length) {
+          description = bgResp.description;
+          logger.log('[UpApply] 💾 fallback description fetched:', description.length, 'chars');
+        }
+      } catch {
+        // non-critical — proceed with whatever GraphQL returned
+      }
+    }
+
+    const descToSave = description || title;
+
+    // Save (idempotent — backend re-analyzes if new description is longer than stored stub)
     const saveResp = await fetch(`${apiBase}/api/v1/jobs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({
         upwork_url: jobUrl,
         title: title || 'Job',
-        description,
+        description: descToSave,
         skills_required: jobData.skills.length ? jobData.skills : undefined,
         client_info: jobData.clientCountry ? { location: jobData.clientCountry } : undefined,
       }),

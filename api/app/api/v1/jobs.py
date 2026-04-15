@@ -124,6 +124,41 @@ async def create_job(
     existing_job = result.scalar_one_or_none()
 
     if existing_job:
+        # If the incoming description is substantially longer than the stored one
+        # (i.e. the stored one was a stub like just the title), re-analyze and update.
+        existing_desc = existing_job.description or ""
+        incoming_desc = job_data.description or ""
+        if len(incoming_desc) > len(existing_desc) + 50:
+            try:
+                job_skills = job_data.skills_required or []
+                client_info = job_data.client_info.model_dump() if job_data.client_info else None
+                reanalysis = await run_full_analysis(
+                    db=db,
+                    user_id=current_user.id,
+                    profile=profile,
+                    job_description=incoming_desc,
+                    job_skills=job_skills,
+                    budget_amount=job_data.budget_amount,
+                    budget_min=job_data.budget_min,
+                    client_info=client_info,
+                )
+                existing_job.description = incoming_desc
+                if job_data.full_description:
+                    existing_job.full_description = job_data.full_description
+                existing_job.match_score = reanalysis.match_score
+                existing_job.analysis = {
+                    "skill_matches": [m.model_dump() for m in reanalysis.skill_matches],
+                    "missing_skills": reanalysis.missing_skills,
+                    "strengths": reanalysis.strengths,
+                    "concerns": reanalysis.concerns,
+                    "deal_breaker_warnings": reanalysis.deal_breaker_warnings,
+                    "relevant_memory_ids": [m["id"] for m in reanalysis.relevant_memories],
+                    "recommendation": reanalysis.recommendation,
+                }
+                await db.commit()
+                await db.refresh(existing_job)
+            except Exception:
+                pass  # non-critical — return existing job as-is
         return existing_job
 
     job_skills = job_data.skills_required or []

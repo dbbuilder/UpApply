@@ -924,6 +924,77 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })();
       return true;
 
+    // ------------------------------------------------------------------
+    // FETCH_JOB_FULL_DESCRIPTION — used by the 💾 save icon and Queue
+    // action as a fallback when GraphQL returns an empty/stub description.
+    // Opens the job URL in a background tab, waits for the content script
+    // (ping-wait, no manual injection), extracts the description, closes tab.
+    // ------------------------------------------------------------------
+    case 'FETCH_JOB_FULL_DESCRIPTION':
+      (async () => {
+        const { jobUrl } = message as { jobUrl: string };
+        let tabId: number | null = null;
+        try {
+          const tab = await chrome.tabs.create({ url: jobUrl, active: false });
+          if (!tab.id) { sendResponse({ success: false, error: 'tab creation failed' }); return; }
+          tabId = tab.id;
+
+          // Race-condition-safe load wait
+          await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              chrome.tabs.onUpdated.removeListener(listener);
+              reject(new Error('Job page load timeout'));
+            }, 25_000);
+            const listener = (id: number, info: chrome.tabs.TabChangeInfo) => {
+              if (id === tabId && info.status === 'complete') {
+                chrome.tabs.onUpdated.removeListener(listener);
+                clearTimeout(timeout);
+                resolve();
+              }
+            };
+            chrome.tabs.onUpdated.addListener(listener);
+            chrome.tabs.get(tabId!, (t) => {
+              if (chrome.runtime.lastError) return;
+              if (t.status === 'complete') {
+                chrome.tabs.onUpdated.removeListener(listener);
+                clearTimeout(timeout);
+                resolve();
+              }
+            });
+          });
+
+          // Ping-wait — content script auto-injects; no manual injection
+          const ready = await new Promise<boolean>((resolve) => {
+            const deadline = Date.now() + 12_000;
+            const tryPing = () => {
+              chrome.tabs.sendMessage(tabId!, { type: 'PING' }, (resp) => {
+                if (!chrome.runtime.lastError && resp?.pong) { resolve(true); return; }
+                if (Date.now() < deadline) setTimeout(tryPing, 400);
+                else resolve(false);
+              });
+            };
+            tryPing();
+          });
+
+          if (!ready) { sendResponse({ success: false, error: 'content script not ready' }); return; }
+
+          const resp = await new Promise<{ success: boolean; data?: { fullDescription?: string }; error?: string }>((resolve) => {
+            chrome.tabs.sendMessage(tabId!, { type: 'EXTRACT_JOB_POSTING_DATA' }, (r) => {
+              if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
+              else resolve(r || { success: false, error: 'no response' });
+            });
+          });
+
+          const description = resp?.data?.fullDescription || '';
+          sendResponse({ success: true, description });
+        } catch (err) {
+          sendResponse({ success: false, error: String(err) });
+        } finally {
+          if (tabId !== null) { try { await chrome.tabs.remove(tabId); } catch { /* ignore */ } }
+        }
+      })();
+      return true;
+
     case 'DOWNLOAD_ATTACHMENT':
       // Download an attachment and return as base64
       (async () => {
