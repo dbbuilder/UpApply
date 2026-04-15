@@ -471,6 +471,42 @@ async def delete_job(
     await db.commit()
 
 
+@router.post("/import-contracts-dbtest")
+async def import_contracts_dbtest(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Minimal DB test to isolate the 500 in import_contracts."""
+    from uuid import uuid4
+    import traceback as _tb
+    try:
+        job = Job(
+            user_id=current_user.id,
+            upwork_job_id=f"contract_dbtest_{uuid4().hex[:8]}",
+            upwork_url="https://www.upwork.com/nx/wm/workroom/dbtest/overview",
+            title="DB Test Job",
+            description="DB test",
+            is_saved=True,
+            source="contract_import",
+            match_score=100.0,
+            embedding=None,
+        )
+        db.add(job)
+        await db.flush()
+        app_rec = Application(
+            user_id=current_user.id,
+            job_id=job.id,
+            status=ApplicationStatus.HIRED,
+            outcome_notes="db test",
+        )
+        db.add(app_rec)
+        await db.flush()
+        await db.rollback()
+        return {"ok": True, "job_id": job.id}
+    except Exception as exc:
+        return {"ok": False, "error": type(exc).__name__, "detail": str(exc), "trace": _tb.format_exc()[-1000:]}
+
+
 @router.post("/import-contracts", response_model=ContractImportResponse)
 async def import_contracts(
     request: ContractImportRequest,
