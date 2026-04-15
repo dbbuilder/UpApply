@@ -455,14 +455,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
           });
 
-          // Give the Nuxt SPA time to hydrate
-          await new Promise(resolve => setTimeout(resolve, 2500));
-
-          // Use ping-wait instead of manual re-injection — Chrome auto-injects
-          // the content script on all upwork.com pages; re-injecting creates a
-          // duplicate that causes "message channel closed" on the scrape send.
+          // Ping-wait: confirm the auto-injected content script is ready.
+          // (Don't re-inject manually — that creates a duplicate instance.)
           const ready = await new Promise<boolean>((resolve) => {
-            const deadline = Date.now() + 10_000;
+            const deadline = Date.now() + 15_000;
             const tryPing = () => {
               chrome.tabs.sendMessage(savedTab.id!, { type: 'PING' }, (resp) => {
                 if (!chrome.runtime.lastError && resp?.pong) { resolve(true); return; }
@@ -475,6 +471,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
           if (!ready) {
             sendResponse({ success: false, error: 'Content script not ready on saved jobs page' });
+            return;
+          }
+
+          // Wait for the Nuxt SPA to hydrate and render job tiles. Background
+          // (inactive) tabs are throttled by Chrome, so the saved-jobs API call
+          // and Vue render can take much longer than on an active tab.
+          // Poll for at least one JobTile element before scraping (max 20 s).
+          const tilesReady = await new Promise<boolean>((resolve) => {
+            const deadline = Date.now() + 20_000;
+            const poll = () => {
+              chrome.scripting.executeScript({
+                target: { tabId: savedTab.id! },
+                func: () => document.querySelectorAll('article[data-test="JobTile"]').length,
+              }).then(([result]) => {
+                if ((result?.result ?? 0) > 0) { resolve(true); return; }
+                if (Date.now() < deadline) setTimeout(poll, 500);
+                else resolve(false);
+              }).catch(() => {
+                if (Date.now() < deadline) setTimeout(poll, 500);
+                else resolve(false);
+              });
+            };
+            poll();
+          });
+
+          if (!tilesReady) {
+            sendResponse({ success: false, error: 'No saved jobs found — page may not have loaded or you have no bookmarked jobs.' });
             return;
           }
 
