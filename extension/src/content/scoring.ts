@@ -1019,6 +1019,7 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
       item.badge.textContent = '?';
       item.badge.style.background = '#6b7280';
       item.badge.title = 'UpApply: not logged in';
+      _showLoginPrompt();
       return;
     }
 
@@ -1082,10 +1083,16 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
     _applyBadgeResult(item, data.match_score, chips, false, data.reason);
     logger.log(`[UpApply] score DONE   ${uid}`);
   } catch (err) {
-    console.error(`[UpApply] score ERROR  ${uid}`, err);
+    logger.error(`score ERROR  ${uid}`, err);
     item.badge.textContent = '?';
     item.badge.style.background = '#6b7280';
-    item.badge.title = 'UpApply: scoring error';
+    if (String(err).includes('401')) {
+      item.badge.title = 'UpApply: session expired — please log in again';
+      _clearAuthTokenCache();
+      _showLoginPrompt();
+    } else {
+      item.badge.title = 'UpApply: scoring error';
+    }
   }
 }
 
