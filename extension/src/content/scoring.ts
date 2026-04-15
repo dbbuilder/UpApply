@@ -1424,6 +1424,27 @@ function _attachTileObservers(): void {
 let _scoreButtonInjected = false;
 
 
+/** Position the Score button just to the right of the "Job alerts" tab.
+ *  Falls back to top-right corner if the tab can't be found. */
+function _positionScoreButton(btn: HTMLButtonElement): void {
+  // Look for the "Job alerts" tab (Upwork notification page tabs)
+  const tabEl = Array.from(
+    document.querySelectorAll<HTMLElement>('a, button, [role="tab"], li, span'),
+  ).find((el) => el.textContent?.trim() === 'Job alerts');
+
+  if (tabEl) {
+    const r = tabEl.getBoundingClientRect();
+    btn.style.top  = `${r.top + (r.height - 28) / 2}px`;
+    btn.style.left = `${r.right + 10}px`;
+    btn.style.right = '';
+  } else {
+    // Fallback: top-right corner
+    btn.style.top   = '64px';
+    btn.style.right = '16px';
+    btn.style.left  = '';
+  }
+}
+
 function _injectScoreButton(): void {
   if (_scoreButtonInjected) return;
   _scoreButtonInjected = true;
@@ -1451,6 +1472,10 @@ function _injectScoreButton(): void {
     _processNotificationRows();
   });
   document.body.appendChild(btn);
+
+  // Position next to "Job alerts" tab — retry briefly in case tabs haven't rendered yet
+  _positionScoreButton(btn);
+  setTimeout(() => { const b = document.getElementById('ua-score-btn') as HTMLButtonElement | null; if (b) _positionScoreButton(b); }, 600);
 }
 
 // ---------------------------------------------------------------------------
