@@ -471,42 +471,6 @@ async def delete_job(
     await db.commit()
 
 
-@router.post("/import-contracts-dbtest")
-async def import_contracts_dbtest(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Minimal DB test to isolate the 500 in import_contracts."""
-    from uuid import uuid4
-    import traceback as _tb
-    try:
-        job = Job(
-            user_id=current_user.id,
-            upwork_job_id=f"contract_dbtest_{uuid4().hex[:8]}",
-            upwork_url="https://www.upwork.com/nx/wm/workroom/dbtest/overview",
-            title="DB Test Job",
-            description="DB test",
-            is_saved=True,
-            source="contract_import",
-            match_score=100.0,
-            embedding=None,
-        )
-        db.add(job)
-        await db.flush()
-        app_rec = Application(
-            user_id=current_user.id,
-            job_id=job.id,
-            status=ApplicationStatus.HIRED,
-            outcome_notes="db test",
-        )
-        db.add(app_rec)
-        await db.flush()
-        await db.rollback()
-        return {"ok": True, "job_id": job.id}
-    except Exception as exc:
-        return {"ok": False, "error": type(exc).__name__, "detail": str(exc), "trace": _tb.format_exc()[-1000:]}
-
-
 @router.post("/import-contracts", response_model=ContractImportResponse)
 async def import_contracts(
     request: ContractImportRequest,
@@ -515,102 +479,100 @@ async def import_contracts(
 ):
     """Import Upwork contract history as won jobs for scoring calibration."""
     import asyncio
-    import traceback as _tb
     imported = 0
     updated = 0
 
+    # Pre-fetch all existing jobs to avoid N+1 queries
+    upwork_ids = [f"contract_{c.contract_id}" for c in request.contracts]
+    existing_result = await db.execute(
+        select(Job).where(
+            Job.user_id == current_user.id,
+            Job.upwork_job_id.in_(upwork_ids),
+        )
+    )
+    existing_map = {j.upwork_job_id: j for j in existing_result.scalars().all()}
+
+    # Build descriptions for all contracts
+    descriptions = []
+    for contract in request.contracts:
+        parts = [contract.title]
+        if contract.rate:
+            parts.append(f"Rate: {contract.rate}")
+        if contract.client_name:
+            parts.append(f"Client: {contract.client_name}")
+        if contract.date_range:
+            parts.append(f"Dates: {contract.date_range}")
+        descriptions.append("\n".join(parts))
+
+    # Generate all embeddings in parallel, skipping contracts that already have them
+    needs_embedding = [
+        i for i, c in enumerate(request.contracts)
+        if f"contract_{c.contract_id}" not in existing_map
+        or existing_map[f"contract_{c.contract_id}"].embedding is None
+    ]
     try:
-        # Pre-fetch all existing jobs to avoid N+1 queries
-        upwork_ids = [f"contract_{c.contract_id}" for c in request.contracts]
-        existing_result = await db.execute(
-            select(Job).where(
-                Job.user_id == current_user.id,
-                Job.upwork_job_id.in_(upwork_ids),
+        from tenacity import RetryError
+        embed_tasks = [generate_embedding(descriptions[i]) for i in needs_embedding]
+        embeddings_list = await asyncio.gather(*embed_tasks) if embed_tasks else []
+    except (RetryError, Exception):
+        embeddings_list = [None] * len(needs_embedding)
+    embedding_by_idx = dict(zip(needs_embedding, embeddings_list))
+
+    for idx, contract in enumerate(request.contracts):
+        upwork_job_id = f"contract_{contract.contract_id}"
+        existing_job = existing_map.get(upwork_job_id)
+        description = descriptions[idx]
+        embedding = embedding_by_idx.get(idx)
+
+        if existing_job:
+            # Update embedding if missing; always count as synced
+            if existing_job.embedding is None and embedding is not None:
+                existing_job.embedding = embedding
+            updated += 1
+            job = existing_job
+        else:
+            job = Job(
+                user_id=current_user.id,
+                upwork_job_id=upwork_job_id,
+                upwork_url=f"https://www.upwork.com/nx/wm/workroom/{contract.contract_id}/overview",
+                title=contract.title,
+                description=description,
+                budget_type=contract.contract_type if contract.contract_type != "unknown" else None,
+                budget_amount=contract.rate,
+                client_info={"name": contract.client_name} if contract.client_name else None,
+                is_saved=True,
+                source="contract_import",
+                match_score=100.0,  # Won contracts are calibration anchors
+                embedding=embedding,
+            )
+            db.add(job)
+            await db.flush()  # Materialise job.id before creating Application
+            imported += 1
+
+        # Ensure an Application record exists with HIRED status
+        existing_app = await db.execute(
+            select(Application).where(
+                Application.user_id == current_user.id,
+                Application.job_id == job.id,
             )
         )
-        existing_map = {j.upwork_job_id: j for j in existing_result.scalars().all()}
-
-        # Build descriptions for all contracts
-        descriptions = []
-        for contract in request.contracts:
-            parts = [contract.title]
-            if contract.rate:
-                parts.append(f"Rate: {contract.rate}")
-            if contract.client_name:
-                parts.append(f"Client: {contract.client_name}")
-            if contract.date_range:
-                parts.append(f"Dates: {contract.date_range}")
-            descriptions.append("\n".join(parts))
-
-        # Generate all embeddings in parallel, skipping contracts that already have them
-        needs_embedding = [
-            i for i, c in enumerate(request.contracts)
-            if f"contract_{c.contract_id}" not in existing_map
-            or existing_map[f"contract_{c.contract_id}"].embedding is None
-        ]
-        try:
-            from tenacity import RetryError
-            embed_tasks = [generate_embedding(descriptions[i]) for i in needs_embedding]
-            embeddings_list = await asyncio.gather(*embed_tasks) if embed_tasks else []
-        except (RetryError, Exception):
-            embeddings_list = [None] * len(needs_embedding)
-        embedding_by_idx = dict(zip(needs_embedding, embeddings_list))
-
-        for idx, contract in enumerate(request.contracts):
-            upwork_job_id = f"contract_{contract.contract_id}"
-            existing_job = existing_map.get(upwork_job_id)
-            description = descriptions[idx]
-            embedding = embedding_by_idx.get(idx)
-
-            if existing_job:
-                # Update embedding if missing; always count as synced
-                if existing_job.embedding is None and embedding is not None:
-                    existing_job.embedding = embedding
-                updated += 1
-                job = existing_job
-            else:
-                job = Job(
-                    user_id=current_user.id,
-                    upwork_job_id=upwork_job_id,
-                    upwork_url=f"https://www.upwork.com/nx/wm/workroom/{contract.contract_id}/overview",
-                    title=contract.title,
-                    description=description,
-                    budget_type=contract.contract_type if contract.contract_type != "unknown" else None,
-                    budget_amount=contract.rate,
-                    client_info={"name": contract.client_name} if contract.client_name else None,
-                    is_saved=True,
-                    source="contract_import",
-                    match_score=100.0,  # Won contracts are calibration anchors
-                    embedding=embedding,
-                )
-                db.add(job)
-                await db.flush()  # Materialise job.id before creating Application
-                imported += 1
-
-            # Ensure an Application record exists with HIRED status
-            existing_app = await db.execute(
-                select(Application).where(
-                    Application.user_id == current_user.id,
-                    Application.job_id == job.id,
-                )
+        app = existing_app.scalar_one_or_none()
+        if not app:
+            app = Application(
+                user_id=current_user.id,
+                job_id=job.id,
+                status=ApplicationStatus.HIRED,
+                outcome_notes=f"Imported from contract history. Status: {contract.status}",
             )
-            app = existing_app.scalar_one_or_none()
-            if not app:
-                app = Application(
-                    user_id=current_user.id,
-                    job_id=job.id,
-                    status=ApplicationStatus.HIRED,
-                    outcome_notes=f"Imported from contract history. Status: {contract.status}",
-                )
-                db.add(app)
-            elif app.status != ApplicationStatus.HIRED:
-                app.status = ApplicationStatus.HIRED
+            db.add(app)
+        elif app.status != ApplicationStatus.HIRED:
+            app.status = ApplicationStatus.HIRED
 
-            # If a winning proposal text was scraped, create/update a Proposal record
-            if contract.cover_letter_text and contract.cover_letter_text.strip():
-                workroom_url = f"https://www.upwork.com/nx/wm/workroom/{contract.contract_id}/overview"
-                existing_prop = await db.execute(
-                    select(Proposal).where(
+        # If a winning proposal text was scraped, create/update a Proposal record
+        if contract.cover_letter_text and contract.cover_letter_text.strip():
+            workroom_url = f"https://www.upwork.com/nx/wm/workroom/{contract.contract_id}/overview"
+            existing_prop = await db.execute(
+                select(Proposal).where(
                         Proposal.user_id == current_user.id,
                         Proposal.upwork_job_url == workroom_url,
                     )

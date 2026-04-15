@@ -56,8 +56,9 @@ class Application(Base):
     )
 
     # Application details
+    # DB column is VARCHAR(20) — do NOT use Enum() which would require a PG enum type
     status: Mapped[ApplicationStatus] = mapped_column(
-        Enum(ApplicationStatus), default=ApplicationStatus.DRAFT
+        String(20), default=ApplicationStatus.DRAFT
     )
     bid_amount: Mapped[Optional[float]] = mapped_column(Numeric(10, 2), nullable=True)
 
