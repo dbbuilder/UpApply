@@ -423,18 +423,61 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (async () => {
         const savedUrl = 'https://www.upwork.com/nx/search/jobs/saved/';
         logger.log('UpApply Background: Opening saved jobs tab:', savedUrl);
-        const savedTab = await chrome.tabs.create({ url: savedUrl, active: false });
-        if (!savedTab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }
+        let savedTabId: number | null = null;
         try {
-          await waitForTabLoad(savedTab.id);
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          const manifest = chrome.runtime.getManifest();
-          const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
-          if (contentScriptPath) {
-            try { await chrome.scripting.executeScript({ target: { tabId: savedTab.id }, files: [contentScriptPath] }); }
-            catch (e) { /* already loaded */ }
+          const savedTab = await chrome.tabs.create({ url: savedUrl, active: false });
+          if (!savedTab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }
+          savedTabId = savedTab.id;
+
+          // Wait for page load. Check current status first to avoid race where
+          // complete fires before the onUpdated listener is registered.
+          await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              chrome.tabs.onUpdated.removeListener(listener);
+              reject(new Error('Saved jobs page load timeout'));
+            }, 30_000);
+            const listener = (id: number, info: chrome.tabs.TabChangeInfo) => {
+              if (id === savedTab.id && info.status === 'complete') {
+                chrome.tabs.onUpdated.removeListener(listener);
+                clearTimeout(timeout);
+                resolve();
+              }
+            };
+            chrome.tabs.onUpdated.addListener(listener);
+            // If already complete (loaded from cache), resolve immediately
+            chrome.tabs.get(savedTab.id!, (t) => {
+              if (chrome.runtime.lastError) return;
+              if (t.status === 'complete') {
+                chrome.tabs.onUpdated.removeListener(listener);
+                clearTimeout(timeout);
+                resolve();
+              }
+            });
+          });
+
+          // Give the Nuxt SPA time to hydrate
+          await new Promise(resolve => setTimeout(resolve, 2500));
+
+          // Use ping-wait instead of manual re-injection — Chrome auto-injects
+          // the content script on all upwork.com pages; re-injecting creates a
+          // duplicate that causes "message channel closed" on the scrape send.
+          const ready = await new Promise<boolean>((resolve) => {
+            const deadline = Date.now() + 10_000;
+            const tryPing = () => {
+              chrome.tabs.sendMessage(savedTab.id!, { type: 'PING' }, (resp) => {
+                if (!chrome.runtime.lastError && resp?.pong) { resolve(true); return; }
+                if (Date.now() < deadline) setTimeout(tryPing, 400);
+                else resolve(false);
+              });
+            };
+            tryPing();
+          });
+
+          if (!ready) {
+            sendResponse({ success: false, error: 'Content script not ready on saved jobs page' });
+            return;
           }
-          await new Promise(resolve => setTimeout(resolve, 500));
+
           const response = await new Promise<{ success: boolean; data?: unknown; error?: string }>((resolve) => {
             chrome.tabs.sendMessage(savedTab.id!, { type: 'SCRAPE_JOB_CARDS' }, (resp) => {
               if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
@@ -442,8 +485,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
           });
           sendResponse(response);
+        } catch (err) {
+          sendResponse({ success: false, error: String(err) });
         } finally {
-          try { await chrome.tabs.remove(savedTab.id); } catch (e) { /* ignore */ }
+          if (savedTabId !== null) {
+            try { await chrome.tabs.remove(savedTabId); } catch { /* ignore */ }
+          }
         }
       })();
       return true;
