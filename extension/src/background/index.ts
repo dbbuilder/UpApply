@@ -421,7 +421,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'IMPORT_SAVED_JOBS':
       // Navigate to saved jobs page in background tab, scrape, close, return cards
       (async () => {
-        const savedUrl = 'https://www.upwork.com/nx/search/jobs/saved/';
+        const savedUrl = 'https://www.upwork.com/nx/find-work/saved/';
         logger.log('UpApply Background: Opening saved jobs tab:', savedUrl);
         let savedTabId: number | null = null;
         try {
