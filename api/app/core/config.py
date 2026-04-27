@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
     anthropic_api_key: str = ""
+    anthropic_base_url: str = ""
     cover_letter_model: str = "claude-sonnet-4-6"
 
     # Security

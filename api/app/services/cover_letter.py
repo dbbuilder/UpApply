@@ -11,7 +11,8 @@ from app.schemas.job import SkillMatch
 
 
 def _get_anthropic_client() -> AsyncAnthropic:
-    return AsyncAnthropic(api_key=settings.anthropic_api_key)
+    base_url = settings.anthropic_base_url or None
+    return AsyncAnthropic(api_key=settings.anthropic_api_key, base_url=base_url)
 
 
 def clean_cover_letter(content: str) -> str:

@@ -16,7 +16,8 @@ from app.schemas.profile import (
 
 
 def _get_anthropic_client() -> AsyncAnthropic:
-    return AsyncAnthropic(api_key=settings.anthropic_api_key)
+    base_url = settings.anthropic_base_url or None
+    return AsyncAnthropic(api_key=settings.anthropic_api_key, base_url=base_url)
 
 
 def _build_optimization_prompt(profile: UserProfile) -> str:
