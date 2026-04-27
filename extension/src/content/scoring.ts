@@ -1013,7 +1013,7 @@ async function _scoreOneNotif(item: _NotifQueueItem): Promise<void> {
   try {
     // 1. Persistent cache check
     // sc_v9: added description/title/skills so preview toggle never needs to re-fetch
-    const CACHE_KEY = `sc_v9_${item.jobUrl}`;
+    const CACHE_KEY = `sc_v10_${item.jobUrl}`;
     const CACHE_TTL = 24 * 60 * 60 * 1000;
     type CacheEntry = { score: number; chips: string[]; reason?: string; title?: string; description?: string; skills?: string[]; ts: number };
     const storageAvailable = !!(chrome?.storage?.local);
