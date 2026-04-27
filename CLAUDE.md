@@ -45,6 +45,24 @@ UpApply/
 └── src/                    # Legacy CLI (reference only)
 ```
 
+## Secrets Management (Doppler)
+
+Secrets are managed in Doppler project `upapply` with three environments: `dev`, `stg`, `prd`.
+
+```bash
+# First-time setup (already configured via doppler.yaml → dev)
+doppler setup  # picks up doppler.yaml automatically
+
+# View/edit secrets
+doppler secrets --project upapply --config dev
+doppler secrets --project upapply --config prd
+
+# Sync prd secrets → Render env vars (then trigger a Render deploy)
+./scripts/sync-doppler-to-render.sh
+```
+
+Do NOT edit `api/.env` or `extension/.env` directly — those files are kept as fallback only. All canonical values live in Doppler.
+
 ## Development Commands
 
 ### API Development
@@ -52,20 +70,16 @@ UpApply/
 ```bash
 cd api
 
-# Setup
+# Setup (one-time)
 python3 -m venv venv
 source venv/bin/activate
 pip install -e .
 
-# Configure environment
-cp .env.example .env
-# Edit .env with your DATABASE_URL and OPENAI_API_KEY
-
-# Run migrations
-alembic upgrade head
+# Run migrations (Doppler injects DATABASE_URL)
+doppler run --project upapply --config dev -- alembic upgrade head
 
 # Start development server
-uvicorn app.main:app --reload --port 8000
+doppler run --project upapply --config dev -- uvicorn app.main:app --reload --port 8000
 ```
 
 ### Extension Development
@@ -77,13 +91,13 @@ cd extension
 npm install
 
 # Development with hot reload
-npm run dev
+doppler run --project upapply --config dev -- npm run dev
 
 # Type checking
 npm run type-check
 
 # Production build
-npm run build
+doppler run --project upapply --config prd -- npm run build
 # Load dist/ folder in chrome://extensions
 ```
 
