@@ -413,7 +413,12 @@ Respond with JSON only (no markdown): {{"score": <integer 0-100>, "reason": "<on
         score = float(data.get("score", 0))
         reason = data.get("reason", "")
         return min(max(score, 0), 100), reason or None
-    except Exception:
+    except Exception as exc:
+        import logging as _log
+        _log.getLogger(__name__).warning(
+            "LLM scoring failed (model=%s), falling back to rule-based: %s: %s",
+            settings.scoring_model, type(exc).__name__, exc,
+        )
         return None, None
 
 
