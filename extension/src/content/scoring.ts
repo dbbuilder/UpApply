@@ -1352,6 +1352,15 @@ async function _processNotifQueue(): Promise<void> {
     logger.log(`[UpApply] queue FINISHED done=${_notifDone}/${_notifTotal}`);
     _notifProcessing = false;
     _hideProgressBar();
+    // Restore Score button so user can rescore without reloading
+    const btn = document.getElementById('ua-score-btn') as HTMLButtonElement | null;
+    if (btn) {
+      btn.textContent = '⚡ Rescore';
+      btn.disabled = false;
+      btn.style.opacity = '1';
+      btn.style.cursor = 'pointer';
+      btn.style.background = '#1d4ed8';
+    }
     // Re-trigger: items pushed by IntersectionObserver while this run was active
     // sit in _notifQueue. The guard at the top prevents double-entry.
     if (_notifQueue.length > 0) {
@@ -1425,57 +1434,78 @@ let _scoreButtonInjected = false;
 
 
 /** Position the Score button just to the right of the "Job alerts" tab.
- *  Falls back to top-right corner if the tab can't be found. */
+ *  Falls back to a reliable left-side position if the tab can't be found.
+ *  Uses includes() so badge counts in nested spans don't break the match. */
 function _positionScoreButton(btn: HTMLButtonElement): void {
-  // Look for the "Job alerts" tab (Upwork notification page tabs)
   const tabEl = Array.from(
     document.querySelectorAll<HTMLElement>('a, button, [role="tab"], li, span'),
-  ).find((el) => el.textContent?.trim() === 'Job alerts');
+  ).find((el) => {
+    const t = el.textContent?.trim() ?? '';
+    return t === 'Job alerts' || t.startsWith('Job alerts');
+  });
 
   if (tabEl) {
     const r = tabEl.getBoundingClientRect();
-    btn.style.top  = `${r.top + (r.height - 28) / 2}px`;
-    btn.style.left = `${r.right + 10}px`;
-    btn.style.right = '';
-  } else {
-    // Fallback: top-right corner
-    btn.style.top   = '64px';
-    btn.style.right = '16px';
-    btn.style.left  = '';
+    // Only apply if tab is actually in the viewport (positive y)
+    if (r.top >= 0 && r.bottom > 0) {
+      btn.style.top  = `${r.top + (r.height - 28) / 2}px`;
+      btn.style.left = `${r.right + 10}px`;
+      btn.style.right = '';
+      return;
+    }
   }
+  // Fallback: left side below the sticky header — never hidden by sidebar
+  btn.style.top   = '148px';
+  btn.style.left  = '260px';
+  btn.style.right = '';
 }
 
 function _injectScoreButton(): void {
   if (_scoreButtonInjected) return;
   _scoreButtonInjected = true;
-  document.getElementById('ua-score-btn')?.remove();
 
-  const btn = document.createElement('button');
-  btn.id = 'ua-score-btn';
-  btn.type = 'button';
-  // Always fixed to the viewport — never inserted into Upwork's nav DOM,
-  // which can be inside a scrollable container on the notifications page.
-  btn.style.cssText =
-    'position:fixed;top:64px;right:16px;z-index:2147483647;' +
-    'background:#1d4ed8;color:#fff;border:none;cursor:pointer;' +
-    'padding:5px 12px;border-radius:20px;font-size:11px;font-weight:600;' +
-    'font-family:-apple-system,sans-serif;white-space:nowrap;' +
-    'display:flex;align-items:center;gap:4px;' +
-    'box-shadow:0 1px 4px rgba(0,0,0,0.2);transition:background 0.15s;';
+  // Re-use existing button if present (e.g. after scoring finished)
+  let btn = document.getElementById('ua-score-btn') as HTMLButtonElement | null;
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'ua-score-btn';
+    btn.type = 'button';
+    // position:fixed keeps button frozen in viewport regardless of scroll.
+    // Never inserted into Upwork's nav — avoids breaking Vue event handlers.
+    btn.style.cssText =
+      'position:fixed;top:148px;left:260px;z-index:2147483647;' +
+      'background:#1d4ed8;color:#fff;border:none;cursor:pointer;' +
+      'padding:5px 12px;border-radius:20px;font-size:11px;font-weight:600;' +
+      'font-family:-apple-system,sans-serif;white-space:nowrap;' +
+      'display:flex;align-items:center;gap:4px;' +
+      'box-shadow:0 1px 4px rgba(0,0,0,0.2);transition:background 0.15s;';
+    document.body.appendChild(btn);
+  }
+
   btn.textContent = '⚡ Score';
   btn.title = 'Score all notifications';
-  btn.addEventListener('mouseenter', () => { btn.style.background = '#1e40af'; });
-  btn.addEventListener('mouseleave', () => { btn.style.background = '#1d4ed8'; });
-  btn.addEventListener('click', () => {
-    document.getElementById('ua-score-btn')?.remove();
-    _scoreButtonInjected = false;
+  btn.disabled = false;
+  btn.style.opacity = '1';
+  btn.style.cursor = 'pointer';
+  btn.style.background = '#1d4ed8';
+  btn.onmouseenter = () => { if (!btn!.disabled) btn!.style.background = '#1e40af'; };
+  btn.onmouseleave = () => { btn!.style.background = btn!.disabled ? '#6b7280' : '#1d4ed8'; };
+  btn.onclick = () => {
+    // Don't remove — update to show progress so button stays visible while scoring
+    btn!.textContent = '⟳ Scoring…';
+    btn!.disabled = true;
+    btn!.style.opacity = '0.75';
+    btn!.style.cursor = 'default';
+    btn!.style.background = '#6b7280';
     _processNotificationRows();
-  });
-  document.body.appendChild(btn);
+  };
 
   // Position next to "Job alerts" tab — retry briefly in case tabs haven't rendered yet
   _positionScoreButton(btn);
-  setTimeout(() => { const b = document.getElementById('ua-score-btn') as HTMLButtonElement | null; if (b) _positionScoreButton(b); }, 600);
+  setTimeout(() => {
+    const b = document.getElementById('ua-score-btn') as HTMLButtonElement | null;
+    if (b) _positionScoreButton(b);
+  }, 600);
 }
 
 // ---------------------------------------------------------------------------
@@ -1605,9 +1635,9 @@ function _handleMutations(): void {
 
   // Notification button: only show on the dedicated notifications page, never on
   // other pages just because the bell dropdown happens to be open.
-  if (isNotifPage && hasRows && !_notifProcessing) {
-    _injectScoreButton();
-  } else if (_scoreButtonInjected && !_notifProcessing) {
+  if (isNotifPage && hasRows) {
+    _injectScoreButton(); // guard inside prevents double-inject
+  } else if (_scoreButtonInjected && !isNotifPage) {
     document.getElementById('ua-score-btn')?.remove();
     _scoreButtonInjected = false;
   }
