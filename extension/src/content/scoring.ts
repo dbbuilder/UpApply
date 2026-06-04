@@ -735,9 +735,14 @@ async function _getAuthToken(): Promise<string | null> {
   return _contentAuthToken;
 }
 
-/** Called on SPA navigation to force re-read of token on next scoring run. */
+/** Evict the auth token from both memory and chrome.storage.local (e.g. on 401). */
 function _clearAuthTokenCache(): void {
   _contentAuthToken = undefined;
+  if (chrome?.storage?.local) {
+    chrome.storage.local.remove('authToken').catch(() => {});
+  } else {
+    chrome.runtime.sendMessage({ type: 'CLEAR_AUTH_TOKEN' }).catch(() => {});
+  }
 }
 
 // ---------------------------------------------------------------------------
