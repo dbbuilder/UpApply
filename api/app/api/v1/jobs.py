@@ -684,7 +684,7 @@ Return a JSON object with a "milestones" array. Each milestone has:
 - "amount": number (dollar amount for this milestone)"""
 
     response = await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=settings.default_model,
         messages=[
             {
                 "role": "system",

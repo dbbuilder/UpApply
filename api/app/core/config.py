@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     default_model: str = "gpt-4.1-nano"
     scoring_model: str = "gpt-4.1-nano"   # job scoring — cheap structured extraction
+    vision_model: str = "gpt-4o-mini"     # vision/multimodal calls (nano doesn't support images)
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
     anthropic_api_key: str = ""

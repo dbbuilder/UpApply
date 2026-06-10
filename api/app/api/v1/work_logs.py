@@ -148,7 +148,7 @@ async def extract_image_text(
 
     client = get_openai_client()
     response = await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=settings.vision_model,
         messages=[
             {
                 "role": "user",
