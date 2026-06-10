@@ -602,8 +602,17 @@ function _hideProgressBar(): void {
 // This avoids opening background tabs and bypasses bot-detection entirely.
 // ---------------------------------------------------------------------------
 
+// Hardcoded patterns avoid non-literal RegExp (ReDoS) — only two cookie names are ever read.
+const _COOKIE_PATTERNS: Record<string, RegExp> = {
+  'oauth2_global_js_token': /(?:^|;\s*)oauth2_global_js_token=([^;]*)/,
+  'XSRF-TOKEN':             /(?:^|;\s*)XSRF-TOKEN=([^;]*)/,
+  'x-odesk-csrf-token':     /(?:^|;\s*)x-odesk-csrf-token=([^;]*)/,
+};
+
 function _getUpworkCookie(name: string): string | null {
-  const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${encodeURIComponent(name)}=([^;]*)`));
+  const pattern = _COOKIE_PATTERNS[name];
+  if (!pattern) return null;
+  const m = document.cookie.match(pattern);
   return m ? decodeURIComponent(m[1]) : null;
 }
 
@@ -1394,39 +1403,26 @@ function _processNotificationRows(): void {
   _processNotifQueue();
 }
 
-/** Scores a job tile the moment it scrolls into view. One observation per tile. */
-function _observeJobTile(article: HTMLElement): void {
-  if (!_tileObserver) {
-    _tileObserver = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-        _tileObserver!.unobserve(entry.target);
-
-        if (entry.target.querySelector('[data-upapply-job]')) continue;
-        const link = entry.target.querySelector<HTMLAnchorElement>('a[href*="/jobs/~"]');
-        if (!link) continue;
-        const jobUrl = _normalizeJobUrl(link.href);
-        if (_scoredNotifUrls.has(jobUrl)) continue;
-
-        _scoredNotifUrls.add(jobUrl);
-        const title = link.textContent?.trim() || '';
-        const badge = _injectNotifBadge(entry.target, jobUrl);
-        _notifQueue.push({ badge, row: entry.target, jobUrl, title });
-        _notifTotal++;
-        _processNotifQueue(); // safe — _notifProcessing guard skips if running; re-trigger picks up remainder
-      }
-    }, { threshold: 0.1 });
-  }
-  _tileObserver.observe(article);
-}
-
-/** Called by MutationObserver — registers any new, unobserved job tiles with the viewport observer. */
+/** Called by MutationObserver — registers new tiles so they show a "–" placeholder badge.
+ *  No scoring happens here; the Score button triggers _processNotifQueue. */
 function _attachTileObservers(): void {
   document.querySelectorAll<HTMLElement>('article[data-test="JobTile"]').forEach((article) => {
     if (article.dataset.upapplyObserved === '1') return;
     if (article.querySelector('[data-upapply-job]')) return;
     article.dataset.upapplyObserved = '1';
-    _observeJobTile(article);
+
+    const link = article.querySelector<HTMLAnchorElement>('a[href*="/jobs/~"]');
+    if (!link) return;
+    const jobUrl = _normalizeJobUrl(link.href);
+    if (_scoredNotifUrls.has(jobUrl)) return;
+
+    _scoredNotifUrls.add(jobUrl);
+    const title = link.textContent?.trim() || '';
+    const badge = _injectNotifBadge(article, jobUrl);
+    badge.textContent = '–';
+    badge.title = 'Click ⚡ Score to analyze';
+    _notifQueue.push({ badge, row: article, jobUrl, title });
+    _notifTotal++;
   });
 }
 
@@ -1638,19 +1634,20 @@ function _handleMutations(): void {
   const hasRows     = !!document.querySelector('.notification-row a[href*="/jobs/~"]');
   const hasTiles    = !!document.querySelector('article[data-test="JobTile"]');
 
-  // Notification button: only show on the dedicated notifications page, never on
-  // other pages just because the bell dropdown happens to be open.
-  if (isNotifPage && hasRows) {
+  // Score button: show on the notifications page (hasRows) or any job tile page (hasTiles).
+  // Remove if neither condition is true.
+  if ((isNotifPage && hasRows) || hasTiles) {
     _injectScoreButton(); // guard inside prevents double-inject
-  } else if (_scoreButtonInjected && !isNotifPage) {
+  } else if (_scoreButtonInjected && !isNotifPage && !hasTiles) {
     document.getElementById('ua-score-btn')?.remove();
     _scoreButtonInjected = false;
   }
 
   // Job tile pages (search, best-matches, most-recent, saved, find-work):
-  // auto-score each tile as it enters the viewport — no button needed.
+  // Register tiles for on-demand scoring; show Score button (same as notifications).
   if (hasTiles) {
     _attachTileObservers();
+    _injectScoreButton();
   }
 
   // Contract import button: show on /nx/wm/freelancer/contracts (actual Upwork URL)
