@@ -26,7 +26,11 @@ services:
       - key: EMBEDDING_MODEL
         value: text-embedding-3-small
       - key: DEFAULT_MODEL
-        value: gpt-4o
+        value: gpt-4.1-nano
+      - key: SCORING_MODEL
+        value: gpt-4.1-nano
+      - key: VISION_MODEL
+        value: gpt-4o-mini
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "10080"
 
