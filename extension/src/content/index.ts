@@ -15,6 +15,7 @@ import { logger } from '../lib/logger';
 import { extractAllProposals, scrapeProposalDetail } from './scrapers/proposals';
 import { extractOutcomeItems } from './outcome-sync';
 import { isSubmitButton, readSubmission } from './submit-capture';
+import { isApplyPage, isProposalsListPage } from './page-match';
 import { scrapeAllContracts } from './scrapers/contracts';
 import './scoring';
 
@@ -806,7 +807,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
  */
 function handleSubmitClick(event: MouseEvent): void {
   try {
-    if (!window.location.href.includes('/apply')) return;
+    if (!isApplyPage(window.location.pathname)) return;
     if (!isSubmitButton(event.target as Element | null)) return;
     const submission = readSubmission(document);
     if (!submission.coverLetter) return;
@@ -826,7 +827,7 @@ let lastOutcomeSyncUrl: string | null = null;
  * visible on the first page. No pagination clicks, no background polling.
  */
 function syncProposalOutcomes(): void {
-  if (!isMyProposalsPage()) return;
+  if (!isProposalsListPage(window.location.pathname)) return;
   const url = window.location.href;
   if (url === lastOutcomeSyncUrl) return;
   lastOutcomeSyncUrl = url;
