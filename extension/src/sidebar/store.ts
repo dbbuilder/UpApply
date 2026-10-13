@@ -11,6 +11,12 @@ interface User {
   has_profile: boolean;
 }
 
+export interface DraftMeta {
+  warnings: string[];
+  factsUsed: { id: string; statement: string }[];
+  screeningAnswers: { question: string; answer: string }[];
+}
+
 interface AppState {
   // Auth
   isAuthenticated: boolean;
@@ -32,6 +38,8 @@ interface AppState {
   coverLetterId: string | null;
   coverLetterLoading: boolean;
   coverLetterError: string | null;
+  // Generation v2 extras for the current draft (null on the legacy path)
+  draftMeta: DraftMeta | null;
 
   // Job tracking
   savedJobId: string | null;
@@ -86,6 +94,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   coverLetterId: null,
   coverLetterLoading: false,
   coverLetterError: null,
+  draftMeta: null,
   savedJobId: null,
   applicationId: null,
   currentView: 'auth',
@@ -108,6 +117,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         applicationId: null,
         analysisError: null,
         coverLetterError: null,
+        draftMeta: null,
       });
     } else {
       // Same job, just update the data without resetting generated content
@@ -195,6 +205,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       applicationId: null,
       analysisError: null,
       coverLetterError: null,
+      draftMeta: null,
       currentView: 'auth',
     });
   },
@@ -290,12 +301,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         custom_instructions: inclusions || undefined,
         prototype_url: prototypeUrl || undefined,
         include_call_offer: includeCallOffer,
+        screening_questions: currentJob.screeningQuestions?.map((q) => q.question),
       });
       set({
         coverLetter: result.content,
         coverLetterId: result.id,
         savedJobId: result.job_id,
         coverLetterLoading: false,
+        draftMeta:
+          result.verify_warnings || result.facts_used || result.screening_answers
+            ? {
+                warnings: result.verify_warnings ?? [],
+                factsUsed: result.facts_used ?? [],
+                screeningAnswers: result.screening_answers ?? [],
+              }
+            : null,
       });
     } catch (error) {
       console.error('Generation error:', error);
@@ -321,6 +341,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         coverLetter: result.content,
         coverLetterId: result.id,
         coverLetterLoading: false,
+        draftMeta: null,
       });
     } catch (error) {
       console.error('Regeneration error:', error);

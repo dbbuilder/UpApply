@@ -21,6 +21,8 @@ interface CoverLetterPanelProps {
   showAppliedPrompt: boolean;
   markingApplied: boolean;
   applicationId: string | null;
+  verifyWarnings: string[];
+  factsUsed: { id: string; statement: string }[];
   onGenerate: () => void;
   onGenerateAll: () => void;
   onRetryGenerate: () => void;
@@ -58,6 +60,8 @@ export default function CoverLetterPanel({
   showAppliedPrompt,
   markingApplied,
   applicationId,
+  verifyWarnings,
+  factsUsed,
   onGenerate,
   onGenerateAll,
   onRetryGenerate,
@@ -194,6 +198,28 @@ export default function CoverLetterPanel({
           <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-700 whitespace-pre-wrap max-h-[300px] overflow-auto">
             {coverLetter}
           </div>
+
+          {verifyWarnings.length > 0 && (
+            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+              <p className="font-medium mb-1">Check before sending</p>
+              <ul className="list-disc pl-4 space-y-0.5">
+                {verifyWarnings.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {factsUsed.length > 0 && (
+            <details className="mt-2 text-xs text-gray-600">
+              <summary className="cursor-pointer select-none">Facts used ({factsUsed.length})</summary>
+              <ul className="list-disc pl-4 mt-1 space-y-0.5">
+                {factsUsed.map((f) => (
+                  <li key={f.id}>{f.statement}</li>
+                ))}
+              </ul>
+            </details>
+          )}
 
           <button type="button" onClick={onFill} className="btn-primary w-full mt-3">
             Fill in Upwork Form

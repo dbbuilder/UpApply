@@ -16,6 +16,7 @@ export default function GeneratorPage() {
     coverLetter,
     coverLetterLoading,
     coverLetterError,
+    draftMeta,
     savedJobId,
     applicationId,
     analyzeCurrentJob,
@@ -324,6 +325,17 @@ export default function GeneratorPage() {
 
   const handleGenerateAll = async () => {
     await generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
+    // v2 answers come back with the letter (same evidence, one call) — use them instead of per-question calls
+    const v2Answers = useAppStore.getState().draftMeta?.screeningAnswers ?? [];
+    if (v2Answers.length > 0 && currentJob?.screeningQuestions) {
+      const fromDraft: Record<string, string> = {};
+      currentJob.screeningQuestions.forEach((q, i) => {
+        const match = v2Answers.find(a => a.question === q.question) ?? v2Answers[i];
+        if (match?.answer) fromDraft[`q${i}`] = match.answer;
+      });
+      setQuestionAnswers(prev => ({ ...prev, ...fromDraft }));
+      return;
+    }
     if (currentJob?.screeningQuestions && currentJob.screeningQuestions.length > 0) {
       const results = await Promise.allSettled(
         currentJob.screeningQuestions.map((q, i) =>
@@ -518,6 +530,8 @@ export default function GeneratorPage() {
               showAppliedPrompt={showAppliedPrompt}
               markingApplied={markingApplied}
               applicationId={applicationId}
+              verifyWarnings={draftMeta?.warnings ?? []}
+              factsUsed={draftMeta?.factsUsed ?? []}
               onGenerate={handleGenerate}
               onGenerateAll={handleGenerateAll}
               onRetryGenerate={handleGenerate}

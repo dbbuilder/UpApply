@@ -926,6 +926,7 @@ export interface CoverLetterGenerateRequest {
   custom_instructions?: string;
   prototype_url?: string;
   include_call_offer?: boolean;
+  screening_questions?: string[];
 }
 
 export interface CoverLetter {
@@ -940,6 +941,10 @@ export interface CoverLetter {
   match_score?: number;
   highlighted_skills?: string[];
   created_at: string;
+  // Generation v2 (null on the legacy path)
+  screening_answers?: { question: string; answer: string }[] | null;
+  verify_warnings?: string[] | null;
+  facts_used?: { id: string; statement: string }[] | null;
 }
 
 export interface ApplicationCreate {
