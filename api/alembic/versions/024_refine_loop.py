@@ -1,4 +1,5 @@
-"""Add refine-thread and submitted-final columns to cover_letters.
+"""Add refine-thread and submitted-final columns to cover_letters, and the
+proposals.facts_credited_at marker that keeps outcome fact-crediting idempotent.
 
 Revision ID: 024_refine_loop
 Revises: 023_generation_v2
@@ -22,9 +23,12 @@ def upgrade() -> None:
     op.add_column('cover_letters', sa.Column('final_answers', postgresql.JSONB(), nullable=True))
     # Word-level edit distance draft → final (0.0 identical, 1.0 rewritten)
     op.add_column('cover_letters', sa.Column('edit_distance_pct', sa.Float(), nullable=True))
+    # Outcome sync credits a proposal's facts at most once
+    op.add_column('proposals', sa.Column('facts_credited_at', sa.DateTime(timezone=True), nullable=True))
 
 
 def downgrade() -> None:
+    op.drop_column('proposals', 'facts_credited_at')
     op.drop_column('cover_letters', 'edit_distance_pct')
     op.drop_column('cover_letters', 'final_answers')
     op.drop_column('cover_letters', 'final_text')
