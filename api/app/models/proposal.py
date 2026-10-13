@@ -78,6 +78,27 @@ class Proposal(Base):
         String(50), default="manual"
     )  # manual, scraped, extension
 
+    # Voice-sample metadata (migration 022). Only author != 'ai' rows are voice examples.
+    author: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="chris", server_default="chris"
+    )  # chris, chris_edited_ai, ai
+    outcome: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True
+    )  # no_response, viewed, replied, interviewed, hired, declined
+    job_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    screening_answers: Mapped[Optional[list]] = mapped_column(
+        JSONB, nullable=True
+    )  # [{"question": str, "answer": str}]
+    # Embedding of the JOB (title + description) so voice retrieval is job<->job
+    job_needs_embedding: Mapped[Optional[List[float]]] = mapped_column(
+        Vector(settings.embedding_dimensions), nullable=True
+    )
+    # Set once /facts/from-proposals (or PUT /final) has run extraction on this letter,
+    # including runs that yielded zero facts, so the queue always advances.
+    facts_ingested_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Timestamps
     submitted_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -99,5 +120,11 @@ class Proposal(Base):
             "embedding",
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+        Index(
+            "ix_proposals_job_needs_embedding_hnsw",
+            "job_needs_embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"job_needs_embedding": "vector_cosine_ops"},
         ),
     )

@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 from uuid import uuid4
 
-from sqlalchemy import DateTime, String, Text, Numeric, func, ForeignKey, Index
+from sqlalchemy import Boolean, DateTime, String, Text, Numeric, false, func, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -58,6 +58,10 @@ class Memory(Base):
         String(50), nullable=True
     )  # manual, resume_import, job_won
     importance_score: Mapped[float] = mapped_column(Numeric(3, 2), default=0.5)
+    # Corpus "JOB POSTING:" rows are ingestion input only — never retrieved (migration 022)
+    exclude_from_retrieval: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
