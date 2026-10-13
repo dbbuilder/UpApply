@@ -1,25 +1,32 @@
 """Facts (knowledge layer) endpoints: review queue, manual facts, ingestion."""
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.embeddings import generate_embedding
 from app.core.security import get_current_user
 from app.models.fact import Fact
+from app.models.memory import Memory
+from app.models.proposal import Proposal
 from app.models.user import User
 from app.schemas.fact import (
+    MAX_INGEST_TEXT,
     FactBulkApprove,
     FactCandidate,
     FactCreate,
+    FactIngestItem,
+    FactIngestRequest,
+    FactIngestResult,
     FactKind,
     FactOut,
     FactStatus,
     FactUpdate,
 )
-from app.services.facts import fact_embedding_text, upsert_manual_fact
+from app.services.facts import fact_embedding_text, ingest_items, upsert_manual_fact
 
 router = APIRouter()
 
@@ -102,3 +109,89 @@ async def bulk_approve_facts(
     )
     await db.commit()
     return {"approved": result.rowcount}
+
+
+@router.post("/ingest", response_model=FactIngestResult)
+async def ingest_facts(
+    request: FactIngestRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Extract fact candidates from user-written text (used by scripts/ingest_chatgpt_facts.py).
+
+    Ingested text can quote clients and job posts, so `request.auto_approve` is not honoured:
+    new candidates always go to review; only a match to an approved fact is auto-approved (§1.7)."""
+    counts = await ingest_items(db, current_user.id, request.source_type, request.items)
+    await db.commit()
+    return FactIngestResult(**counts)
+
+
+@router.post("/from-memories", response_model=FactIngestResult)
+async def facts_from_memories(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Split curated bio memories into atomic facts, auto-approved (spec §1.3.4)."""
+    memories = (await db.execute(
+        select(Memory).where(
+            Memory.user_id == current_user.id,
+            Memory.exclude_from_retrieval.is_(False),
+            Memory.importance_score >= 0.9,
+            ~Memory.content.like("JOB POSTING:%"),
+            or_(Memory.category.is_(None), Memory.category != "lesson"),
+        )
+    )).scalars().all()
+    items = [
+        FactIngestItem(
+            text=(f"{m.title}\n{m.content}" + (f"\nOutcome: {m.outcome}" if m.outcome else ""))[:MAX_INGEST_TEXT],
+            source_ref=m.id,
+        )
+        for m in memories
+    ]
+    counts = await ingest_items(db, current_user.id, "bio_memory", items, auto_approve=True)
+    await db.commit()
+    return FactIngestResult(**counts)
+
+
+def _proposal_source_text(p: Proposal) -> str:
+    parts = [p.cover_letter_text.strip()]
+    for qa in p.screening_answers or []:
+        parts.append(f"Q: {qa.get('question', '')}\nA: {qa.get('answer', '')}")
+    return "\n\n".join(parts)[:MAX_INGEST_TEXT]
+
+
+@router.post("/from-proposals", response_model=FactIngestResult)
+async def facts_from_proposals(
+    limit: int = Query(10, ge=1, le=25),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fact candidates from submitted letters + answers (spec §1.3.2). Call repeatedly until remaining == 0."""
+    pending = (await db.execute(
+        select(Proposal)
+        .where(
+            Proposal.user_id == current_user.id,
+            Proposal.author.in_(("chris", "chris_edited_ai")),
+            Proposal.cover_letter_text != "",
+            Proposal.facts_ingested_at.is_(None),
+        )
+        .order_by(Proposal.submitted_at.desc().nullslast(), Proposal.created_at.desc())
+    )).scalars().all()
+    batch = pending[:limit]
+
+    items = [
+        FactIngestItem(
+            text=_proposal_source_text(p),
+            source_ref=p.id,
+            context=f"Job: {p.job_title or ''}\n{(p.job_text or '')[:1500]}".strip(),
+        )
+        for p in batch
+    ]
+    counts = await ingest_items(db, current_user.id, "upwork_proposal", items)
+    failed = set(counts["failed_refs"])
+    now = datetime.now(timezone.utc)
+    for p in batch:
+        if p.id not in failed:
+            p.facts_ingested_at = now  # zero-fact letters too, so the next call moves on
+    await db.commit()
+    return FactIngestResult(**counts, remaining=len(pending) - len(batch) + len(failed))

@@ -2,6 +2,8 @@
 
 Nothing here commits — callers own the transaction (routers commit; get_db commits too).
 """
+import asyncio
+import logging
 from typing import List, Optional, Tuple
 
 from sqlalchemy import select, update
@@ -9,7 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.embeddings import generate_embedding
 from app.models.fact import Fact
-from app.schemas.fact import FactCandidate
+from app.schemas.fact import FactCandidate, FactIngestItem
+from app.services.fact_extraction import extract_facts
+
+logger = logging.getLogger(__name__)
 
 DEDUPE_THRESHOLD = 0.92
 
@@ -180,3 +185,53 @@ async def credit_facts(
     else:
         stmt = stmt.values(times_used=Fact.times_used + 1)
     await db.execute(stmt.execution_options(synchronize_session=False))
+
+
+async def _already_ingested(db: AsyncSession, user_id: str, source_type: str, source_ref: str) -> bool:
+    row = await db.execute(
+        select(Fact.id)
+        .where(
+            Fact.user_id == user_id,
+            Fact.sources.contains([{"source_type": source_type, "source_ref": source_ref}]),
+        )
+        .limit(1)
+    )
+    return row.first() is not None
+
+
+async def ingest_items(
+    db: AsyncSession,
+    user_id: str,
+    source_type: str,
+    items: List[FactIngestItem],
+    auto_approve: bool = False,
+) -> dict:
+    """Extract candidates from each item and upsert them. Items whose source_ref already
+    appears in a fact's sources are skipped, so re-runs only pay for new material."""
+    counts = {"created": 0, "merged": 0, "auto_approved": 0, "skipped": 0, "failed": 0}
+    failed_refs: List[Optional[str]] = []
+
+    pending: List[FactIngestItem] = []
+    for item in items:
+        if item.source_ref and await _already_ingested(db, user_id, source_type, item.source_ref):
+            counts["skipped"] += 1
+        else:
+            pending.append(item)
+
+    results = await asyncio.gather(
+        *(extract_facts(i.text, source_type, i.source_ref, i.context) for i in pending),
+        return_exceptions=True,
+    )
+    for item, result in zip(pending, results):
+        if isinstance(result, BaseException):
+            logger.warning("Fact extraction failed for %s/%s: %s", source_type, item.source_ref, result)
+            counts["failed"] += 1
+            failed_refs.append(item.source_ref)
+            continue
+        for cand in result:
+            _, outcome = await upsert_candidate_outcome(db, user_id, cand, auto_approve)
+            counts[outcome] += 1
+    # Not a FactIngestResult field (pydantic ignores it); /from-proposals uses it to leave
+    # failed letters unmarked so they are retried.
+    counts["failed_refs"] = failed_refs
+    return counts

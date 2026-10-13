@@ -1,0 +1,196 @@
+"""Integration tests for fact ingestion endpoints (extraction + embeddings mocked)."""
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from httpx import AsyncClient
+
+from app.models.fact import Fact
+from app.models.memory import Memory
+from app.models.proposal import Proposal
+from app.models.user import User
+from app.schemas.fact import FactCandidate
+from tests.conftest import TestSessionLocal
+from tests.vector_utils import make_fake_embedder
+
+BASE = "/api/v1/facts"
+
+
+async def _fake_extract(text, source_type, source_ref=None, context=None):
+    """Same statement for every item -> second item dedupes into the first."""
+    return [FactCandidate(
+        kind="metric", statement="Cut cloud spend 38% for a fintech client.", strength=0.8,
+        source_type=source_type, source_ref=source_ref, source_snippet="cut spend 38%",
+    )]
+
+
+async def _per_ref_extract(text, source_type, source_ref=None, context=None):
+    """Distinct statement per source_ref -> no dedupe."""
+    return [FactCandidate(
+        kind="project", statement=f"Fact from {source_ref}", strength=0.7,
+        source_type=source_type, source_ref=source_ref,
+    )]
+
+
+@pytest.fixture
+def fake_embed():
+    mock = make_fake_embedder()
+    with patch("app.services.facts.generate_embedding", mock):
+        yield mock
+
+
+async def _user_id(client, headers) -> str:
+    return (await client.get("/api/v1/auth/me", headers=headers)).json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_ingest_creates_merges_and_is_idempotent(client: AsyncClient, auth_headers: dict, fake_embed):
+    extract = AsyncMock(side_effect=_fake_extract)
+    payload = {
+        "source_type": "chatgpt_user_turn",
+        "items": [
+            {"text": "We cut spend 38%", "source_ref": "conv-1", "context": "letter"},
+            {"text": "Again: 38% cut", "source_ref": "conv-2"},
+        ],
+    }
+    with patch("app.services.facts.extract_facts", extract):
+        r = await client.post(f"{BASE}/ingest", headers=auth_headers, json=payload)
+        assert r.status_code == 200
+        assert r.json() == {"created": 1, "merged": 1, "auto_approved": 0, "skipped": 0, "failed": 0, "remaining": 0}
+
+        r = await client.post(f"{BASE}/ingest", headers=auth_headers, json=payload)
+        assert r.json()["skipped"] == 2
+    assert extract.await_count == 2  # second run never re-extracts
+
+    facts = (await client.get(BASE, headers=auth_headers, params={"status": "candidate"})).json()
+    assert len(facts) == 1
+    assert [s["source_ref"] for s in facts[0]["sources"]] == ["conv-1", "conv-2"]
+
+
+@pytest.mark.asyncio
+async def test_ingest_counts_extraction_failures(client: AsyncClient, auth_headers: dict, fake_embed):
+    extract = AsyncMock(side_effect=RuntimeError("boom"))
+    with patch("app.services.facts.extract_facts", extract):
+        r = await client.post(f"{BASE}/ingest", headers=auth_headers, json={
+            "source_type": "chatgpt_user_turn", "items": [{"text": "x", "source_ref": "c"}],
+        })
+    assert r.json()["failed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_from_memories_uses_only_bio_memories_and_auto_approves(client: AsyncClient, auth_headers: dict, fake_embed):
+    uid = await _user_id(client, auth_headers)
+    async with TestSessionLocal() as s:
+        bio = Memory(user_id=uid, title="Stratavault.ai", content="Built Stratavault.ai", category="project", importance_score=1.0)
+        s.add_all([
+            bio,
+            Memory(user_id=uid, title="Style", content="Prefers terse tone", category="lesson", importance_score=0.95),
+            Memory(user_id=uid, title="Past Proposal", content="JOB POSTING:\nNeed dev", importance_score=0.9, exclude_from_retrieval=True),
+            Memory(user_id=uid, title="Minor", content="Knows Excel", category="skill_demo", importance_score=0.5),
+        ])
+        await s.commit()
+        bio_id = bio.id
+
+    extract = AsyncMock(side_effect=_per_ref_extract)
+    with patch("app.services.facts.extract_facts", extract):
+        r = await client.post(f"{BASE}/from-memories", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["auto_approved"] == 1
+    assert [c.args[2] for c in extract.await_args_list] == [bio_id]  # (text, source_type, source_ref, context)
+
+    approved = (await client.get(BASE, headers=auth_headers, params={"status": "approved"})).json()
+    assert [f["statement"] for f in approved] == [f"Fact from {bio_id}"]
+    assert approved[0]["source_type"] == "bio_memory"
+
+
+@pytest.mark.asyncio
+async def test_from_proposals_marks_zero_fact_letters_and_retries_failures(client: AsyncClient, auth_headers: dict, fake_embed):
+    uid = await _user_id(client, auth_headers)
+    async with TestSessionLocal() as s:
+        s.add_all([
+            Proposal(user_id=uid, cover_letter_text="Short thanks note", job_title="J1", source="scraped"),
+            Proposal(user_id=uid, cover_letter_text="Letter that errors", job_title="J2", source="scraped"),
+        ])
+        await s.commit()
+
+    async def _extract(text, source_type, source_ref=None, context=None):
+        if "errors" in text:
+            raise RuntimeError("haiku down")
+        return []
+
+    extract = AsyncMock(side_effect=_extract)
+    with patch("app.services.facts.extract_facts", extract):
+        r = await client.post(f"{BASE}/from-proposals", headers=auth_headers, params={"limit": 10})
+        assert r.json()["failed"] == 1
+        assert r.json()["remaining"] == 1  # the failed one only
+        r = await client.post(f"{BASE}/from-proposals", headers=auth_headers, params={"limit": 10})
+    texts = [c.args[0] for c in extract.await_args_list]
+    assert texts.count("Short thanks note") == 1  # zero-fact letter never re-extracted
+    assert texts.count("Letter that errors") == 2  # failure retried
+
+
+@pytest.mark.asyncio
+async def test_from_proposals_batches_and_skips_ai_authored(client: AsyncClient, auth_headers: dict, fake_embed):
+    uid = await _user_id(client, auth_headers)
+    async with TestSessionLocal() as s:
+        s.add_all([
+            Proposal(user_id=uid, cover_letter_text="Letter one", job_title="Job 1", job_text="Need SQL",
+                     screening_answers=[{"question": "Experience?", "answer": "20 years"}], source="scraped"),
+            Proposal(user_id=uid, cover_letter_text="Letter two", job_title="Job 2", source="scraped"),
+            Proposal(user_id=uid, cover_letter_text="Letter three", job_title="Job 3", source="extension", author="chris_edited_ai"),
+            Proposal(user_id=uid, cover_letter_text="ChatGPT letter", source="chatgpt_import", author="ai"),
+            Proposal(user_id=uid, cover_letter_text="", job_title="Empty", source="scraped"),
+        ])
+        await s.commit()
+
+    extract = AsyncMock(side_effect=_per_ref_extract)
+    with patch("app.services.facts.extract_facts", extract):
+        r = await client.post(f"{BASE}/from-proposals", headers=auth_headers, params={"limit": 2})
+        assert r.json()["created"] == 2
+        assert r.json()["remaining"] == 1
+
+        r = await client.post(f"{BASE}/from-proposals", headers=auth_headers, params={"limit": 2})
+        assert r.json()["created"] == 1
+        assert r.json()["remaining"] == 0
+
+        r = await client.post(f"{BASE}/from-proposals", headers=auth_headers, params={"limit": 2})
+        assert r.json()["remaining"] == 0
+    assert extract.await_count == 3  # nothing is re-extracted once processed
+
+    texts = [c.args[0] for c in extract.await_args_list]
+    assert len(texts) == 3
+    assert not any("ChatGPT letter" in t for t in texts)
+    assert any("Q: Experience?" in t and "A: 20 years" in t for t in texts)
+    assert all(c.args[1] == "upwork_proposal" for c in extract.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_ingest_never_auto_approves_client_text(client: AsyncClient, auth_headers: dict, fake_embed):
+    """Ingested text may quote clients/job posts; candidates always go to review (spec §1.7)."""
+    extract = AsyncMock(side_effect=_per_ref_extract)
+    with patch("app.services.facts.extract_facts", extract):
+        r = await client.post(f"{BASE}/ingest", headers=auth_headers, json={
+            "source_type": "chatgpt_user_turn", "auto_approve": True,
+            "items": [{"text": "Built X", "source_ref": "conv-9"}],
+        })
+    assert r.json()["created"] == 1 and r.json()["auto_approved"] == 0
+    approved = (await client.get(BASE, headers=auth_headers, params={"status": "approved"})).json()
+    assert approved == []
+
+
+@pytest.mark.asyncio
+async def test_ingest_is_scoped_to_the_calling_user(client: AsyncClient, auth_headers: dict, fake_embed):
+    """Another user's identical source_ref does not make this user's item skip."""
+    async with TestSessionLocal() as s:
+        other = User(email="other-ingest@example.com", hashed_password="x")
+        s.add(other)
+        await s.flush()
+        s.add(Fact(user_id=other.id, kind="project", statement="Other", strength=0.5, status="candidate",
+                   source_type="chatgpt_user_turn", source_ref="conv-1",
+                   sources=[{"source_type": "chatgpt_user_turn", "source_ref": "conv-1", "snippet": None}]))
+        await s.commit()
+    extract = AsyncMock(side_effect=_per_ref_extract)
+    with patch("app.services.facts.extract_facts", extract):
+        r = await client.post(f"{BASE}/ingest", headers=auth_headers, json={
+            "source_type": "chatgpt_user_turn", "items": [{"text": "Built X", "source_ref": "conv-1"}],
+        })
+    assert r.json()["skipped"] == 0 and r.json()["created"] == 1
