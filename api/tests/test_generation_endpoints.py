@@ -296,3 +296,42 @@ async def test_screening_generate_rejects_oversized_input(client: AsyncClient, a
         )
     assert resp.status_code == 422, resp.text
     engine.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cover_letter_generate_v2_evidence_unavailable_is_503_and_saves_nothing(
+    client: AsyncClient, auth_headers_with_profile
+):
+    from app.services.generation.evidence import EvidenceUnavailable
+
+    await _enable_v2()
+    engine = AsyncMock(side_effect=EvidenceUnavailable("embeddings: RateLimitError quota sk-secret"))
+    with patch("app.api.v1.jobs.run_full_analysis", AsyncMock(return_value=_analysis())), \
+         patch("app.api.v1.jobs.generate_embedding", AsyncMock(side_effect=RuntimeError("no quota"))), \
+         patch("app.api.v1.jobs.generate_application", engine):
+        resp = await client.post(
+            "/api/v1/jobs/cover-letters/generate",
+            headers=auth_headers_with_profile,
+            json={"job_data": JOB_DATA},
+        )
+    assert resp.status_code == 503
+    assert "sk-secret" not in resp.text and "quota" not in resp.text
+    async with test_engine.connect() as conn:
+        count = (await conn.execute(text("SELECT count(*) FROM cover_letters"))).scalar_one()
+    assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_screening_generate_v2_evidence_unavailable_is_503(client: AsyncClient, auth_headers_with_profile):
+    from app.services.generation.evidence import EvidenceUnavailable
+
+    await _enable_v2()
+    engine = AsyncMock(side_effect=EvidenceUnavailable("embeddings: quota sk-secret"))
+    with patch("app.api.v1.screening_answers.generate_application", engine):
+        resp = await client.post(
+            "/api/v1/screening-answers/generate",
+            headers=auth_headers_with_profile,
+            json={"question": "How would you handle the cutover?"},
+        )
+    assert resp.status_code == 503
+    assert "sk-secret" not in resp.text and "quota" not in resp.text

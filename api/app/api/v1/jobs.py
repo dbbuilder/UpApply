@@ -48,6 +48,7 @@ from app.services.cover_letter import (
     improve_cover_letter,
 )
 from app.services.generation import generate_application
+from app.services.generation.evidence import EvidenceUnavailable
 from app.services.llm import LLMError
 
 router = APIRouter()
@@ -847,6 +848,12 @@ async def generate_cover_letter_endpoint(
                 include_call_offer=body.include_call_offer,
                 prototype_url=body.prototype_url,
                 extra_points=body.custom_instructions,
+            )
+        except EvidenceUnavailable:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Your experience facts could not be retrieved right now. Please try again shortly.",
             )
         except LLMError as exc:
             await db.rollback()

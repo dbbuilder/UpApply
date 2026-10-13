@@ -135,10 +135,28 @@ async def test_select_evidence_skips_weak_anchor_match():
 
 
 @pytest.mark.asyncio
-async def test_select_evidence_returns_empty_when_embeddings_fail():
+async def test_select_evidence_raises_when_needs_embeddings_fail():
+    """Fail closed: no silent generic, ungrounded letter when fact retrieval is down."""
     with patch.object(ev, "generate_embeddings_batch", AsyncMock(side_effect=RuntimeError("quota"))):
-        result = await select_evidence(None, "u1", _brief(["need"]), None)
-    assert result == Evidence()
+        with pytest.raises(ev.EvidenceUnavailable):
+            await select_evidence(None, "u1", _brief(["need"]), None)
+
+
+@pytest.mark.asyncio
+async def test_select_evidence_clips_every_embedding_input():
+    brief = JobBrief(
+        needs=["n" * 100_000], job_types=[], client_signals={}, mirror_phrases=[],
+        explicit_asks=[], questions=[], title="T", description="x" * 100_000,
+    )
+    embed = AsyncMock(side_effect=lambda texts: [[1.0] for _ in texts])
+    with patch.object(ev, "generate_embeddings_batch", embed), \
+         patch.object(ev, "search_facts", AsyncMock(return_value=[])), \
+         patch.object(ev, "_find_voice_samples", AsyncMock(return_value=[])):
+        await select_evidence(None, "u1", brief, {"always_include": ["a" * 100_000]})
+    sent = [t for call in embed.call_args_list for t in call.args[0]]
+    assert len(sent) == 3
+    assert all(len(t) <= ev.EMBED_MAX_CHARS for t in sent)
+    assert ev.EMBED_MAX_CHARS <= 24_000
 
 
 def _vec(x, y=0.0):
@@ -194,6 +212,7 @@ async def test_voice_query_embedding_failure_only_loses_voice_samples():
         result = await select_evidence(None, "u1", brief, None)
     assert [f.id for f in result.facts] == ["a"]
     assert result.voice_samples == []
+    assert result.warnings == [ev.VOICE_UNAVAILABLE_WARNING]
     find_voice.assert_not_called()
 
 

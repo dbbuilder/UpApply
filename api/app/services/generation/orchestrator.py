@@ -107,6 +107,7 @@ async def generate_application(
         )
         warnings = await _verify(draft, brief, evidence, profile, prototype_url, answers_only)
 
+    warnings.extend(evidence.warnings)
     if not evidence.facts:
         warnings.append(NO_FACTS_WARNING)
 

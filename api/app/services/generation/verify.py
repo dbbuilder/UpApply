@@ -167,8 +167,13 @@ async def check_claims(draft: "Draft", evidence: Evidence) -> list[str]:
         f"Q: {neutralise(str(item.get('question', '')))}\nA: {neutralise(str(item.get('answer', '')))}"
         for item in draft.screening_answers
     ) or "(none)"
+    no_facts = (
+        "There are NO approved facts for this draft: every specific claim about the writer's "
+        "past is unsupported.\n\n"
+        if not evidence.facts else ""
+    )
     user = (
-        f"<evidence>\n{neutralise(format_facts(evidence.facts))}\n</evidence>\n\n"
+        f"{no_facts}<evidence>\n{neutralise(format_facts(evidence.facts))}\n</evidence>\n\n"
         f"<draft_letter>\n{neutralise(draft.cover_letter) or '(none)'}\n</draft_letter>\n\n"
         f"<screening_answers>\n{answers}\n</screening_answers>"
     )

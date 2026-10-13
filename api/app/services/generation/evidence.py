@@ -22,6 +22,13 @@ ANCHOR_MIN_SIMILARITY = 0.75
 VOICE_SAMPLE_LIMIT = 3
 VOICE_AUTHORS = ("chris", "chris_edited_ai")
 OUTCOME_BOOST = {"hired": 0.15, "interviewed": 0.10, "replied": 0.08, "viewed": 0.02}
+# The embedding model takes ~8k tokens per input; clip so an oversized post cannot fail the call.
+EMBED_MAX_CHARS = 24_000
+VOICE_UNAVAILABLE_WARNING = "Voice samples were unavailable, so the draft was written without them."
+
+
+class EvidenceUnavailable(Exception):
+    """Fact retrieval failed: generating anyway would silently produce an ungrounded letter."""
 
 
 def rerank_score(similarity: float, strength: float, times_used: int, times_in_won: int) -> float:
@@ -34,6 +41,7 @@ def rerank_score(similarity: float, strength: float, times_used: int, times_in_w
 class Evidence:
     facts: list[Fact] = field(default_factory=list)
     voice_samples: list[Proposal] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 def format_facts(facts: list[Fact]) -> str:
@@ -133,8 +141,10 @@ async def select_evidence(
     always = [a for a in ((anchors or {}).get("always_include") or []) if isinstance(a, str) and a.strip()]
     # Job<->job: same text shape Phase 1 (Task 1.8) and Phase 3 (Task 3.4) embed into
     # proposals.job_needs_embedding ("title\n\ndescription"); needs are the fallback.
-    voice_query = "\n\n".join(t for t in (brief.title, brief.description) if t) or "\n".join(needs)
-    texts = needs + always
+    voice_query = ("\n\n".join(t for t in (brief.title, brief.description) if t) or "\n".join(needs))[
+        :EMBED_MAX_CHARS
+    ]
+    texts = [t[:EMBED_MAX_CHARS] for t in needs + always]
     if not texts and not voice_query:
         return Evidence()
 
@@ -143,8 +153,8 @@ async def select_evidence(
         try:
             vectors = await generate_embeddings_batch(texts)
         except Exception as exc:
-            logger.warning("Embeddings unavailable for evidence selection: %s", exc)
-            return Evidence()
+            logger.warning("Embeddings unavailable for evidence selection: %s", type(exc).__name__)
+            raise EvidenceUnavailable("needs/anchors embedding failed") from exc
 
     need_vectors = vectors[: len(needs)]
     anchor_vectors = vectors[len(needs) : len(needs) + len(always)]
@@ -159,14 +169,16 @@ async def select_evidence(
             facts.append(hits[0][0])
             seen.add(str(hits[0][0].id))
 
-    # Embedded on its own: the full job text can exceed the embedding input limit, and that
-    # must cost only the voice samples, never the facts.
+    # Embedded on its own: if the job-text embedding still fails it costs only the voice
+    # samples (with a warning), never the facts.
     voice: list[Proposal] = []
+    warnings: list[str] = []
     if voice_query:
         try:
             voice_vector = (await generate_embeddings_batch([voice_query]))[0]
         except Exception as exc:
             logger.warning("Voice-sample query embedding failed: %s", type(exc).__name__)
+            warnings.append(VOICE_UNAVAILABLE_WARNING)
         else:
             voice = await _find_voice_samples(db, user_id, voice_vector, exclude_ids=exclude_proposal_ids)
-    return Evidence(facts=facts, voice_samples=voice)
+    return Evidence(facts=facts, voice_samples=voice, warnings=warnings)

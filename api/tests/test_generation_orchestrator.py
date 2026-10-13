@@ -105,6 +105,42 @@ async def test_no_facts_warns_and_skips_crediting():
     db.execute.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_no_facts_still_runs_the_claim_check_so_any_specific_is_rejected():
+    claims = AsyncMock(side_effect=[["Unsupported claim: 160 servers (no evidence)"], []])
+    write = AsyncMock(side_effect=[_draft(CLEAN, fact_ids=()), _draft(CLEAN, fact_ids=())])
+    with patch.object(orch, "build_job_brief", AsyncMock(return_value=BRIEF)), \
+         patch.object(orch, "select_evidence", AsyncMock(return_value=Evidence())), \
+         patch.object(orch, "write_application", write), \
+         patch.object(orch, "check_claims", claims):
+        result = await generate_application(
+            db=AsyncMock(), user=USER, profile=PROFILE, title="T", description="D", skills=[], questions=[]
+        )
+    assert claims.call_count == 2
+    assert write.call_count == 2  # the unsupported specific forced a repair
+    assert result.warnings == [orch.NO_FACTS_WARNING]
+
+
+@pytest.mark.asyncio
+async def test_evidence_warnings_reach_the_result():
+    evidence = Evidence(facts=[FACT], warnings=["Voice samples unavailable."])
+    result, _, _ = await _run([_draft(CLEAN)], evidence=evidence)
+    assert result.warnings == ["Voice samples unavailable."]
+
+
+@pytest.mark.asyncio
+async def test_evidence_unavailable_propagates():
+    from app.services.generation.evidence import EvidenceUnavailable
+    with patch.object(orch, "build_job_brief", AsyncMock(return_value=BRIEF)), \
+         patch.object(orch, "select_evidence", AsyncMock(side_effect=EvidenceUnavailable())), \
+         patch.object(orch, "write_application", AsyncMock()) as write:
+        with pytest.raises(EvidenceUnavailable):
+            await generate_application(
+                db=AsyncMock(), user=USER, profile=PROFILE, title="T", description="D", skills=[], questions=[]
+            )
+    write.assert_not_called()
+
+
 GOOD_ANSWER = "The cutover ran in waves. Each wave had a tested rollback."
 
 

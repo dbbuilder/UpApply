@@ -16,6 +16,7 @@ from app.models.screening_answer import ScreeningAnswer
 from app.models.cover_letter import CoverLetter
 from app.schemas.job import MAX_GEN_DESCRIPTION, MAX_GEN_TITLE, MAX_SCREENING_QUESTION
 from app.services.generation import generate_application
+from app.services.generation.evidence import EvidenceUnavailable
 from app.services.generation.brief import JobBrief
 from app.services.llm import LLMError
 from app.schemas.screening_answer import (
@@ -288,6 +289,11 @@ async def generate_screening_answer(
                 brief=cached_brief,
                 credit_usage=False,  # the letter written alongside this answer is discarded
                 answers_only=True,  # so it is neither verified, repaired for, nor warned about
+            )
+        except EvidenceUnavailable:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Your experience facts could not be retrieved right now. Please try again shortly.",
             )
         except LLMError as exc:
             raise HTTPException(

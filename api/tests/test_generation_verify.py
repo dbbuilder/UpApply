@@ -176,3 +176,15 @@ def test_screening_answer_hard_rules_are_enforced():
     assert any("B?" in v and "leverage my expertise" in v for v in violations)
     assert not any("E?" in v for v in violations)  # empty answers are reported by _verify
     assert check_rules(_letter(), _brief(), None, [hi]) != []
+
+
+@pytest.mark.asyncio
+async def test_check_claims_with_no_facts_tells_the_auditor_every_specific_is_unsupported():
+    draft = SimpleNamespace(cover_letter="Migrated 160 servers.", screening_answers=[])
+    call = AsyncMock(return_value={"unsupported_claims": [{"claim": "160 servers", "reason": "no facts"}]})
+    with patch("app.services.generation.verify.structured_call", call):
+        warnings = await check_claims(draft, Evidence())
+    assert warnings == ["Unsupported claim: 160 servers (no facts)"]
+    user = call.call_args.kwargs["user"]
+    assert "NO approved facts" in user
+    assert "every specific claim" in user
