@@ -179,3 +179,7 @@ api/venv/
 
 # Unignore extension lib folder (blocked by lib/ rule above)
 !extension/src/lib/
+
+# Private data: client job posts, real letters, ChatGPT export, eval packets — never commit
+working/
+docs/evals/
