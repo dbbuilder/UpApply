@@ -150,7 +150,7 @@ def build_writer_user_prompt(
         f"MIRROR PHRASES:\n{_block('mirror_phrases', _bullets(brief.mirror_phrases))}",
         f"EXPLICIT ASKS (honour every one):\n{_block('explicit_asks', _bullets(brief.explicit_asks))}",
         f"EVIDENCE (the only source of specifics about {name}):\n"
-        f"{_block('evidence', neutralise(format_facts(evidence.facts)))}",
+        f"{_block('evidence', format_facts(evidence.facts))}",
         f"VOICE SAMPLES (real letters {name} sent; write the way these read):\n"
         f"{_format_voice_samples(evidence.voice_samples)}",
         f"LENGTH: aim for {low}-{high} words in the letter body.",

@@ -173,7 +173,7 @@ async def check_claims(draft: "Draft", evidence: Evidence) -> list[str]:
         if not evidence.facts else ""
     )
     user = (
-        f"{no_facts}<evidence>\n{neutralise(format_facts(evidence.facts))}\n</evidence>\n\n"
+        f"{no_facts}<evidence>\n{format_facts(evidence.facts)}\n</evidence>\n\n"
         f"<draft_letter>\n{neutralise(draft.cover_letter) or '(none)'}\n</draft_letter>\n\n"
         f"<screening_answers>\n{answers}\n</screening_answers>"
     )

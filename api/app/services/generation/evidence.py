@@ -9,8 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.embeddings import generate_embeddings_batch
 from app.models.fact import Fact
 from app.models.proposal import Proposal
+from app.schemas.fact import MAX_DETAIL, MAX_STATEMENT
 from app.services.facts import search_facts
 from app.services.generation.brief import JobBrief
+from app.services.untrusted import neutralise
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +47,15 @@ class Evidence:
 
 
 def format_facts(facts: list[Fact]) -> str:
-    """Render facts as `[id] (kind) statement` lines; ids are what the writer cites."""
+    """Render facts as `[id] (kind) statement` lines; ids are what the writer cites.
+    Statement and detail can hold client text (client_quote), so each is neutralised."""
     if not facts:
         return "(no approved facts matched this job)"
     lines = []
     for fact in facts:
-        lines.append(f"[{fact.id}] ({fact.kind}) {fact.statement}")
+        lines.append(f"[{fact.id}] ({fact.kind}) {neutralise(fact.statement or '', MAX_STATEMENT)}")
         if fact.detail:
-            lines.append(f"    {fact.detail}")
+            lines.append(f"    {neutralise(fact.detail, MAX_DETAIL)}")
     return "\n".join(lines)
 
 

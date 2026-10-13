@@ -180,3 +180,18 @@ async def test_writer_caps_neutralised_job_fields_at_their_request_limits():
     assert len(title) == MAX_GEN_TITLE
     assert len(post) == MAX_GEN_DESCRIPTION
     assert len(question) == MAX_SCREENING_QUESTION
+
+
+@pytest.mark.asyncio
+async def test_writer_evidence_block_keeps_all_facts_at_maximum_size():
+    from app.schemas.fact import MAX_DETAIL, MAX_STATEMENT
+    facts = [
+        SimpleNamespace(id=f"f{i}", kind="project", statement="s" * MAX_STATEMENT, detail="d" * MAX_DETAIL)
+        for i in range(8)
+    ]
+    call = AsyncMock(return_value=dict(MODEL_JSON))
+    with patch("app.services.generation.writer.structured_call", call):
+        await write_application(PROFILE, BRIEF, Evidence(facts=facts), True, None, None)
+    user = call.call_args.kwargs["user"]
+    assert "[f7] (project)" in user
+    assert user.count("d" * MAX_DETAIL) == 8
