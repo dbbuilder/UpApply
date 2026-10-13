@@ -91,3 +91,23 @@ class ProposalImportFromUpwork(BaseModel):
     """Schema for importing proposals scraped from Upwork."""
 
     proposals: List[dict] = Field(..., max_length=1000)  # Raw scraped data
+
+
+class ProposalOutcomeItem(BaseModel):
+    """One proposal status seen on Upwork's Proposals page."""
+
+    upwork_proposal_id: Optional[str] = Field(None, max_length=100)
+    proposal_id: Optional[str] = Field(None, max_length=36)
+    job_title: Optional[str] = Field(None, max_length=500)  # fallback match for click-captured proposals
+    status: str = Field(..., max_length=50)  # submitted | viewed | responded | replied | interviewed | hired | declined | no_response
+    submitted_at: Optional[str] = Field(None, max_length=50)  # "Mar 3, 2026" or ISO
+
+
+class ProposalOutcomeSyncRequest(BaseModel):
+    items: List[ProposalOutcomeItem] = Field(..., max_length=500)
+
+
+class ProposalOutcomeSyncResponse(BaseModel):
+    updated: int
+    credited: int
+    not_found: int
