@@ -75,10 +75,49 @@ async def test_match_to_approved_auto_approves_and_keeps_wording(db_session, tes
     assert outcome == "auto_approved"
     assert fact.id == existing.id
     assert fact.statement == "Migrated 160 servers to Azure."
-    assert fact.strength == 0.9
-    assert fact.skills == ["Azure", "SQL Server"]
+    # untrusted candidate: provenance only, ranking fields untouched
+    assert fact.strength == 0.6
+    assert fact.skills == ["Azure"]
     assert [s["source_ref"] for s in fact.sources] == ["m1", "p1"]
     assert await _count(db_session) == 1
+
+
+@pytest.mark.asyncio
+async def test_untrusted_merge_into_approved_only_appends_provenance(db_session, test_user):
+    existing = await _seed(
+        db_session, test_user.id, "Migrated 160 servers to Azure.", unit(0),
+        status="approved", strength=0.5, skills=["Azure"], industries=["Education"], job_types=["cloud"],
+    )
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=unit(0))):
+        fact, _ = await upsert_candidate_outcome(
+            db_session, test_user.id,
+            _cand("Migrated 160 servers to Azure.", strength=1.0, skills=["AI", "Kubernetes"],
+                  industries=["Fintech"], job_types=["ai", "cto"], source_type="chatgpt_user_turn"),
+        )
+    assert fact.id == existing.id and fact.status == "approved"
+    assert fact.strength == 0.5
+    assert fact.skills == ["Azure"]
+    assert fact.industries == ["Education"]
+    assert fact.job_types == ["cloud"]
+    assert [s["source_type"] for s in fact.sources] == ["bio_memory", "chatgpt_user_turn"]
+
+
+@pytest.mark.asyncio
+async def test_trusted_auto_approve_merge_into_approved_updates_ranking(db_session, test_user):
+    await _seed(
+        db_session, test_user.id, "Migrated 160 servers to Azure.", unit(0),
+        status="approved", strength=0.5, skills=["Azure"], job_types=["cloud"],
+    )
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=unit(0))):
+        fact, _ = await upsert_candidate_outcome(
+            db_session, test_user.id,
+            _cand("Migrated 160 servers to Azure.", strength=0.9, skills=["SQL Server"],
+                  job_types=["sql"], source_type="bio_memory"),
+            auto_approve=True,
+        )
+    assert fact.strength == 0.9
+    assert fact.skills == ["Azure", "SQL Server"]
+    assert fact.job_types == ["cloud", "sql"]
 
 
 @pytest.mark.asyncio

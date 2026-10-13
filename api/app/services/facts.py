@@ -66,6 +66,11 @@ async def upsert_candidate_outcome(
     if nearest and nearest[1] >= DEDUPE_THRESHOLD:
         fact = nearest[0]
         fact.sources = [*(fact.sources or []), _source_entry(cand)]
+        if fact.status == "approved" and not auto_approve:
+            # Untrusted candidate matching an approved fact: provenance only. Ranking fields
+            # (tags, strength) change only via user PATCH, manual create or a trusted source.
+            await db.flush()
+            return fact, "auto_approved"
         fact.skills = _union(fact.skills, cand.skills)
         fact.industries = _union(fact.industries, cand.industries)
         fact.job_types = _union(fact.job_types, list(cand.job_types))
