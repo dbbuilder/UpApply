@@ -233,6 +233,7 @@ async def find_relevant_memories_with_embedding(
         FROM memories
         WHERE user_id = :user_id
         AND embedding IS NOT NULL
+        AND NOT exclude_from_retrieval
         ORDER BY embedding <=> CAST(:embedding AS vector)
         LIMIT :limit
     """)
