@@ -3,7 +3,7 @@ import json
 from typing import List, Optional
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +11,8 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.embeddings import generate_embedding, get_openai_client
+from app.core.rate_limit import limiter
+from app.models.job import Job
 from app.models.user import User
 from app.models.proposal import PENDING_PROPOSAL_STATUSES, Proposal
 from app.models.user import UserProfile
@@ -592,7 +594,9 @@ async def import_proposals_from_upwork(
                     existing.facts_ingested_at = None
                 if job_text and not existing.job_text:
                     existing.job_text = job_text
-                if existing.job_needs_embedding is None:
+                    # Replace a title-only job embedding now that the job text is known.
+                    existing.job_needs_embedding = await _job_needs_embedding(job_title, job_text)
+                elif existing.job_needs_embedding is None:
                     existing.job_needs_embedding = await _job_needs_embedding(job_title, existing.job_text)
                 if outcome and _OUTCOME_RANK[outcome] > _OUTCOME_RANK.get(existing.outcome, 0):
                     existing.outcome = outcome
@@ -643,3 +647,37 @@ async def import_proposals_from_upwork(
         await db.refresh(proposal)
 
     return created_proposals
+
+
+@router.post("/backfill-job-embeddings")
+@limiter.limit("10/hour")
+async def backfill_job_embeddings(
+    request: Request,
+    limit: int = Query(100, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fill job_needs_embedding on the caller's voice-sample rows (author != 'ai') that lack it,
+    from job_text, the linked job's description, or the stored snippet. Call again while
+    remaining > 0."""
+    missing = (
+        select(Proposal, Job)
+        .outerjoin(Job, (Job.id == Proposal.job_id) & (Job.user_id == current_user.id))
+        .where(
+            Proposal.user_id == current_user.id,
+            Proposal.author != "ai",
+            Proposal.job_needs_embedding.is_(None),
+        )
+        .order_by(Proposal.created_at.desc())
+    )
+    rows = (await db.execute(missing)).all()
+    embedded = 0
+    for proposal, job in rows[:limit]:
+        title = proposal.job_title or (job.title if job else None)
+        text_ = proposal.job_text or (job.description if job else None) or proposal.job_description_snippet
+        vector = await _job_needs_embedding(title, text_)
+        if vector is not None:
+            proposal.job_needs_embedding = vector
+            embedded += 1
+    await db.commit()
+    return {"embedded": embedded, "remaining": max(len(rows) - limit, 0)}

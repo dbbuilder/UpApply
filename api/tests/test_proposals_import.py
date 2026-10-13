@@ -126,3 +126,21 @@ async def test_import_caps_free_text_sizes(client: AsyncClient, auth_headers: di
     assert len(body["screening_answers"]) == 50
     assert len(body["screening_answers"][0]["question"]) == 5_000
     assert len(body["screening_answers"][0]["answer"]) == 5_000
+
+
+@pytest.mark.asyncio
+async def test_reimport_recomputes_job_embedding_when_job_text_arrives(client: AsyncClient, auth_headers: dict, fake_embed):
+    """List page first (title only), detail page later: job<->job embedding must use the job text."""
+    await client.post(URL, headers=auth_headers, json={"proposals": [
+        {"proposalId": "601", "jobTitle": "Fractional CTO", "coverLetter": "short", "status": "submitted"},
+    ]})
+    fake_embed.reset_mock()
+    fake_embed.return_value = unit(7)
+    await client.post(URL, headers=auth_headers, json={"proposals": [{
+        "proposalId": "601", "jobTitle": "Fractional CTO", "coverLetter": "short",
+        "status": "submitted", "jobDescription": "Lead our 5-person team",
+    }]})
+    texts = [c.args[0] for c in fake_embed.await_args_list]
+    assert "Fractional CTO\n\nLead our 5-person team" in texts
+    row = await _row("601")
+    assert list(row.job_needs_embedding) == pytest.approx(unit(7))

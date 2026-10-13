@@ -238,6 +238,7 @@ async def import_chatgpt_conversations(
                         was_hired=False,
                         status="imported",
                         source="chatgpt_import",
+                        author="ai",  # ChatGPT-written: never a voice sample or fact source
                         embedding=embedding,
                     )
                     db.add(proposal)

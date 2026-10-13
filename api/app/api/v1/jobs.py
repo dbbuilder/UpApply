@@ -16,6 +16,7 @@ from app.models.job import Job
 from app.models.cover_letter import CoverLetter
 from app.models.application import Application, ApplicationStatus
 from app.models.proposal import Proposal
+from app.api.v1.proposals import _job_needs_embedding
 from app.schemas.job import (
     JobCreate,
     JobResponse,
@@ -616,7 +617,10 @@ async def import_contracts(
             if prop:
                 prop.cover_letter_text = contract.cover_letter_text.strip()
                 prop.was_hired = True
+                prop.outcome = "hired"
                 prop.job_id = job.id
+                if prop.job_needs_embedding is None:
+                    prop.job_needs_embedding = await _job_needs_embedding(job.title, job.description)
             else:
                 try:
                     from tenacity import RetryError
@@ -631,8 +635,10 @@ async def import_contracts(
                     cover_letter_text=contract.cover_letter_text.strip(),
                     was_hired=True,
                     status="hired",
+                    outcome="hired",
                     source="contract_import",
                     embedding=prop_embedding,
+                    job_needs_embedding=await _job_needs_embedding(job.title, job.description),
                 )
                 db.add(prop)
 
@@ -1051,6 +1057,8 @@ async def submit_cover_letter(
                 prop.embedding = await generate_embedding(request.submitted_text)
             except (RetryError, Exception):
                 pass  # Keep existing embedding; corpus entry still saved
+            if prop.job_needs_embedding is None:
+                prop.job_needs_embedding = await _job_needs_embedding(job.title, job.description)
         else:
             try:
                 from tenacity import RetryError
@@ -1065,6 +1073,9 @@ async def submit_cover_letter(
                 job_skills=job.skills_required or [],
                 was_hired=None,
                 source="extension",
+                author="chris_edited_ai",  # began as an UpApply draft (matches migration 022)
+                job_text=job.description,
+                job_needs_embedding=await _job_needs_embedding(job.title, job.description),
                 submitted_at=datetime.now(timezone.utc),
                 embedding=embedding,
             )

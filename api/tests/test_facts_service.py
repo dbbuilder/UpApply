@@ -207,3 +207,22 @@ async def test_credit_facts_ignores_other_users_facts(db_session, test_user):
     await credit_facts(db_session, [theirs.id], won=True, user_id=test_user.id)
     await db_session.refresh(theirs)
     assert theirs.times_in_won == 0
+
+
+@pytest.mark.asyncio
+async def test_auto_approve_into_untrusted_candidate_takes_trusted_wording(db_session, test_user):
+    """A bio-memory match must never approve an unreviewed candidate's own (untrusted) wording."""
+    existing = await _seed(db_session, test_user.id, "Led a 120-server Azure migration saving $4M.", unit(0), strength=1.0)
+    trusted_vec = blend(0, 1, 0.95)
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=trusted_vec)):
+        fact, outcome = await upsert_candidate_outcome(
+            db_session, test_user.id,
+            _cand("Led a 160-server on-prem to Azure migration.", strength=0.9, source_type="bio_memory", kind="project"),
+            auto_approve=True,
+        )
+    assert outcome == "auto_approved"
+    assert fact.id == existing.id
+    assert fact.status == "approved"
+    assert fact.statement == "Led a 160-server on-prem to Azure migration."
+    assert fact.kind == "project"
+    assert list(fact.embedding) == pytest.approx(trusted_vec)

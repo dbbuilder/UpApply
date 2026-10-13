@@ -2,12 +2,13 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.embeddings import generate_embedding
+from app.core.rate_limit import limiter
 from app.core.security import get_current_user
 from app.models.fact import Fact
 from app.models.job import Job
@@ -27,7 +28,7 @@ from app.schemas.fact import (
     FactStatus,
     FactUpdate,
 )
-from app.services.facts import _already_ingested, fact_embedding_text, ingest_items, upsert_manual_fact
+from app.services.facts import MAX_ITEMS_PER_RUN, fact_embedding_text, ingest_items, upsert_manual_fact
 
 router = APIRouter()
 
@@ -113,26 +114,31 @@ async def bulk_approve_facts(
 
 
 @router.post("/ingest", response_model=FactIngestResult)
+@limiter.limit("120/hour")
 async def ingest_facts(
-    request: FactIngestRequest,
+    request: Request,
+    body: FactIngestRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Extract fact candidates from user-written text (used by scripts/ingest_chatgpt_facts.py).
 
-    Ingested text can quote clients and job posts, so `request.auto_approve` is not honoured:
+    Ingested text can quote clients and job posts, so `body.auto_approve` is not honoured:
     new candidates always go to review; only a match to an approved fact is auto-approved (§1.7)."""
-    counts = await ingest_items(db, current_user.id, request.source_type, request.items)
+    counts = await ingest_items(db, current_user.id, body.source_type, body.items)
     await db.commit()
     return FactIngestResult(**counts)
 
 
 @router.post("/from-memories", response_model=FactIngestResult)
+@limiter.limit("10/hour")
 async def facts_from_memories(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Split curated bio memories into atomic facts, auto-approved (spec §1.3.4)."""
+    """Split curated bio memories into atomic facts, auto-approved (spec §1.3.4).
+    Processes MAX_ITEMS_PER_RUN memories per call; call again while remaining > 0."""
     memories = (await db.execute(
         select(Memory).where(
             Memory.user_id == current_user.id,
@@ -149,7 +155,9 @@ async def facts_from_memories(
         )
         for m in memories
     ]
-    counts = await ingest_items(db, current_user.id, "bio_memory", items, auto_approve=True)
+    counts = await ingest_items(
+        db, current_user.id, "bio_memory", items, auto_approve=True, max_items=MAX_ITEMS_PER_RUN
+    )
     await db.commit()
     return FactIngestResult(**counts)
 
@@ -162,7 +170,9 @@ def _proposal_source_text(p: Proposal) -> str:
 
 
 @router.post("/from-proposals", response_model=FactIngestResult)
+@limiter.limit("60/hour")
 async def facts_from_proposals(
+    request: Request,
     limit: int = Query(10, ge=1, le=25),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -189,21 +199,26 @@ async def facts_from_proposals(
         for p in batch
     ]
     counts = await ingest_items(db, current_user.id, "upwork_proposal", items)
-    failed = set(counts["failed_refs"])
+    retry = set(counts["retry_refs"])
+    counts.pop("remaining")
     now = datetime.now(timezone.utc)
     for p in batch:
-        if p.id not in failed:
-            p.facts_ingested_at = now  # zero-fact letters too, so the next call moves on
+        if p.id not in retry:
+            # zero-fact letters and given-up failures too, so the queue always advances
+            p.facts_ingested_at = now
     await db.commit()
-    return FactIngestResult(**counts, remaining=len(pending) - len(batch) + len(failed))
+    return FactIngestResult(**counts, remaining=len(pending) - len(batch) + len(retry))
 
 
 @router.post("/from-contracts", response_model=FactIngestResult)
+@limiter.limit("10/hour")
 async def facts_from_contracts(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Fact candidates from imported Upwork contracts (spec §1.3.3). Never auto-approved."""
+    """Fact candidates from imported Upwork contracts (spec §1.3.3). Never auto-approved.
+    Processes MAX_ITEMS_PER_RUN unprocessed contracts per call; call again while remaining > 0."""
     jobs = (await db.execute(
         select(Job)
         .where(
@@ -213,14 +228,10 @@ async def facts_from_contracts(
         )
         .order_by(Job.created_at.desc())
     )).scalars().all()
-    pending = [
-        j for j in jobs
-        if not await _already_ingested(db, current_user.id, "upwork_contract", j.upwork_job_id)
-    ][:100]
     items = [
         FactIngestItem(text=(j.description or j.title)[:MAX_INGEST_TEXT], source_ref=j.upwork_job_id)
-        for j in pending
+        for j in jobs
     ]
-    counts = await ingest_items(db, current_user.id, "upwork_contract", items)
+    counts = await ingest_items(db, current_user.id, "upwork_contract", items, max_items=MAX_ITEMS_PER_RUN)
     await db.commit()
     return FactIngestResult(**counts)

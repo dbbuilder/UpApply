@@ -3,20 +3,24 @@
 Nothing here commits — callers own the transaction (routers commit; get_db commits too).
 """
 import asyncio
+import hashlib
 import logging
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.embeddings import generate_embedding
-from app.models.fact import Fact
+from app.models.fact import Fact, FactIngestLog
 from app.schemas.fact import FactCandidate, FactIngestItem
 from app.services.fact_extraction import extract_facts
 
 logger = logging.getLogger(__name__)
 
 DEDUPE_THRESHOLD = 0.92
+MAX_CONCURRENT_EXTRACTIONS = 5  # parallel Haiku calls per request
+MAX_EXTRACTION_ATTEMPTS = 3     # an item that fails this often is given up on
+MAX_ITEMS_PER_RUN = 25          # /from-memories and /from-contracts batch size
 
 
 def fact_embedding_text(statement: str, detail: Optional[str]) -> str:
@@ -65,14 +69,20 @@ async def upsert_candidate_outcome(
         fact.skills = _union(fact.skills, cand.skills)
         fact.industries = _union(fact.industries, cand.industries)
         fact.job_types = _union(fact.job_types, list(cand.job_types))
-        if fact.status != "approved" and cand.strength > fact.strength:
+        if auto_approve and fact.status == "candidate":
+            # A trusted source approving an unreviewed candidate: the trusted wording wins, so
+            # an untrusted candidate's own (possibly inflated) claim is never approved (§1.7).
+            fact.kind = cand.kind
+            fact.statement = cand.statement
+            fact.detail = cand.detail
+            fact.embedding = embedding
+            fact.status = "approved"
+        elif fact.status != "approved" and cand.strength > fact.strength:
             # Unreviewed fact: keep the strongest wording. Approved wording is never touched.
             fact.statement = cand.statement
             fact.detail = cand.detail
             fact.embedding = embedding
         fact.strength = max(fact.strength, cand.strength)
-        if auto_approve and fact.status == "candidate":
-            fact.status = "approved"
         await db.flush()
         return fact, ("auto_approved" if fact.status == "approved" else "merged")
 
@@ -187,16 +197,32 @@ async def credit_facts(
     await db.execute(stmt.execution_options(synchronize_session=False))
 
 
-async def _already_ingested(db: AsyncSession, user_id: str, source_type: str, source_ref: str) -> bool:
-    row = await db.execute(
-        select(Fact.id)
-        .where(
-            Fact.user_id == user_id,
-            Fact.sources.contains([{"source_type": source_type, "source_ref": source_ref}]),
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+async def _ingest_log(
+    db: AsyncSession, user_id: str, source_type: str, refs: List[str]
+) -> Dict[str, FactIngestLog]:
+    if not refs:
+        return {}
+    rows = (await db.execute(
+        select(FactIngestLog).where(
+            FactIngestLog.user_id == user_id,
+            FactIngestLog.source_type == source_type,
+            FactIngestLog.source_ref.in_(refs),
         )
-        .limit(1)
+    )).scalars().all()
+    return {r.source_ref: r for r in rows}
+
+
+def _is_settled(row: Optional[FactIngestLog], text: str) -> bool:
+    """Same text already extracted, or given up on after repeated failures."""
+    return bool(
+        row
+        and row.content_hash == _content_hash(text)
+        and (row.status == "done" or row.attempts >= MAX_EXTRACTION_ATTEMPTS)
     )
-    return row.first() is not None
 
 
 async def ingest_items(
@@ -205,33 +231,74 @@ async def ingest_items(
     source_type: str,
     items: List[FactIngestItem],
     auto_approve: bool = False,
+    max_items: Optional[int] = None,
 ) -> dict:
-    """Extract candidates from each item and upsert them. Items whose source_ref already
-    appears in a fact's sources are skipped, so re-runs only pay for new material."""
+    """Extract candidates from each item and upsert them.
+
+    Every item with a source_ref is recorded in fact_ingest_log (including zero-fact results),
+    so re-runs only pay for new or changed text. Failures are retried up to
+    MAX_EXTRACTION_ATTEMPTS. At most `max_items` items are extracted per call
+    (`remaining` counts the rest) and at most MAX_CONCURRENT_EXTRACTIONS run at once."""
     counts = {"created": 0, "merged": 0, "auto_approved": 0, "skipped": 0, "failed": 0}
-    failed_refs: List[Optional[str]] = []
+    log = await _ingest_log(db, user_id, source_type, [i.source_ref for i in items if i.source_ref])
 
     pending: List[FactIngestItem] = []
+    seen: set = set()
     for item in items:
-        if item.source_ref and await _already_ingested(db, user_id, source_type, item.source_ref):
+        if item.source_ref and (item.source_ref in seen or _is_settled(log.get(item.source_ref), item.text)):
             counts["skipped"] += 1
-        else:
-            pending.append(item)
+            continue
+        if item.source_ref:
+            seen.add(item.source_ref)
+        pending.append(item)
+    if max_items is not None:
+        pending, rest = pending[:max_items], pending[max_items:]
+    else:
+        rest = []
 
-    results = await asyncio.gather(
-        *(extract_facts(i.text, source_type, i.source_ref, i.context) for i in pending),
-        return_exceptions=True,
-    )
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_EXTRACTIONS)
+
+    async def _extract(i: FactIngestItem):
+        async with semaphore:
+            return await extract_facts(i.text, source_type, i.source_ref, i.context)
+
+    results = await asyncio.gather(*(_extract(i) for i in pending), return_exceptions=True)
+
+    retry_refs: List[str] = []
+    failed_refs: List[Optional[str]] = []
     for item, result in zip(pending, results):
-        if isinstance(result, BaseException):
+        failed = isinstance(result, BaseException)
+        if failed:
             logger.warning("Fact extraction failed for %s/%s: %s", source_type, item.source_ref, result)
             counts["failed"] += 1
             failed_refs.append(item.source_ref)
+        else:
+            for cand in result:
+                _, outcome = await upsert_candidate_outcome(db, user_id, cand, auto_approve)
+                counts[outcome] += 1
+        if not item.source_ref:
             continue
-        for cand in result:
-            _, outcome = await upsert_candidate_outcome(db, user_id, cand, auto_approve)
-            counts[outcome] += 1
-    # Not a FactIngestResult field (pydantic ignores it); /from-proposals uses it to leave
-    # failed letters unmarked so they are retried.
+        digest = _content_hash(item.text)
+        row = log.get(item.source_ref)
+        if row is None:
+            row = FactIngestLog(
+                user_id=user_id, source_type=source_type, source_ref=item.source_ref,
+                content_hash=digest, status="done", attempts=0,
+            )
+            db.add(row)
+        elif row.content_hash != digest:
+            row.content_hash = digest
+            row.attempts = 0
+        row.status = "failed" if failed else "done"
+        row.attempts = row.attempts + 1 if failed else 0
+        if failed and row.attempts < MAX_EXTRACTION_ATTEMPTS:
+            retry_refs.append(item.source_ref)
+    await db.flush()
+
+    counts["remaining"] = len(rest)
+    # Not FactIngestResult fields. failed_refs: every ref whose extraction raised this call.
+    # retry_refs: the subset still under MAX_EXTRACTION_ATTEMPTS, which /from-proposals leaves
+    # unmarked so they are retried; the rest are given up on.
     counts["failed_refs"] = failed_refs
+    counts["retry_refs"] = retry_refs
     return counts

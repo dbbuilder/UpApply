@@ -56,6 +56,20 @@ def upgrade() -> None:
         "USING hnsw (job_needs_embedding vector_cosine_ops)"
     )
 
+    # Per-item extraction marker: zero-fact items are never re-billed; changed text re-opens.
+    op.create_table(
+        'fact_ingest_log',
+        sa.Column('id', sa.String(36), primary_key=True),
+        sa.Column('user_id', sa.String(36), sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=False),
+        sa.Column('source_type', sa.String(50), nullable=False),
+        sa.Column('source_ref', sa.String(200), nullable=False),
+        sa.Column('content_hash', sa.String(64), nullable=False),
+        sa.Column('status', sa.String(20), nullable=False),
+        sa.Column('attempts', sa.Integer(), nullable=False, server_default='0'),
+        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()')),
+        sa.UniqueConstraint('user_id', 'source_type', 'source_ref', name='uq_fact_ingest_log_ref'),
+    )
+
     op.add_column(
         'memories',
         sa.Column('exclude_from_retrieval', sa.Boolean(), nullable=False, server_default=sa.false()),
@@ -94,6 +108,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_column('memories', 'exclude_from_retrieval')
+    op.drop_table('fact_ingest_log')
     op.execute("DROP INDEX IF EXISTS ix_proposals_job_needs_embedding_hnsw")
     op.drop_column('proposals', 'facts_ingested_at')
     op.drop_column('proposals', 'job_needs_embedding')

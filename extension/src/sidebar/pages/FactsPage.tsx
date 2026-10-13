@@ -122,7 +122,7 @@ export default function FactsPage() {
       setNotice(
         `${r.created} new · ${r.merged} merged · ${r.auto_approved} auto-approved · ${r.skipped} already done` +
         (r.failed ? ` · ${r.failed} failed` : '') +
-        (r.remaining ? ` · ${r.remaining} proposals left, run again` : ''),
+        (r.remaining ? ` · ${r.remaining} left, run again` : ''),
       );
       await load(status);
     } catch (err) {

@@ -227,3 +227,143 @@ async def test_from_contracts_ingests_contract_jobs_once_as_candidates(client: A
     assert "Acme Health" in extract.await_args_list[0].args[0]
     candidates = (await client.get(BASE, headers=auth_headers, params={"status": "candidate"})).json()
     assert [f["source_type"] for f in candidates] == ["upwork_contract"]
+
+
+# --- Adversarial review regressions (phase 1) ---
+
+async def _no_facts(text, source_type, source_ref=None, context=None):
+    return []
+
+
+@pytest.mark.asyncio
+async def test_reopened_proposal_with_new_text_is_re_extracted(client: AsyncClient, auth_headers: dict, fake_embed):
+    """import-from-upwork resets facts_ingested_at when the full letter arrives; the full text
+    must be extracted even though a fact already cites this proposal."""
+    from sqlalchemy import select
+
+    uid = await _user_id(client, auth_headers)
+    async with TestSessionLocal() as s:
+        p = Proposal(user_id=uid, cover_letter_text="Truncated letter", job_title="J", source="scraped")
+        s.add(p)
+        await s.commit()
+        pid = p.id
+
+    extract = AsyncMock(side_effect=_per_ref_extract)
+    with patch("app.services.facts.extract_facts", extract):
+        await client.post(f"{BASE}/from-proposals", headers=auth_headers)
+        async with TestSessionLocal() as s:
+            row = (await s.execute(select(Proposal).where(Proposal.id == pid))).scalar_one()
+            row.cover_letter_text = "Truncated letter, now the full letter with answers"
+            row.facts_ingested_at = None
+            await s.commit()
+        r = await client.post(f"{BASE}/from-proposals", headers=auth_headers)
+    assert r.json()["skipped"] == 0
+    texts = [c.args[0] for c in extract.await_args_list]
+    assert texts == ["Truncated letter", "Truncated letter, now the full letter with answers"]
+
+
+@pytest.mark.asyncio
+async def test_ingest_never_re_extracts_zero_fact_items(client: AsyncClient, auth_headers: dict, fake_embed):
+    extract = AsyncMock(side_effect=_no_facts)
+    payload = {"source_type": "chatgpt_user_turn", "items": [{"text": "Write me a job post", "source_ref": "conv-z"}]}
+    with patch("app.services.facts.extract_facts", extract):
+        await client.post(f"{BASE}/ingest", headers=auth_headers, json=payload)
+        r = await client.post(f"{BASE}/ingest", headers=auth_headers, json=payload)
+    assert r.json()["skipped"] == 1
+    assert extract.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_from_contracts_marks_zero_fact_contracts_and_reports_remaining(client: AsyncClient, auth_headers: dict, fake_embed):
+    from app.models.job import Job
+    from app.services.facts import MAX_ITEMS_PER_RUN
+
+    uid = await _user_id(client, auth_headers)
+    n = MAX_ITEMS_PER_RUN + 5
+    async with TestSessionLocal() as s:
+        s.add_all([
+            Job(user_id=uid, upwork_job_id=f"contract_{i}", upwork_url=f"https://www.upwork.com/nx/wm/workroom/{i}/overview",
+                title=f"Contract {i}", description=f"Contract {i}", source="contract_import", is_saved=True)
+            for i in range(n)
+        ])
+        await s.commit()
+
+    extract = AsyncMock(side_effect=_no_facts)
+    with patch("app.services.facts.extract_facts", extract):
+        r1 = (await client.post(f"{BASE}/from-contracts", headers=auth_headers)).json()
+        r2 = (await client.post(f"{BASE}/from-contracts", headers=auth_headers)).json()
+        r3 = (await client.post(f"{BASE}/from-contracts", headers=auth_headers)).json()
+    assert r1["remaining"] == 5
+    assert r2["remaining"] == 0
+    assert r3["skipped"] == n and r3["remaining"] == 0
+    assert extract.await_count == n  # each contract extracted exactly once
+    assert len({c.args[2] for c in extract.await_args_list}) == n
+
+
+@pytest.mark.asyncio
+async def test_from_memories_caps_batch_and_reports_remaining(client: AsyncClient, auth_headers: dict, fake_embed):
+    from app.services.facts import MAX_ITEMS_PER_RUN
+
+    uid = await _user_id(client, auth_headers)
+    async with TestSessionLocal() as s:
+        s.add_all([
+            Memory(user_id=uid, title=f"Bio {i}", content=f"Built thing {i}", category="project", importance_score=0.95)
+            for i in range(MAX_ITEMS_PER_RUN + 3)
+        ])
+        await s.commit()
+
+    extract = AsyncMock(side_effect=_no_facts)
+    with patch("app.services.facts.extract_facts", extract):
+        r = (await client.post(f"{BASE}/from-memories", headers=auth_headers)).json()
+        assert extract.await_count == MAX_ITEMS_PER_RUN
+        assert r["remaining"] == 3
+        r = (await client.post(f"{BASE}/from-memories", headers=auth_headers)).json()
+    assert extract.await_count == MAX_ITEMS_PER_RUN + 3
+    assert r["remaining"] == 0
+
+
+@pytest.mark.asyncio
+async def test_from_proposals_gives_up_on_persistent_failures(client: AsyncClient, auth_headers: dict, fake_embed):
+    from app.services.facts import MAX_EXTRACTION_ATTEMPTS
+
+    uid = await _user_id(client, auth_headers)
+    async with TestSessionLocal() as s:
+        s.add(Proposal(user_id=uid, cover_letter_text="Always truncates", job_title="J", source="scraped"))
+        await s.commit()
+
+    extract = AsyncMock(side_effect=RuntimeError("max_tokens"))
+    remaining = []
+    with patch("app.services.facts.extract_facts", extract):
+        for _ in range(MAX_EXTRACTION_ATTEMPTS + 1):
+            remaining.append((await client.post(f"{BASE}/from-proposals", headers=auth_headers)).json()["remaining"])
+    assert remaining == [1] * (MAX_EXTRACTION_ATTEMPTS - 1) + [0, 0]
+    assert extract.await_count == MAX_EXTRACTION_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_ingest_bounds_concurrent_extractions(client: AsyncClient, auth_headers: dict, fake_embed):
+    import asyncio
+
+    from app.services.facts import MAX_CONCURRENT_EXTRACTIONS
+
+    state = {"now": 0, "peak": 0}
+
+    async def _slow(text, source_type, source_ref=None, context=None):
+        state["now"] += 1
+        state["peak"] = max(state["peak"], state["now"])
+        await asyncio.sleep(0.01)
+        state["now"] -= 1
+        return []
+
+    items = [{"text": f"t{i}", "source_ref": f"c{i}"} for i in range(25)]
+    with patch("app.services.facts.extract_facts", AsyncMock(side_effect=_slow)):
+        r = await client.post(f"{BASE}/ingest", headers=auth_headers, json={"source_type": "chatgpt_user_turn", "items": items})
+    assert r.status_code == 200
+    assert 1 < state["peak"] <= MAX_CONCURRENT_EXTRACTIONS
+
+
+def test_fact_llm_endpoints_are_rate_limited():
+    from app.core.rate_limit import limiter
+
+    for name in ("ingest_facts", "facts_from_memories", "facts_from_proposals", "facts_from_contracts"):
+        assert f"app.api.v1.facts.{name}" in limiter._route_limits, name
