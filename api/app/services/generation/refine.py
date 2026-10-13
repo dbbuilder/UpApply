@@ -41,6 +41,8 @@ logger = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 4
 SEARCH_LIMIT = 5
+MAX_FOUND_FACTS = 8  # distinct facts search_facts may return in one refine turn
+MAX_ADDED_WARNING_CHARS = 300
 MAX_QUERY_CHARS = 500
 MAX_HISTORY = 20
 MAX_MESSAGE_CHARS = 4000
@@ -168,6 +170,9 @@ async def _run_tool(db: AsyncSession, user_id: str, block: Any, found: dict[str,
     query = str((block.input or {}).get("query", "")).strip()[:MAX_QUERY_CHARS]
     if not query:
         return _tool_error(block, "Empty query.")
+    if len(found) >= MAX_FOUND_FACTS:
+        return _tool_error(block, "Fact search limit reached for this request; "
+                                  "use the facts already found.")
     try:
         embedding = await generate_embedding(query)
         # search_facts is user-scoped and returns approved facts only.
@@ -175,9 +180,16 @@ async def _run_tool(db: AsyncSession, user_id: str, block: Any, found: dict[str,
     except Exception as exc:
         logger.warning("search_facts tool failed: %s", type(exc).__name__)
         return _tool_error(block, "Fact search is unavailable right now.")
-    facts = [fact for fact, _similarity in hits]
-    for fact in facts:
-        found[str(fact.id)] = fact
+    # A job post read during refine could steer the model into harvesting the fact library:
+    # at most MAX_FOUND_FACTS distinct facts leave the library per turn.
+    facts = []
+    for fact, _similarity in hits:
+        fid = str(fact.id)
+        if fid not in found:
+            if len(found) >= MAX_FOUND_FACTS:
+                continue
+            found[fid] = fact
+        facts.append(fact)
     return {
         "type": "tool_result",
         "tool_use_id": block.id,
@@ -272,6 +284,13 @@ async def refine_application(
             question = str(item.get("question", ""))
             warnings.append(Issue(f'No answer for screening question: "{question}"', "missing_answer", question))
     warnings += await check_claims(draft, all_evidence)
+    # Facts the letter now cites that were not in its evidence came from search_facts this
+    # turn: Chris sees each one before the letter goes to this client.
+    original_ids = {str(f.id) for f in evidence.facts}
+    for fid in draft.fact_ids_used:
+        if fid not in original_ids and fid in found:
+            statement = " ".join(neutralise(found[fid].statement or "", MAX_ADDED_WARNING_CHARS).split())
+            warnings.append(f"Added via search: {statement}")
     return RefineResult(
         draft=draft,
         warnings=warnings,

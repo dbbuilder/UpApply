@@ -137,6 +137,17 @@ describe('Generator refine chat', () => {
     await sendRefine('shorter');
     expect(refineMock).toHaveBeenCalledWith('cl-1', 'shorter', [], 'Draft one, edited by hand.');
   });
+
+  it('shows facts added via search as plain-text warnings', async () => {
+    refineMock.mockResolvedValue({
+      ...refineResult('Refined.', 'mention azure'),
+      warnings: ['Added via search: Led <img src=x onerror=alert(1)> Azure migration'],
+    });
+    await act(async () => { root.render(createElement(Generator)); });
+    await sendRefine('mention azure');
+    expect(container.textContent).toContain('Added via search: Led <img src=x onerror=alert(1)> Azure migration');
+    expect(container.querySelector('img')).toBeNull();
+  });
 });
 
 describe('Generator on a legacy (generation_v2 off) letter', () => {

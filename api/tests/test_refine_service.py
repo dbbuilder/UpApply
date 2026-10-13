@@ -109,7 +109,10 @@ async def test_tool_loop_returns_revised_draft_and_found_facts():
 
     assert result.draft.cover_letter == REVISED["cover_letter"]
     assert result.draft.fact_ids_used == [EVIDENCE_FACT_ID, FOUND_FACT_ID]
-    assert result.warnings == ["rule warning", "claim warning"]
+    assert result.warnings == [
+        "rule warning", "claim warning",
+        "Added via search: Built AnalyzeMyCloud.com for Azure cost analysis.",
+    ]
     assert result.claims_verified is True
     assert [str(f.id) for f in result.found_facts] == [FOUND_FACT_ID]
     search.assert_awaited_once()
@@ -306,3 +309,68 @@ def test_draft_schema_is_strict():
     schema = refine_mod.DRAFT_SCHEMA
     assert schema["additionalProperties"] is False
     assert set(schema["required"]) == {"cover_letter", "screening_answers", "fact_ids_used"}
+
+
+def _ids(n: int, start: int = 0) -> list[str]:
+    return [f"33333333-3333-3333-3333-{i:012d}" for i in range(start, start + n)]
+
+
+@pytest.mark.asyncio
+async def test_search_facts_returns_at_most_eight_distinct_facts_per_turn():
+    """A job post cannot steer refine into harvesting the whole fact library."""
+    batches = [[(_fact(fid, f"Fact {fid}"), 0.8) for fid in _ids(5, start)] for start in (0, 5, 10)]
+    client = _client([_tool_use("a", "tu_1"), _tool_use("b", "tu_2"), _tool_use("c", "tu_3"),
+                      _final(REVISED)])
+    search = AsyncMock(side_effect=batches)
+    with patch(f"{MOD}.get_anthropic_client", return_value=client), \
+         patch(f"{MOD}.generate_embedding", AsyncMock(return_value=[0.1] * 1536)), \
+         patch(f"{MOD}.search_facts", search), \
+         patch(f"{MOD}.check_rules", return_value=[]), \
+         patch(f"{MOD}.check_claims", AsyncMock(return_value=[])):
+        result = await refine_application(None, "u1", _profile(), _brief(), _evidence(), _current(), [], "go")
+
+    calls = client.messages.create.await_args_list
+    messages = calls[3].kwargs["messages"]  # one list, extended in place each round
+    first = json.loads(messages[2]["content"][0]["content"])
+    second = json.loads(messages[4]["content"][0]["content"])
+    third = messages[6]["content"][0]
+    assert len(first) == 5
+    assert len(second) == 3  # budget of 8 distinct facts exhausted mid-batch
+    assert third["is_error"] is True
+    assert "limit" in third["content"].lower()
+    assert search.await_count == 2  # the capped call never queries
+    assert len(result.found_facts) == 8
+
+
+@pytest.mark.asyncio
+async def test_repeated_facts_do_not_consume_the_budget():
+    same = [(_fact(fid, f"Fact {fid}"), 0.8) for fid in _ids(5)]
+    client = _client([_tool_use("a", "tu_1"), _tool_use("b", "tu_2"), _final(REVISED)])
+    with patch(f"{MOD}.get_anthropic_client", return_value=client), \
+         patch(f"{MOD}.generate_embedding", AsyncMock(return_value=[0.1] * 1536)), \
+         patch(f"{MOD}.search_facts", AsyncMock(side_effect=[same, same])), \
+         patch(f"{MOD}.check_rules", return_value=[]), \
+         patch(f"{MOD}.check_claims", AsyncMock(return_value=[])):
+        result = await refine_application(None, "u1", _profile(), _brief(), _evidence(), _current(), [], "go")
+    second = client.messages.create.await_args_list[2].kwargs["messages"][4]["content"][0]
+    assert len(json.loads(second["content"])) == 5
+    assert len(result.found_facts) == 5
+
+
+@pytest.mark.asyncio
+async def test_facts_added_via_search_are_surfaced_as_warnings():
+    found = _fact(FOUND_FACT_ID, "Built <b>AnalyzeMyCloud</b>\nfor Azure cost analysis.")
+    unused = _fact(_ids(1)[0], "Never cited in the letter.")
+    client = _client([_tool_use("azure cost work"), _final(REVISED)])
+    with patch(f"{MOD}.get_anthropic_client", return_value=client), \
+         patch(f"{MOD}.generate_embedding", AsyncMock(return_value=[0.1] * 1536)), \
+         patch(f"{MOD}.search_facts", AsyncMock(return_value=[(found, 0.81), (unused, 0.7)])), \
+         patch(f"{MOD}.check_rules", return_value=[]), \
+         patch(f"{MOD}.check_claims", AsyncMock(return_value=[])):
+        result = await refine_application(None, "u1", _profile(), _brief(), _evidence(), _current(), [], "go")
+
+    added = [w for w in result.warnings if w.startswith("Added via search: ")]
+    assert len(added) == 1  # the evidence fact and the uncited search hit are not flagged
+    assert "AnalyzeMyCloud" in added[0]
+    assert "<" not in added[0] and ">" not in added[0] and "\n" not in added[0]
+    assert result.claims_verified is True
