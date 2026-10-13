@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.embeddings import generate_embedding, get_openai_client
+from app.core.errors import generation_unavailable
 from app.models.user import User, UserProfile
 from app.models.screening_answer import ScreeningAnswer
 from app.models.cover_letter import CoverLetter
@@ -291,15 +292,15 @@ async def generate_screening_answer(
                 credit_usage=False,  # the letter written alongside this answer is discarded
                 answers_only=True,  # so it is neither verified, repaired for, nor warned about
             )
-        except EvidenceUnavailable:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Your experience facts could not be retrieved right now. Please try again shortly.",
+        except EvidenceUnavailable as exc:
+            return generation_unavailable(
+                exc, status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Your experience facts could not be retrieved right now. Please try again shortly.",
             )
         except LLMError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Answer generation failed upstream: {exc}",
+            return generation_unavailable(
+                exc, status.HTTP_502_BAD_GATEWAY,
+                "Answer generation is temporarily unavailable. Please try again shortly.",
             )
         answers = result.draft.screening_answers
         return ScreeningAnswerGenerateResponse(

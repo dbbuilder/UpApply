@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.embeddings import generate_embedding
 from app.core.config import settings
+from app.core.errors import generation_unavailable
 from app.models.user import User, UserProfile
 from app.models.job import Job
 from app.models.cover_letter import CoverLetter
@@ -849,17 +850,17 @@ async def generate_cover_letter_endpoint(
                 prototype_url=body.prototype_url,
                 extra_points=body.custom_instructions,
             )
-        except EvidenceUnavailable:
+        except EvidenceUnavailable as exc:
             await db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Your experience facts could not be retrieved right now. Please try again shortly.",
+            return generation_unavailable(
+                exc, status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Your experience facts could not be retrieved right now. Please try again shortly.",
             )
         except LLMError as exc:
             await db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Draft generation failed upstream: {exc}",
+            return generation_unavailable(
+                exc, status.HTTP_502_BAD_GATEWAY,
+                "Draft generation is temporarily unavailable. Please try again shortly.",
             )
         content = v2_result.draft.cover_letter
     else:

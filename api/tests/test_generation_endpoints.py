@@ -161,7 +161,7 @@ async def test_cover_letter_generate_v2_llm_failure_is_502_and_saves_nothing(cli
             json={"job_data": JOB_DATA},
         )
     assert resp.status_code == 502
-    assert "invalid JSON" in resp.json()["detail"]
+    assert "invalid JSON" not in resp.text
     async with test_engine.connect() as conn:
         count = (await conn.execute(text("SELECT count(*) FROM cover_letters"))).scalar_one()
     assert count == 0
@@ -379,3 +379,63 @@ async def test_v2_cover_letter_reports_claims_verified_true(client: AsyncClient,
         )
     assert resp.status_code == 200, resp.text
     assert resp.json()["claims_verified"] is True
+
+
+def _assert_generic_failure(resp, status_code, caplog, leaked):
+    import re as _re
+    assert resp.status_code == status_code
+    body = resp.json()
+    assert body["code"] == "generation_unavailable"
+    assert _re.fullmatch(r"[0-9a-f]{32}", body["request_id"])
+    assert isinstance(body["detail"], str) and body["request_id"] in body["detail"]
+    for text in leaked:
+        assert text not in resp.text
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert body["request_id"] in logged
+    return logged
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error, status_code", [("llm", 502), ("evidence", 503)])
+async def test_cover_letter_v2_failures_disclose_no_exception_text(
+    client: AsyncClient, auth_headers_with_profile, caplog, error, status_code
+):
+    import logging
+    from app.services.generation.evidence import EvidenceUnavailable
+    from app.services.llm import LLMError
+
+    await _enable_v2()
+    exc = LLMError("API error from claude-x: sk-ant-SECRET ... proxy hint") if error == "llm" \
+        else EvidenceUnavailable("needs/anchors embedding failed sk-ant-SECRET")
+    caplog.set_level(logging.INFO)
+    with patch("app.api.v1.jobs.run_full_analysis", AsyncMock(return_value=_analysis())), \
+         patch("app.api.v1.jobs.generate_embedding", AsyncMock(side_effect=RuntimeError("no quota"))), \
+         patch("app.api.v1.jobs.generate_application", AsyncMock(side_effect=exc)):
+        resp = await client.post(
+            "/api/v1/jobs/cover-letters/generate", headers=auth_headers_with_profile, json={"job_data": JOB_DATA},
+        )
+    logged = _assert_generic_failure(resp, status_code, caplog, ["sk-ant-SECRET", "claude-x", "embedding failed"])
+    assert type(exc).__name__ in logged and "sk-ant-SECRET" in logged
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error, status_code", [("llm", 502), ("evidence", 503)])
+async def test_screening_v2_failures_disclose_no_exception_text(
+    client: AsyncClient, auth_headers_with_profile, caplog, error, status_code
+):
+    import logging
+    from app.services.generation.evidence import EvidenceUnavailable
+    from app.services.llm import LLMError
+
+    await _enable_v2()
+    exc = LLMError("API error from claude-x: sk-ant-SECRET") if error == "llm" \
+        else EvidenceUnavailable("needs/anchors embedding failed sk-ant-SECRET")
+    caplog.set_level(logging.INFO)
+    with patch("app.api.v1.screening_answers.generate_application", AsyncMock(side_effect=exc)):
+        resp = await client.post(
+            "/api/v1/screening-answers/generate",
+            headers=auth_headers_with_profile,
+            json={"question": "How would you handle the cutover?"},
+        )
+    logged = _assert_generic_failure(resp, status_code, caplog, ["sk-ant-SECRET", "claude-x", "embedding failed"])
+    assert type(exc).__name__ in logged
