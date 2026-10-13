@@ -179,6 +179,9 @@ export default function GeneratorPage() {
 
   const handleRefine = async (message: string) => {
     if (!coverLetterId) return;
+    const refinedId = coverLetterId;
+    // A new draft or job switch while the request is in flight makes this result stale.
+    const isStale = () => useAppStore.getState().coverLetterId !== refinedId;
     setRefining(true);
     setRefineError(null);
     const questions = currentJob?.screeningQuestions ?? [];
@@ -186,7 +189,8 @@ export default function GeneratorPage() {
       .map((q, i) => ({ question: q.question, answer: questionAnswers[`q${i}`] ?? '' }))
       .filter(a => a.answer);
     try {
-      const result = await apiClient.refineCoverLetter(coverLetterId, message, currentAnswers);
+      const result = await apiClient.refineCoverLetter(refinedId, message, currentAnswers);
+      if (isStale()) return;
       useAppStore.getState().setCoverLetter(result.cover_letter);
       // The first draft's warnings no longer apply (RefineChat shows the latest ones);
       // the "Claims not verified" notice follows the refined draft's claim check.
@@ -214,6 +218,7 @@ export default function GeneratorPage() {
       setRefineWarnings(result.warnings);
       setSubmitted(false);
     } catch (err) {
+      if (isStale()) return;
       setRefineError(err instanceof Error ? err.message : 'Refine failed');
     } finally {
       setRefining(false);
@@ -345,6 +350,7 @@ export default function GeneratorPage() {
   };
 
   const handleGenerateAll = async () => {
+    _resetFeedbackLoopState();
     await generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
     // v2 answers come back with the letter (same evidence, one call) — use them instead of per-question calls
     const meta = useAppStore.getState().draftMeta;
