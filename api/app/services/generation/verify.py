@@ -26,6 +26,17 @@ _SALUTATION = re.compile(r"^(hello|hi|hey|dear|greetings|good (morning|afternoon
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 _STARTS_WITH_I = re.compile(r"^[\"'“‘(\-–—*\s]*I\b")
 _QUOTED = re.compile(r"[\"“]([^\"”]+)[\"”]")
+# A quoted span is a required word only when the words just before it ask for it
+# ('start with "blue"', 'include the word "pineapple"'); 'In your answer to "Describe..."' is a reference.
+_REQUIRES_QUOTE = re.compile(
+    r"\b(with|word|words|phrase|term|keyword|code|codeword|include|including|mention|use|using|write|say|type|"
+    r"put|add|begin|start)\s*[:,]?\s*$",
+    re.IGNORECASE,
+)
+# 'Do not use the phrase "I am excited"': the quoted span must be ABSENT.
+_NEGATED = re.compile(r"\b(do not|don't|dont|never|avoid|without|must not|should not|shouldn't|refrain)\b", re.IGNORECASE)
+_CLAUSE_END = re.compile(r"[.;!?]")
+ANSWER_SENTENCES = (2, 5)
 
 CLAIMS_SCHEMA: dict = {
     "type": "object",
@@ -66,8 +77,53 @@ def expected_closing(preferred_closing: Optional[str]) -> str:
     return f"{WARM_REGARDS}\n{closing}" if closing else WARM_REGARDS
 
 
-def check_rules(text: str, brief: JobBrief, preferred_closing: Optional[str]) -> list[str]:
-    """Chris's hard rules. Returns human-readable violations (empty = clean)."""
+def _sentences(text: str) -> list[str]:
+    return [s.strip() for s in _SENTENCE_SPLIT.split(text) if s.strip()]
+
+
+def check_answer_rules(screening_answers: list[dict]) -> list[str]:
+    """Hard rules for screening answers: 2-5 sentences, no salutation, no banned phrase.
+    Empty answers are reported separately by the orchestrator."""
+    violations: list[str] = []
+    low, high = ANSWER_SENTENCES
+    for item in screening_answers:
+        answer = str(item.get("answer") or "").strip()
+        if not answer:
+            continue
+        label = str(item.get("question", ""))[:80]
+        count = len(_sentences(answer))
+        if count < low or count > high:
+            violations.append(f'Answer to "{label}" has {count} sentences; screening answers must be {low}-{high} sentences.')
+        if _SALUTATION.match(answer.splitlines()[0].strip()):
+            violations.append(f'Answer to "{label}" opens with a salutation; start with content.')
+        lowered = answer.lower()
+        for phrase in BANNED_PHRASES:
+            if phrase.lower() in lowered:
+                violations.append(f'Answer to "{label}" uses banned phrase: "{phrase}"')
+    return violations
+
+
+def _ask_violated(ask: str, haystack: str) -> bool:
+    for match in _QUOTED.finditer(ask):
+        quoted = match.group(1).strip().lower()
+        prefix = _CLAUSE_END.split(ask[: match.start()])[-1]
+        if _NEGATED.search(prefix):
+            if quoted in haystack:
+                return True
+        elif _REQUIRES_QUOTE.search(prefix) and quoted not in haystack:
+            return True
+    return False
+
+
+def check_rules(
+    text: str,
+    brief: JobBrief,
+    preferred_closing: Optional[str],
+    screening_answers: Optional[list[dict]] = None,
+) -> list[str]:
+    """Chris's hard rules. Returns human-readable violations (empty = clean).
+    With `screening_answers`, the answer rules are checked too and explicit asks may be
+    honoured in either the letter or the answers."""
     violations: list[str] = []
     stripped = text.strip()
     closing = expected_closing(preferred_closing)
@@ -81,8 +137,7 @@ def check_rules(text: str, brief: JobBrief, preferred_closing: Optional[str]) ->
     if _SALUTATION.match(first_line):
         violations.append("Letter opens with a salutation; start with content.")
 
-    for sentence in _SENTENCE_SPLIT.split(body):
-        sentence = sentence.strip()
+    for sentence in _sentences(body):
         if _STARTS_WITH_I.match(sentence):
             violations.append(f'Sentence starts with "I": "{sentence[:80]}"')
 
@@ -96,12 +151,13 @@ def check_rules(text: str, brief: JobBrief, preferred_closing: Optional[str]) ->
     if words < int(low * (1 - LENGTH_SLACK)) or words > int(high * (1 + LENGTH_SLACK)):
         violations.append(f"Length {words} words is outside the {low}-{high} target for this job.")
 
+    answers = screening_answers or []
+    haystack = "\n".join([lowered] + [str(a.get("answer") or "").lower() for a in answers])
     for ask in brief.explicit_asks:
-        for quoted in _QUOTED.findall(ask):
-            if quoted.lower() not in lowered:
-                violations.append(f"Explicit ask not honoured: {ask}")
-                break
+        if _ask_violated(ask, haystack):
+            violations.append(f"Explicit ask not honoured: {ask}")
 
+    violations.extend(check_answer_rules(answers))
     return violations
 
 
@@ -113,7 +169,7 @@ async def check_claims(draft: "Draft", evidence: Evidence) -> list[str]:
     ) or "(none)"
     user = (
         f"<evidence>\n{neutralise(format_facts(evidence.facts))}\n</evidence>\n\n"
-        f"<draft_letter>\n{neutralise(draft.cover_letter)}\n</draft_letter>\n\n"
+        f"<draft_letter>\n{neutralise(draft.cover_letter) or '(none)'}\n</draft_letter>\n\n"
         f"<screening_answers>\n{answers}\n</screening_answers>"
     )
     try:

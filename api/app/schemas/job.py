@@ -11,6 +11,8 @@ MAX_SCREENING_QUESTION = 2000
 MAX_SCREENING_QUESTIONS = 20
 MAX_EXTRA_POINTS = 2000
 MAX_PROTOTYPE_URL = 500
+MAX_GEN_SKILLS = 50
+MAX_GEN_SKILL_LENGTH = 200
 
 ScreeningQuestion = Annotated[str, Field(max_length=MAX_SCREENING_QUESTION)]
 
@@ -162,6 +164,11 @@ class CoverLetterGenerateRequest(BaseModel):
                 raise ValueError(f"job_data.title exceeds {MAX_GEN_TITLE} characters")
             if len(self.job_data.description) > MAX_GEN_DESCRIPTION:
                 raise ValueError(f"job_data.description exceeds {MAX_GEN_DESCRIPTION} characters")
+            skills = self.job_data.skills_required or []
+            if len(skills) > MAX_GEN_SKILLS or any(len(s) > MAX_GEN_SKILL_LENGTH for s in skills):
+                raise ValueError(
+                    f"job_data.skills_required allows {MAX_GEN_SKILLS} skills of {MAX_GEN_SKILL_LENGTH} characters"
+                )
         return self
 
 

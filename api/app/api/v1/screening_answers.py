@@ -287,6 +287,7 @@ async def generate_screening_answer(
                 questions=[body.question],
                 brief=cached_brief,
                 credit_usage=False,  # the letter written alongside this answer is discarded
+                answers_only=True,  # so it is neither verified, repaired for, nor warned about
             )
         except LLMError as exc:
             raise HTTPException(

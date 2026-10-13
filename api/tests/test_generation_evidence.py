@@ -73,7 +73,7 @@ async def test_select_evidence_covers_needs_adds_anchor_floor_and_voice():
         return results[query_embedding[0]][:limit]
 
     voice = [SimpleNamespace(id="p1", cover_letter_text="real letter")]
-    embed = AsyncMock(return_value=[[1.0], [2.0], [3.0], [4.0]])
+    embed = AsyncMock(side_effect=[[[1.0], [2.0], [3.0]], [[4.0]]])
     with patch.object(ev, "generate_embeddings_batch", embed), \
          patch.object(ev, "search_facts", AsyncMock(side_effect=fake_search)), \
          patch.object(ev, "_find_voice_samples", AsyncMock(return_value=voice)) as find_voice:
@@ -81,7 +81,8 @@ async def test_select_evidence_covers_needs_adds_anchor_floor_and_voice():
             db=None, user_id="u1", brief=_brief(["need one", "need two"]),
             anchors={"always_include": ["160-server migration"], "sql": "ignored here"},
         )
-    assert embed.call_args.args[0] == ["need one", "need two", "160-server migration", "need one\nneed two"]
+    assert embed.call_args_list[0].args[0] == ["need one", "need two", "160-server migration"]
+    assert embed.call_args_list[1].args[0] == ["need one\nneed two"]
     assert [f.id for f in result.facts] == ["a", "c", "b", "anchor"]
     assert result.voice_samples == voice
     assert find_voice.call_args.args[1] == "u1"
@@ -114,7 +115,8 @@ async def test_select_evidence_voice_query_is_the_job_text_when_present():
          patch.object(ev, "search_facts", AsyncMock(return_value=[])), \
          patch.object(ev, "_find_voice_samples", AsyncMock(return_value=[])):
         await select_evidence(None, "u1", brief, None)
-    assert embed.call_args.args[0] == ["need one", "Azure lead\n\nMigrate our SQL estate"]
+    assert embed.call_args_list[0].args[0] == ["need one"]
+    assert embed.call_args_list[1].args[0] == ["Azure lead\n\nMigrate our SQL estate"]
 
 
 @pytest.mark.asyncio
@@ -169,3 +171,61 @@ async def test_find_voice_samples_filters_ai_and_weights_outcome(setup_database)
         texts = [s.cover_letter_text for s in samples]  # read before rollback expires the rows
         await db.rollback()
     assert texts == ["Chris edited, hired", "Chris exact, no response"]
+
+
+@pytest.mark.asyncio
+async def test_voice_query_embedding_failure_only_loses_voice_samples():
+    """An oversized job post must not take the needs/anchors embedding batch down with it."""
+    a = _fact("a")
+    brief = JobBrief(
+        needs=["need one"], job_types=[], client_signals={}, mirror_phrases=[],
+        explicit_asks=[], questions=[], title="T", description="x" * 50_000,
+    )
+
+    async def embed(texts):
+        if any(len(t) > 10_000 for t in texts):
+            raise RuntimeError("input too long")
+        return [[1.0] for _ in texts]
+
+    find_voice = AsyncMock(return_value=[SimpleNamespace(id="p1")])
+    with patch.object(ev, "generate_embeddings_batch", AsyncMock(side_effect=embed)), \
+         patch.object(ev, "search_facts", AsyncMock(return_value=[(a, 0.9)])), \
+         patch.object(ev, "_find_voice_samples", find_voice):
+        result = await select_evidence(None, "u1", brief, None)
+    assert [f.id for f in result.facts] == ["a"]
+    assert result.voice_samples == []
+    find_voice.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_select_evidence_forwards_excluded_proposals_to_voice_search():
+    find_voice = AsyncMock(return_value=[])
+    with patch.object(ev, "generate_embeddings_batch", AsyncMock(side_effect=lambda t: [[1.0] for _ in t])), \
+         patch.object(ev, "search_facts", AsyncMock(return_value=[])), \
+         patch.object(ev, "_find_voice_samples", find_voice):
+        await select_evidence(None, "u1", _brief(["need"]), None, exclude_proposal_ids=["p-123"])
+    assert find_voice.call_args.kwargs["exclude_ids"] == ["p-123"]
+
+
+@pytest.mark.asyncio
+async def test_find_voice_samples_excludes_by_id_or_upwork_proposal_id(setup_database):
+    from app.models.proposal import Proposal
+    from app.models.user import User
+    from tests.conftest import TestSessionLocal
+
+    async with TestSessionLocal() as db:
+        user = User(email="voice-exclude@example.com", hashed_password="x")
+        db.add(user)
+        await db.flush()
+        golden = Proposal(user_id=user.id, cover_letter_text="Golden answer key", author="chris",
+                          upwork_proposal_id="up-golden", job_needs_embedding=_vec(1.0))
+        by_id = Proposal(user_id=user.id, cover_letter_text="Excluded by id", author="chris",
+                         job_needs_embedding=_vec(1.0))
+        other = Proposal(user_id=user.id, cover_letter_text="Other job", author="chris",
+                         job_needs_embedding=_vec(0.9, 0.4))
+        db.add_all([golden, by_id, other])
+        await db.flush()
+        samples = await ev._find_voice_samples(db, user.id, _vec(1.0), exclude_ids=["up-golden", by_id.id])
+        texts = [s.cover_letter_text for s in samples]
+        await db.rollback()
+    assert texts == ["Other job"]

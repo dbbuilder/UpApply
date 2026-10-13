@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.embeddings import generate_embeddings_batch
@@ -91,8 +91,10 @@ async def _find_voice_samples(
     user_id: str,
     query_embedding: list[float],
     limit: int = VOICE_SAMPLE_LIMIT,
+    exclude_ids: Optional[list[str]] = None,
 ) -> list[Proposal]:
-    """Chris-written proposals for similar jobs, nudged toward ones that got traction."""
+    """Chris-written proposals for similar jobs, nudged toward ones that got traction.
+    `exclude_ids` match either proposals.id or proposals.upwork_proposal_id."""
     distance = Proposal.job_needs_embedding.cosine_distance(query_embedding)
     stmt = (
         select(Proposal, (1 - distance).label("similarity"))
@@ -104,6 +106,12 @@ async def _find_voice_samples(
         .order_by(distance)
         .limit(limit * 4)
     )
+    if exclude_ids:
+        excluded = [str(i) for i in exclude_ids]
+        stmt = stmt.where(
+            Proposal.id.not_in(excluded),
+            or_(Proposal.upwork_proposal_id.is_(None), Proposal.upwork_proposal_id.not_in(excluded)),
+        )
     rows = (await db.execute(stmt)).all()
     ranked = sorted(
         rows,
@@ -118,6 +126,7 @@ async def select_evidence(
     user_id: str,
     brief: JobBrief,
     anchors: Optional[dict],
+    exclude_proposal_ids: Optional[list[str]] = None,
 ) -> Evidence:
     """Per-need fact retrieval + rerank, always-include floor, and 2-3 voice samples."""
     needs = [n for n in brief.needs if n.strip()]
@@ -125,15 +134,17 @@ async def select_evidence(
     # Job<->job: same text shape Phase 1 (Task 1.8) and Phase 3 (Task 3.4) embed into
     # proposals.job_needs_embedding ("title\n\ndescription"); needs are the fallback.
     voice_query = "\n\n".join(t for t in (brief.title, brief.description) if t) or "\n".join(needs)
-    texts = needs + always + ([voice_query] if voice_query else [])
-    if not texts:
+    texts = needs + always
+    if not texts and not voice_query:
         return Evidence()
 
-    try:
-        vectors = await generate_embeddings_batch(texts)
-    except Exception as exc:
-        logger.warning("Embeddings unavailable for evidence selection: %s", exc)
-        return Evidence()
+    vectors: list[list[float]] = []
+    if texts:
+        try:
+            vectors = await generate_embeddings_batch(texts)
+        except Exception as exc:
+            logger.warning("Embeddings unavailable for evidence selection: %s", exc)
+            return Evidence()
 
     need_vectors = vectors[: len(needs)]
     anchor_vectors = vectors[len(needs) : len(needs) + len(always)]
@@ -148,5 +159,14 @@ async def select_evidence(
             facts.append(hits[0][0])
             seen.add(str(hits[0][0].id))
 
-    voice = await _find_voice_samples(db, user_id, vectors[-1]) if voice_query else []
+    # Embedded on its own: the full job text can exceed the embedding input limit, and that
+    # must cost only the voice samples, never the facts.
+    voice: list[Proposal] = []
+    if voice_query:
+        try:
+            voice_vector = (await generate_embeddings_batch([voice_query]))[0]
+        except Exception as exc:
+            logger.warning("Voice-sample query embedding failed: %s", type(exc).__name__)
+        else:
+            voice = await _find_voice_samples(db, user_id, voice_vector, exclude_ids=exclude_proposal_ids)
     return Evidence(facts=facts, voice_samples=voice)

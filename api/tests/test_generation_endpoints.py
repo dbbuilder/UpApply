@@ -177,6 +177,8 @@ async def test_cover_letter_generate_v2_llm_failure_is_502_and_saves_nothing(cli
     {"prototype_url": "demo.example.com"},
     {"job_data": {**JOB_DATA, "title": "t" * 301}},
     {"job_data": {**JOB_DATA, "description": "d" * 20001}},
+    {"job_data": {**JOB_DATA, "skills_required": ["s"] * 51}},
+    {"job_data": {**JOB_DATA, "skills_required": ["s" * 201]}},
 ])
 async def test_cover_letter_generate_rejects_oversized_or_bad_input(
     client: AsyncClient, auth_headers_with_profile, override
@@ -219,6 +221,7 @@ async def test_screening_generate_routes_to_v2_when_flag_on(client: AsyncClient,
     assert kwargs["skills"] == JOB_DATA["skills_required"]
     assert kwargs["brief"] is None
     assert kwargs["credit_usage"] is False
+    assert kwargs["answers_only"] is True
 
 
 @pytest.mark.asyncio

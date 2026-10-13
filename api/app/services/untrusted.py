@@ -31,3 +31,10 @@ def neutralise(text: str) -> str:
     text = _ZERO_WIDTH.sub("", text)
     text = _URL_BRACKET.sub(lambda m: "<" if m.group(1).lower() == "c" else ">", text)
     return unicodedata.normalize("NFKC", text).translate(_BRACKETS)
+
+
+def escape_brackets(text: str) -> str:
+    """For trusted text that must reach the model verbatim (the user's own prototype URL and
+    extra points): no entity decoding or normalisation, only brackets swapped so it cannot
+    close its delimiting block."""
+    return text.translate(_BRACKETS)

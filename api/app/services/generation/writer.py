@@ -10,7 +10,7 @@ from app.services.generation.brief import JobBrief
 from app.services.generation.evidence import Evidence, format_facts
 from app.services.generation.verify import expected_closing, length_band
 from app.services.llm import structured_call
-from app.services.untrusted import neutralise
+from app.services.untrusted import escape_brackets, neutralise
 
 
 class Draft(BaseModel):
@@ -93,7 +93,7 @@ HARD RULES (violations are failures)
 
 SCREENING ANSWERS
 - Answer every question, in order, copying each question text exactly into the question field.
-- 2-5 sentences each unless the question asks for more. Draw on the same evidence as the letter, but prefer a different fact than the one the letter leans on when another fits.
+- 2-5 sentences each. Draw on the same evidence as the letter, but prefer a different fact than the one the letter leans on when another fits.
 - Same voice. The salutation, placeholder and banned-phrase rules apply to answers too.""")
     return "\n\n".join(parts)
 
@@ -165,12 +165,12 @@ def build_writer_user_prompt(
         parts.append(
             "PROTOTYPE: a working prototype for this job is live at the URL below. "
             "Work it into the letter where it strengthens the case, with the URL written exactly.\n"
-            + _block("prototype_url", neutralise(prototype_url.strip()))
+            + _block("prototype_url", escape_brackets(prototype_url.strip()))
         )
     if extra_points and extra_points.strip():
         parts.append(
             f"EXTRA POINTS FROM {name} (include these):\n"
-            + _block("extra_points", neutralise(format_inclusions(extra_points)))
+            + _block("extra_points", escape_brackets(format_inclusions(extra_points)))
         )
     if brief.questions:
         numbered = "\n".join(f"{i}. {neutralise(q.strip())}" for i, q in enumerate(brief.questions, 1))

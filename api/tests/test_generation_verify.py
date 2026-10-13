@@ -11,6 +11,7 @@ from app.services.generation.evidence import Evidence
 from app.services.generation.verify import (
     CLAIM_CHECK_SKIPPED,
     CLAIMS_SYSTEM,
+    check_answer_rules,
     check_claims,
     check_rules,
     expected_closing,
@@ -137,3 +138,41 @@ async def test_check_claims_degrades_to_skip_marker_on_llm_failure():
     draft = SimpleNamespace(cover_letter="x", screening_answers=[])
     with patch("app.services.generation.verify.structured_call", AsyncMock(side_effect=RuntimeError("down"))):
         assert await check_claims(draft, Evidence()) == [CLAIM_CHECK_SKIPPED]
+
+
+def test_negative_explicit_ask_flags_presence_not_absence():
+    ask = 'Do not use the phrase "I am excited" in your proposal'
+    assert check_rules(_letter(), _brief(asks=[ask]), None) == []
+    used = check_rules(_letter(extra=" Honestly, I am excited by this."), _brief(asks=[ask]), None)
+    assert any("Explicit ask not honoured" in v for v in used)
+    assert check_rules(_letter(), _brief(asks=["Don't say \"synergy\""]), None) == []
+    assert check_rules(_letter(), _brief(asks=['Never write "guaranteed"']), None) == []
+
+
+def test_quoted_reference_that_is_not_a_required_word_is_not_enforced():
+    ask = 'In your answer to "Describe your Azure experience" mention cost savings'
+    assert check_rules(_letter(), _brief(asks=[ask]), None) == []
+
+
+def test_explicit_ask_can_be_honoured_in_screening_answers():
+    ask = 'Include the word "pineapple" so we know you read this'
+    answers = [{"question": "Q?", "answer": "Pineapple, as asked. The cutover ran in waves."}]
+    assert check_rules(_letter(), _brief(asks=[ask]), None, answers) == []
+    assert any("Explicit ask" in v for v in check_rules(_letter(), _brief(asks=[ask]), None))
+
+
+def test_screening_answer_hard_rules_are_enforced():
+    good = {"question": "Q?", "answer": "The cutover ran in waves. Each wave had a rollback."}
+    assert check_answer_rules([good]) == []
+    one = {"question": "Short?", "answer": "Yes."}
+    long = {"question": "Long?", "answer": " ".join(["The cutover ran in waves."] * 6)}
+    hi = {"question": "Hi?", "answer": "Hi there, the cutover ran in waves. Each wave had a rollback."}
+    banned = {"question": "B?", "answer": "We can leverage my expertise here. Each wave had a rollback."}
+    empty = {"question": "E?", "answer": ""}
+    violations = check_answer_rules([one, long, hi, banned, empty])
+    assert any("Short?" in v and "2-5 sentences" in v for v in violations)
+    assert any("Long?" in v and "2-5 sentences" in v for v in violations)
+    assert any("Hi?" in v and "salutation" in v for v in violations)
+    assert any("B?" in v and "leverage my expertise" in v for v in violations)
+    assert not any("E?" in v for v in violations)  # empty answers are reported by _verify
+    assert check_rules(_letter(), _brief(), None, [hi]) != []

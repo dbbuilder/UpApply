@@ -3,7 +3,10 @@
 
 Golden JSON (list of jobs where Chris's real submitted letter is known):
     [{"id": "p-123", "title": "...", "description": "...", "skills": ["..."],
-      "questions": ["..."], "chris_letter": "...", "outcome": "replied"}]
+      "questions": ["..."], "chris_letter": "...", "outcome": "replied",
+      "proposal_id": "<proposals.id, optional>", "upwork_proposal_id": "<optional>"}]
+"id", "proposal_id" and "upwork_proposal_id" are all excluded from voice-sample retrieval so
+the v2 side is never conditioned on the job's own submitted letter (the answer key).
 
 Generate the blind packet (needs DATABASE_URL, OPENAI_API_KEY, ANTHROPIC_API_KEY):
     cd api && doppler run --project upapply --config prd -- \\
@@ -31,6 +34,13 @@ sys.path.insert(0, str(ROOT / "api"))
 
 PASS_PREFERENCE = 0.75
 MIN_FACTS_CITED = 2
+MIN_GOLDEN_JOBS = 15
+
+
+def golden_exclusions(job: dict) -> list[str]:
+    """Every id the golden job's own proposal may be stored under."""
+    ids = (job.get("id"), job.get("proposal_id"), job.get("upwork_proposal_id"))
+    return list(dict.fromkeys(str(i) for i in ids if i))
 
 
 def assign_sides(job_ids: list[str], seed: int) -> dict[str, dict[str, str]]:
@@ -86,9 +96,9 @@ def write_score_sheet(path, job_ids: list[str]) -> None:
 
 
 def score(rows: list[dict], key: dict) -> dict:
-    """Spec §4.2 pass bar: new preferred in >=75% of judged pairs (ties count against),
-    zero unsupported claims, every new draft cites >=2 facts. A draft whose claim check
-    was skipped was never verified, so it fails the run too."""
+    """Spec §4.2 pass bar: at least 15 golden jobs, every pair judged, new preferred in >=75%
+    of pairs (ties count against), zero unsupported claims, every new draft cites >=2 facts.
+    A draft whose claim check was skipped was never verified, so it fails the run too."""
     from app.services.generation.verify import CLAIM_CHECK_SKIPPED
 
     sides, new_meta = key["sides"], key["new_meta"]
@@ -105,14 +115,19 @@ def score(rows: list[dict], key: dict) -> dict:
     )
     skipped = sorted(job_id for job_id, meta in new_meta.items() if CLAIM_CHECK_SKIPPED in meta["warnings"])
     thin = sorted(job_id for job_id, meta in new_meta.items() if len(meta["fact_ids_used"]) < MIN_FACTS_CITED)
+    judged_ids = {r["job_id"] for r in judged}
+    unjudged = sum(1 for job_id in sides if job_id not in judged_ids)
     return {
+        "pairs": len(sides),
         "judged": len(judged),
+        "unjudged": unjudged,
         "new_preferred": new_wins,
         "preference": round(preference, 3),
         "unsupported_claims": unsupported,
         "claim_check_skipped": skipped,
         "drafts_under_2_facts": thin,
-        "passed": bool(judged)
+        "passed": len(sides) >= MIN_GOLDEN_JOBS
+        and unjudged == 0
         and preference >= PASS_PREFERENCE
         and unsupported == 0
         and not skipped
@@ -149,7 +164,16 @@ async def _generate_one(email: str, job: dict) -> tuple[str, object]:
         new = await generate_application(
             db=db, user=user, profile=profile, title=job["title"], description=job["description"],
             skills=skills, questions=job.get("questions") or [], credit_usage=False,
+            exclude_proposal_ids=golden_exclusions(job),
         )
+        reference = (job.get("chris_letter") or "").strip()
+        if reference and any(
+            (v.cover_letter_text or "").strip() == reference for v in new.evidence.voice_samples
+        ):
+            raise SystemExit(
+                f"{job['id']}: its own submitted letter was retrieved as a voice sample; "
+                "add its proposal_id / upwork_proposal_id to the golden file"
+            )
         await db.rollback()
     return old, new
 
