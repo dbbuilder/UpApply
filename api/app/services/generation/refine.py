@@ -165,7 +165,9 @@ def _tool_error(block: Any, text: str) -> dict:
     return {"type": "tool_result", "tool_use_id": block.id, "content": text, "is_error": True}
 
 
-async def _run_tool(db: AsyncSession, user_id: str, block: Any, found: dict[str, Fact]) -> dict:
+async def _run_tool(
+    db: AsyncSession, user_id: str, block: Any, found: dict[str, Fact], evidence_ids: set[str]
+) -> dict:
     if block.name != "search_facts":
         return _tool_error(block, "Unknown tool.")
     query = str((block.input or {}).get("query", "")).strip()[:MAX_QUERY_CHARS]
@@ -182,11 +184,12 @@ async def _run_tool(db: AsyncSession, user_id: str, block: Any, found: dict[str,
         logger.warning("search_facts tool failed: %s", type(exc).__name__)
         return _tool_error(block, "Fact search is unavailable right now.")
     # A job post read during refine could steer the model into harvesting the fact library:
-    # at most MAX_FOUND_FACTS distinct facts leave the library per turn.
+    # at most MAX_FOUND_FACTS distinct facts leave the library per turn. Evidence facts are
+    # already in the prompt, so they are returned without using the budget or entering `found`.
     facts = []
     for fact, _similarity in hits:
         fid = str(fact.id)
-        if fid not in found:
+        if fid not in found and fid not in evidence_ids:
             if len(found) >= MAX_FOUND_FACTS:
                 continue
             found[fid] = fact
@@ -221,6 +224,7 @@ async def refine_application(
         ],
     }]
     found: dict[str, Fact] = {}
+    evidence_ids = {str(f.id) for f in evidence.facts}
 
     rounds = 0
     calls = 0
@@ -259,7 +263,7 @@ async def refine_application(
                 results.append(_tool_error(block, "tool call limit reached"))
                 continue
             calls += 1
-            results.append(await _run_tool(db, user_id, block, found))
+            results.append(await _run_tool(db, user_id, block, found, evidence_ids))
         messages.append({"role": "user", "content": results})
 
     if resp.stop_reason in ("refusal", "max_tokens"):
@@ -293,13 +297,12 @@ async def refine_application(
             question = str(item.get("question", ""))
             warnings.append(Issue(f'No answer for screening question: "{question}"', "missing_answer", question))
     warnings += await check_claims(draft, all_evidence)
-    # Facts the letter now cites that were not in its evidence came from search_facts this
-    # turn: Chris sees each one before the letter goes to this client.
-    original_ids = {str(f.id) for f in evidence.facts}
-    for fid in draft.fact_ids_used:
-        if fid not in original_ids and fid in found:
-            statement = " ".join(neutralise(found[fid].statement or "", MAX_ADDED_WARNING_CHARS).split())
-            warnings.append(f"Added via search: {statement}")
+    # Every fact search_facts brought in this turn (never evidence facts) is shown to Chris
+    # before the letter goes to this client. fact_ids_used is model output, so a steered model
+    # could paste a found fact without citing it: warn on all of them, cited or not.
+    for fact in found.values():
+        statement = " ".join(neutralise(fact.statement or "", MAX_ADDED_WARNING_CHARS).split())
+        warnings.append(f"Added via search: {statement}")
     return RefineResult(
         draft=draft,
         warnings=warnings,

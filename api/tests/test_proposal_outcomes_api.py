@@ -1,4 +1,5 @@
 """API tests for POST /api/v1/proposals/outcomes (real DB, real credit_facts)."""
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -263,3 +264,34 @@ async def test_title_bind_in_a_batch_is_not_reused_by_a_later_item(client, auth_
     prop = await _prop(captured["proposal_id"])
     assert prop.upwork_proposal_id == "A" and prop.outcome is None and prop.was_hired is not True
     assert await _times_in_won(captured["fact_id"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_title_binds_do_not_overwrite_each_other(client, auth_headers):
+    """Two syncs (Proposals + Archived tabs) both see the click-captured row unbound. The first
+    bind locks it; the second must wait, re-check, and find nothing instead of rebinding."""
+    from app.api.v1.proposals import _find_proposal_for_outcome
+    from app.schemas.proposal import ProposalOutcomeItem
+
+    uid = await _uid(client, auth_headers)
+    captured = await _seed(uid, upwork_id=None, title="ETL Pipeline", days_ago=2)
+    item_a = ProposalOutcomeItem(upwork_proposal_id="A", job_title="ETL Pipeline", status="submitted",
+                                 submitted_at=_upwork_date(2))
+    item_b = ProposalOutcomeItem(upwork_proposal_id="B", job_title="ETL Pipeline", status="hired",
+                                 submitted_at=_upwork_date(3))
+
+    async with TestSessionLocal() as first, TestSessionLocal() as second:
+        prop = await _find_proposal_for_outcome(first, uid, item_a)
+        assert prop is not None
+        prop.upwork_proposal_id = "A"
+        await first.flush()
+
+        waiter = asyncio.create_task(_find_proposal_for_outcome(second, uid, item_b))
+        await asyncio.sleep(0.3)
+        assert not waiter.done()  # blocked on the first sync's row lock
+        await first.commit()
+        assert await asyncio.wait_for(waiter, 5) is None
+        await second.rollback()
+
+    prop = await _prop(captured["proposal_id"])
+    assert prop.upwork_proposal_id == "A"

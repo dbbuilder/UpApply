@@ -370,10 +370,53 @@ async def test_facts_added_via_search_are_surfaced_as_warnings():
         result = await refine_application(None, "u1", _profile(), _brief(), _evidence(), _current(), [], "go")
 
     added = [w for w in result.warnings if w.startswith("Added via search: ")]
-    assert len(added) == 1  # the evidence fact and the uncited search hit are not flagged
+    assert len(added) == 2  # the uncited hit is flagged too: fact_ids_used is model output
     assert "AnalyzeMyCloud" in added[0]
+    assert added[1] == "Added via search: Never cited in the letter."
     assert "<" not in added[0] and ">" not in added[0] and "\n" not in added[0]
     assert result.claims_verified is True
+
+
+@pytest.mark.asyncio
+async def test_searched_facts_are_flagged_even_when_the_model_cites_none():
+    """A steered model can paste search results into the letter and return fact_ids_used: []."""
+    found = _fact(FOUND_FACT_ID, "Client Acme paid $250k for the data platform.")
+    pasted = {**REVISED, "cover_letter": "Acme paid $250k for the data platform.\n\nWarm regards,\nChris",
+              "fact_ids_used": []}
+    client = _client([_tool_use("client revenue figures"), _final(pasted)])
+    with patch(f"{MOD}.get_anthropic_client", return_value=client), \
+         patch(f"{MOD}.generate_embedding", AsyncMock(return_value=[0.1] * 1536)), \
+         patch(f"{MOD}.search_facts", AsyncMock(return_value=[(found, 0.9)])), \
+         patch(f"{MOD}.check_rules", return_value=[]), \
+         patch(f"{MOD}.check_claims", AsyncMock(return_value=[])):
+        result = await refine_application(None, "u1", _profile(), _brief(), _evidence(), _current(), [], "go")
+
+    assert result.draft.fact_ids_used == []
+    assert "Added via search: Client Acme paid $250k for the data platform." in result.warnings
+
+
+@pytest.mark.asyncio
+async def test_evidence_hits_do_not_use_the_search_budget():
+    """Evidence facts are already in the prompt: 8 facts new to the letter are still allowed."""
+    evidence_fact = _fact(EVIDENCE_FACT_ID, "Led a 160-server on-prem to Azure migration.")
+    batches = [[(evidence_fact, 0.95)] + [(_fact(fid, f"Fact {fid}"), 0.8) for fid in _ids(4, start)]
+               for start in (0, 4)]
+    client = _client([_tool_use("a", "tu_1"), _tool_use("b", "tu_2"), _final(REVISED)])
+    search = AsyncMock(side_effect=batches)
+    with patch(f"{MOD}.get_anthropic_client", return_value=client), \
+         patch(f"{MOD}.generate_embedding", AsyncMock(return_value=[0.1] * 1536)), \
+         patch(f"{MOD}.search_facts", search), \
+         patch(f"{MOD}.check_rules", return_value=[]), \
+         patch(f"{MOD}.check_claims", AsyncMock(return_value=[])):
+        result = await refine_application(None, "u1", _profile(), _brief(), _evidence(), _current(), [], "go")
+
+    messages = client.messages.create.await_args_list[2].kwargs["messages"]
+    assert len(json.loads(messages[2]["content"][0]["content"])) == 5
+    assert len(json.loads(messages[4]["content"][0]["content"])) == 5  # evidence fact + 4 new, none dropped
+    assert len(result.found_facts) == 8
+    assert EVIDENCE_FACT_ID not in {str(f.id) for f in result.found_facts}
+    added = [w for w in result.warnings if w.startswith("Added via search: ")]
+    assert len(added) == 8  # never the evidence fact
 
 
 @pytest.mark.asyncio

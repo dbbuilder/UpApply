@@ -316,6 +316,11 @@ async def _find_proposal_for_outcome(
             Proposal.submitted_at < day_start + timedelta(days=1) + TITLE_MATCH_WINDOW,
         )
         .limit(2)
+        # Lock the row until commit: a concurrent sync (another Proposals tab) that read it
+        # unbound would otherwise overwrite this bind. A waiter re-checks the IS NULL filter
+        # after the lock is released, so it finds nothing instead of rebinding.
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )).scalars().all()
     return candidates[0] if len(candidates) == 1 else None
 
