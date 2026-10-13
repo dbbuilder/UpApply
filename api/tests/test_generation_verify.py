@@ -201,3 +201,27 @@ def test_explicit_ask_check_is_linear_on_adversarial_input(ask):
     start = time.perf_counter()
     check_rules("Body.\n\nWarm regards,", brief, None)
     assert time.perf_counter() - start < 0.5
+
+
+def test_rule_violations_carry_fixed_codes_and_stay_human_readable():
+    brief = _brief(complexity="terse", asks=['Start your reply with "blue"'])
+    text = "Hello there.\nI am excited to apply. I am passionate about data.\n\nRegards"
+    answers = [{"question": "Q <b>?", "answer": "Hi. I am passionate about it."}]
+    issues = check_rules(text, brief, None, answers)
+    codes = {issue.code for issue in issues}
+    assert {"closing", "salutation", "starts_with_i", "banned_phrase", "length", "explicit_ask", "answer_rules"} <= codes
+    assert all(isinstance(issue, str) for issue in issues)
+    assert 'Explicit ask not honoured: Start your reply with "blue"' in issues
+    ask = next(i for i in issues if i.code == "explicit_ask")
+    assert ask.detail == 'Start your reply with "blue"'
+
+
+@pytest.mark.asyncio
+async def test_unsupported_claims_carry_code_and_quoted_detail():
+    draft = SimpleNamespace(cover_letter="Saved $2M.", screening_answers=[])
+    call = AsyncMock(return_value={"unsupported_claims": [{"claim": "Saved $2M", "reason": "no fact"}]})
+    with patch("app.services.generation.verify.structured_call", call):
+        [issue] = await check_claims(draft, Evidence(facts=[FACT]))
+    assert issue == "Unsupported claim: Saved $2M (no fact)"
+    assert issue.code == "unsupported_claim"
+    assert issue.detail == "Saved $2M (no fact)"

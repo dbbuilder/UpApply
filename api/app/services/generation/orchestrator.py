@@ -8,7 +8,14 @@ from app.schemas.job import MAX_GEN_DESCRIPTION, MAX_GEN_SKILL_LENGTH, MAX_GEN_S
 from app.services.facts import credit_facts
 from app.services.generation.brief import JobBrief, build_job_brief
 from app.services.generation.evidence import Evidence, select_evidence
-from app.services.generation.verify import CLAIM_CHECK_SKIPPED, check_answer_rules, check_claims, check_rules
+from app.services.generation.verify import (
+    CLAIM_CHECK_SKIPPED,
+    Issue,
+    check_answer_rules,
+    check_claims,
+    check_rules,
+    repair_note,
+)
 from app.services.generation.writer import Draft, write_application
 
 NO_FACTS_WARNING = "No approved facts matched this job, so the draft has no verified specifics."
@@ -40,11 +47,14 @@ async def _verify(
     else:
         warnings = check_rules(draft.cover_letter, brief, profile.preferred_closing, draft.screening_answers)
         if prototype_url and prototype_url.strip() and prototype_url.strip() not in draft.cover_letter:
-            warnings.append(f"Prototype URL {prototype_url.strip()} is missing from the letter.")
+            warnings.append(Issue(
+                f"Prototype URL {prototype_url.strip()} is missing from the letter.", "missing_prototype_url"
+            ))
         audited = draft
     for item in draft.screening_answers:
         if not item.get("answer"):
-            warnings.append(f'No answer for screening question: "{item.get("question", "")}"')
+            question = str(item.get("question", ""))
+            warnings.append(Issue(f'No answer for screening question: "{question}"', "missing_answer", question))
     warnings.extend(await check_claims(audited, evidence))
     return warnings
 
@@ -104,7 +114,7 @@ async def generate_application(
     if repairable:
         draft = await write_application(
             profile, brief, evidence, include_call_offer, prototype_url, extra_points,
-            repair_notes=repairable,
+            repair_notes=[repair_note(w) for w in repairable],
         )
         warnings = await _verify(draft, brief, evidence, profile, prototype_url, answers_only)
 

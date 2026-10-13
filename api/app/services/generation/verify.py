@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, NamedTuple, Optional
 
 from app.core.config import settings
 from app.services.cover_letter import BANNED_PHRASES
@@ -21,6 +21,39 @@ WARM_REGARDS = "Warm regards,"
 LENGTH_TARGETS = {"terse": (150, 250), "standard": (200, 350), "complex": (300, 450)}
 LENGTH_SLACK = 0.10
 CLAIM_CHECK_SKIPPED = "Claim check skipped (verifier unavailable) - review specifics manually."
+
+REPAIR_CODES = (
+    "missing_answer", "banned_phrase", "starts_with_i", "salutation", "closing", "length",
+    "explicit_ask", "unsupported_claim", "missing_prototype_url", "answer_rules",
+)
+
+
+class Issue(str):
+    """A rule violation. The string itself is the human-readable, user-facing warning;
+    `code` is one of REPAIR_CODES and `detail` holds any quoted, untrusted material
+    (draft text, job text) that a repair prompt may show only as data."""
+
+    code: str
+    detail: str
+
+    def __new__(cls, message: str, code: str, detail: str = "") -> "Issue":
+        issue = super().__new__(cls, message)
+        issue.code = code
+        issue.detail = detail
+        return issue
+
+
+class RepairNote(NamedTuple):
+    code: str
+    detail: str = ""
+
+
+def repair_note(warning: str) -> RepairNote:
+    """Plain strings carry no trusted code: their whole text is treated as quoted detail."""
+    if isinstance(warning, Issue):
+        return RepairNote(warning.code, warning.detail)
+    return RepairNote("", str(warning))
+
 
 _SALUTATION = re.compile(r"^(hello|hi|hey|dear|greetings|good (morning|afternoon|evening)|subject:)\b", re.IGNORECASE)
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
@@ -82,10 +115,10 @@ def _sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE_SPLIT.split(text) if s.strip()]
 
 
-def check_answer_rules(screening_answers: list[dict]) -> list[str]:
+def check_answer_rules(screening_answers: list[dict]) -> list[Issue]:
     """Hard rules for screening answers: 2-5 sentences, no salutation, no banned phrase.
     Empty answers are reported separately by the orchestrator."""
-    violations: list[str] = []
+    violations: list[Issue] = []
     low, high = ANSWER_SENTENCES
     for item in screening_answers:
         answer = str(item.get("answer") or "").strip()
@@ -94,13 +127,16 @@ def check_answer_rules(screening_answers: list[dict]) -> list[str]:
         label = str(item.get("question", ""))[:80]
         count = len(_sentences(answer))
         if count < low or count > high:
-            violations.append(f'Answer to "{label}" has {count} sentences; screening answers must be {low}-{high} sentences.')
+            problem = f"has {count} sentences; screening answers must be {low}-{high} sentences."
+            violations.append(Issue(f'Answer to "{label}" {problem}', "answer_rules", f'Answer to "{label}" {problem}'))
         if _SALUTATION.match(answer.splitlines()[0].strip()):
-            violations.append(f'Answer to "{label}" opens with a salutation; start with content.')
+            problem = "opens with a salutation; start with content."
+            violations.append(Issue(f'Answer to "{label}" {problem}', "answer_rules", f'Answer to "{label}" {problem}'))
         lowered = answer.lower()
         for phrase in BANNED_PHRASES:
             if phrase.lower() in lowered:
-                violations.append(f'Answer to "{label}" uses banned phrase: "{phrase}"')
+                problem = f'uses banned phrase: "{phrase}"'
+                violations.append(Issue(f'Answer to "{label}" {problem}', "answer_rules", f'Answer to "{label}" {problem}'))
     return violations
 
 
@@ -121,42 +157,45 @@ def check_rules(
     brief: JobBrief,
     preferred_closing: Optional[str],
     screening_answers: Optional[list[dict]] = None,
-) -> list[str]:
+) -> list[Issue]:
     """Chris's hard rules. Returns human-readable violations (empty = clean).
     With `screening_answers`, the answer rules are checked too and explicit asks may be
     honoured in either the letter or the answers."""
-    violations: list[str] = []
+    violations: list[Issue] = []
     stripped = text.strip()
     closing = expected_closing(preferred_closing)
     if stripped.endswith(closing):
         body = stripped[: -len(closing)].strip()
     else:
-        violations.append(f'Letter must end with "{closing}".')
+        violations.append(Issue(f'Letter must end with "{closing}".', "closing"))
         body = stripped
 
     first_line = body.splitlines()[0].strip() if body else ""
     if _SALUTATION.match(first_line):
-        violations.append("Letter opens with a salutation; start with content.")
+        violations.append(Issue("Letter opens with a salutation; start with content.", "salutation", first_line[:80]))
 
     for sentence in _sentences(body):
         if _STARTS_WITH_I.match(sentence):
-            violations.append(f'Sentence starts with "I": "{sentence[:80]}"')
+            violations.append(Issue(f'Sentence starts with "I": "{sentence[:80]}"', "starts_with_i", sentence[:80]))
 
     lowered = body.lower()
     for phrase in BANNED_PHRASES:
         if phrase.lower() in lowered:
-            violations.append(f'Banned phrase used: "{phrase}"')
+            violations.append(Issue(f'Banned phrase used: "{phrase}"', "banned_phrase", phrase))
 
     low, high = length_band(brief)
     words = len(body.split())
     if words < int(low * (1 - LENGTH_SLACK)) or words > int(high * (1 + LENGTH_SLACK)):
-        violations.append(f"Length {words} words is outside the {low}-{high} target for this job.")
+        violations.append(Issue(
+            f"Length {words} words is outside the {low}-{high} target for this job.", "length",
+            f"{words} words; target {low}-{high}",
+        ))
 
     answers = screening_answers or []
     haystack = "\n".join([lowered] + [str(a.get("answer") or "").lower() for a in answers])
     for ask in brief.explicit_asks:
         if _ask_violated(ask, haystack):
-            violations.append(f"Explicit ask not honoured: {ask}")
+            violations.append(Issue(f"Explicit ask not honoured: {ask}", "explicit_ask", ask))
 
     violations.extend(check_answer_rules(answers))
     return violations
@@ -190,6 +229,7 @@ async def check_claims(draft: "Draft", evidence: Evidence) -> list[str]:
         logger.warning("Claim check failed: %s", type(exc).__name__)
         return [CLAIM_CHECK_SKIPPED]
     return [
-        f"Unsupported claim: {item['claim']} ({item['reason']})"
+        Issue(f"Unsupported claim: {item['claim']} ({item['reason']})", "unsupported_claim",
+              f"{item['claim']} ({item['reason']})")
         for item in data.get("unsupported_claims", [])
     ]
