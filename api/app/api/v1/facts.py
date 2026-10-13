@@ -130,6 +130,11 @@ async def ingest_facts(
     return FactIngestResult(**counts)
 
 
+# Memory.source values whose content the user curated or typed (POST /memories defaults to
+# "manual"); everything else (chatgpt_corpus, chatgpt_import, bulk_import, job_won, ...) is not trusted.
+TRUSTED_MEMORY_SOURCES = ("bio_import", "manual")
+
+
 @router.post("/from-memories", response_model=FactIngestResult)
 @limiter.limit("10/hour")
 async def facts_from_memories(
@@ -144,6 +149,9 @@ async def facts_from_memories(
             Memory.user_id == current_user.id,
             Memory.exclude_from_retrieval.is_(False),
             Memory.importance_score >= 0.9,
+            # Trusted origins only: curated bio seed, typed in the UI, or legacy unsourced rows.
+            # Imported/bulk/corpus rows are excluded however high their importance.
+            or_(Memory.source.is_(None), Memory.source.in_(TRUSTED_MEMORY_SOURCES)),
             ~Memory.content.like("JOB POSTING:%"),
             or_(Memory.category.is_(None), Memory.category != "lesson"),
         )

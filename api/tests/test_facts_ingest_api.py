@@ -367,3 +367,37 @@ def test_fact_llm_endpoints_are_rate_limited():
 
     for name in ("ingest_facts", "facts_from_memories", "facts_from_proposals", "facts_from_contracts"):
         assert f"app.api.v1.facts.{name}" in limiter._route_limits, name
+
+
+@pytest.mark.asyncio
+async def test_from_memories_only_trusts_bio_manual_or_unsourced_memories(client: AsyncClient, auth_headers: dict, fake_embed):
+    uid = await _user_id(client, auth_headers)
+    trusted, untrusted = {}, {}
+    async with TestSessionLocal() as s:
+        for src in ("bio_import", "manual", None):
+            m = Memory(user_id=uid, title=f"T {src}", content=f"Built {src}", category="project",
+                       importance_score=0.95, source=src)
+            s.add(m)
+            trusted[src] = m
+        for src in ("chatgpt_corpus", "chatgpt_import", "bulk_import", "job_won", "resume_import", "BIO_IMPORT"):
+            m = Memory(user_id=uid, title=f"U {src}", content=f"Claimed {src}", category="project",
+                       importance_score=1.0, source=src)
+            s.add(m)
+            untrusted[src] = m
+        await s.commit()
+        trusted_ids = {m.id for m in trusted.values()}
+
+    extract = AsyncMock(side_effect=_per_ref_extract)
+    with patch("app.services.facts.extract_facts", extract):
+        r = await client.post(f"{BASE}/from-memories", headers=auth_headers)
+    assert r.status_code == 200
+    assert {c.args[2] for c in extract.await_args_list} == trusted_ids
+
+
+@pytest.mark.asyncio
+async def test_memory_typed_in_ui_is_stored_as_manual(client: AsyncClient, auth_headers: dict, fake_embed):
+    with patch("app.api.v1.memories.generate_embedding", fake_embed):
+        r = await client.post("/api/v1/memories", headers=auth_headers,
+                              json={"title": "Led X", "content": "Led a migration", "importance_score": 0.9})
+    assert r.status_code in (200, 201), r.text
+    assert r.json()["source"] == "manual"
