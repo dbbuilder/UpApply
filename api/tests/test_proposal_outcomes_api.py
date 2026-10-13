@@ -230,3 +230,36 @@ async def test_detail_import_does_not_overwrite_same_title_row_from_another_day(
     prop = await _prop(captured["proposal_id"])
     assert prop.upwork_proposal_id is None and prop.cover_letter_text == "final" and prop.outcome is None
     assert await _times_in_won(captured["fact_id"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_title_fallback_never_binds_a_row_with_another_upwork_id(client, auth_headers):
+    """Same title and day, but the row is already bound to a different Upwork proposal."""
+    uid = await _uid(client, auth_headers)
+    bound = await _seed(uid, upwork_id="BOUND", title="Data Engineer", days_ago=2)
+    r = await client.post(URL, headers=auth_headers, json={"items": [
+        {"upwork_proposal_id": "OTHER", "job_title": "Data Engineer", "status": "hired",
+         "submitted_at": _upwork_date(2)},
+    ]})
+    assert r.json() == {"updated": 0, "credited": 0, "not_found": 1}
+    prop = await _prop(bound["proposal_id"])
+    assert prop.upwork_proposal_id == "BOUND" and prop.outcome is None
+    assert await _times_in_won(bound["fact_id"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_title_bind_in_a_batch_is_not_reused_by_a_later_item(client, auth_headers):
+    """Two items on adjacent days both fall in one row's ±1 day window: the first binds it,
+    and the second (now a different Upwork id) must neither overwrite nor credit it."""
+    uid = await _uid(client, auth_headers)
+    captured = await _seed(uid, upwork_id=None, title="ETL Pipeline", days_ago=2)
+    r = await client.post(URL, headers=auth_headers, json={"items": [
+        {"upwork_proposal_id": "A", "job_title": "ETL Pipeline", "status": "submitted",
+         "submitted_at": _upwork_date(2)},
+        {"upwork_proposal_id": "B", "job_title": "ETL Pipeline", "status": "hired",
+         "submitted_at": _upwork_date(3)},
+    ]})
+    assert r.json() == {"updated": 0, "credited": 0, "not_found": 1}
+    prop = await _prop(captured["proposal_id"])
+    assert prop.upwork_proposal_id == "A" and prop.outcome is None and prop.was_hired is not True
+    assert await _times_in_won(captured["fact_id"]) == 0
