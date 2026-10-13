@@ -80,7 +80,7 @@ async def test_ingest_counts_extraction_failures(client: AsyncClient, auth_heade
 async def test_from_memories_uses_only_bio_memories_and_auto_approves(client: AsyncClient, auth_headers: dict, fake_embed):
     uid = await _user_id(client, auth_headers)
     async with TestSessionLocal() as s:
-        bio = Memory(user_id=uid, title="Stratavault.ai", content="Built Stratavault.ai", category="project", importance_score=1.0)
+        bio = Memory(user_id=uid, title="Stratavault.ai", content="Built Stratavault.ai", category="project", importance_score=1.0, source="bio_import")
         s.add_all([
             bio,
             Memory(user_id=uid, title="Style", content="Prefers terse tone", category="lesson", importance_score=0.95),
@@ -307,7 +307,7 @@ async def test_from_memories_caps_batch_and_reports_remaining(client: AsyncClien
     uid = await _user_id(client, auth_headers)
     async with TestSessionLocal() as s:
         s.add_all([
-            Memory(user_id=uid, title=f"Bio {i}", content=f"Built thing {i}", category="project", importance_score=0.95)
+            Memory(user_id=uid, title=f"Bio {i}", content=f"Built thing {i}", category="project", importance_score=0.95, source="bio_import")
             for i in range(MAX_ITEMS_PER_RUN + 3)
         ])
         await s.commit()
@@ -370,16 +370,16 @@ def test_fact_llm_endpoints_are_rate_limited():
 
 
 @pytest.mark.asyncio
-async def test_from_memories_only_trusts_bio_manual_or_unsourced_memories(client: AsyncClient, auth_headers: dict, fake_embed):
+async def test_from_memories_only_trusts_bio_or_manual_memories(client: AsyncClient, auth_headers: dict, fake_embed):
     uid = await _user_id(client, auth_headers)
     trusted, untrusted = {}, {}
     async with TestSessionLocal() as s:
-        for src in ("bio_import", "manual", None):
+        for src in ("bio_import", "manual"):
             m = Memory(user_id=uid, title=f"T {src}", content=f"Built {src}", category="project",
                        importance_score=0.95, source=src)
             s.add(m)
             trusted[src] = m
-        for src in ("chatgpt_corpus", "chatgpt_import", "bulk_import", "job_won", "resume_import", "BIO_IMPORT"):
+        for src in ("chatgpt_corpus", "chatgpt_import", "bulk_import", "job_won", "resume_import", "BIO_IMPORT", None):
             m = Memory(user_id=uid, title=f"U {src}", content=f"Claimed {src}", category="project",
                        importance_score=1.0, source=src)
             s.add(m)

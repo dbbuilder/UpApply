@@ -232,3 +232,27 @@ async def test_malformed_candidate_log_never_contains_source_content(caplog):
     for rec in caplog.records:
         msg = rec.getMessage()
         assert "Acme" not in msg and "doubled" not in msg and "high" not in msg
+
+
+@pytest.mark.asyncio
+async def test_non_string_model_fields_drop_only_that_candidate():
+    good = {"kind": "metric", "statement": "Cut costs 40%", "detail": "", "skills": [], "industries": [],
+            "job_types": [], "strength": 0.5, "evidence_quote": ""}
+    bad = dict(good, statement="Bad one", detail=["not", "a", "string"], evidence_quote=42)
+    with patch("app.services.fact_extraction.structured_call", AsyncMock(return_value={"facts": [bad, good]})):
+        cands = await extract_facts("text", source_type="chatgpt_user_turn")
+    assert [c.statement for c in cands] == ["Cut costs 40%"]
+
+
+@pytest.mark.asyncio
+async def test_fence_is_linear_time_on_adversarial_input():
+    """No backtracking blow-up: unclosed tag openers and zero-width runs at max input size."""
+    import time
+    mock = AsyncMock(return_value={"facts": []})
+    evil = ("<​ ​ source_text" * 2500)[:50_000]
+    start = time.perf_counter()
+    with patch("app.services.fact_extraction.structured_call", mock):
+        await extract_facts(evil, source_type="chatgpt_user_turn", context=evil)
+    assert time.perf_counter() - start < 1.0
+    user = mock.call_args.kwargs["user"]
+    assert user.count("<") == 4 and user.count(">") == 4  # only our own four fence tags

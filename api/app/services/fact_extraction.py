@@ -2,6 +2,7 @@
 import html
 import logging
 import re
+import unicodedata
 from typing import List, Optional
 
 from pydantic import ValidationError
@@ -97,19 +98,12 @@ Hard rules:
 - If nothing qualifies, return {"facts": []}.
 """
 
-# Any open/close tag of our fences inside untrusted text (attributes, whitespace, any case,
-# fullwidth/small-form or URL-encoded brackets, zero-width characters inside the tag) is
-# defanged so it cannot break out.
-_ZW = "[\u00ad\u200b-\u200f\u2060\ufeff]*"
-_LT = "(?:<|\uff1c|\ufe64|%3c)"
-_GT = "(?:>|\uff1e|\ufe65|%3e)"
-_FENCE_TAG = re.compile(
-    _LT + _ZW + r"\s*" + _ZW + "(?:/|\uff0f|%2f)?" + _ZW + r"\s*" + _ZW
-    + "(" + "|".join(_ZW.join(name) for name in ("source_text", "context")) + ")"
-    + r"(?![\w])(?:(?!" + _GT + r")[\s\S])*" + _GT,
-    re.IGNORECASE,
-)
-_ZW_CHARS = re.compile(_ZW)
+# Untrusted text can never form a tag: after NFKC (folds fullwidth/small-form brackets),
+# entity decoding and zero-width stripping, every angle bracket (literal or URL-encoded) is
+# replaced with a look-alike. Linear time; nothing to bypass with tag-name variants.
+_ZERO_WIDTH = re.compile("[\u00ad\u200b-\u200f\u2060\ufeff]")
+_URL_BRACKET = re.compile("%3([ce])", re.IGNORECASE)
+_BRACKETS = str.maketrans({"<": "\u2039", ">": "\u203a"})
 
 
 _QUOTE_CHARS = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
@@ -143,8 +137,14 @@ def _decode_entities(text: str) -> str:
 
 
 def _fence(text: str) -> str:
-    # Decode entities first so &lt;source_text&gt; is caught too.
-    return _FENCE_TAG.sub(lambda m: f"[{_ZW_CHARS.sub('', m.group(1)).lower()}]", _decode_entities(text))
+    for _ in range(10):  # NFKC can surface new entities (fullwidth "&") and vice versa
+        normalised = _decode_entities(unicodedata.normalize("NFKC", text))
+        if normalised == text:
+            break
+        text = normalised
+    text = _ZERO_WIDTH.sub("", text)
+    text = _URL_BRACKET.sub(lambda m: "<" if m.group(1).lower() == "c" else ">", text)
+    return unicodedata.normalize("NFKC", text).translate(_BRACKETS)
 
 
 async def extract_facts(
@@ -201,7 +201,7 @@ async def extract_facts(
                 source_ref=source_ref,
                 source_snippet=(raw.get("evidence_quote") or "").strip()[:MAX_EVIDENCE] or None,
             ))
-        except (KeyError, TypeError, ValueError, ValidationError) as exc:
+        except (KeyError, TypeError, ValueError, AttributeError, ValidationError) as exc:
             # Type and field names only: the exception text and statement carry source content.
             fields = [".".join(map(str, e["loc"])) for e in exc.errors()] if isinstance(exc, ValidationError) else []
             logger.warning("Dropping malformed fact candidate (%s, fields=%s, len=%d)",
