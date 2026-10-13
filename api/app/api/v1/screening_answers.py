@@ -293,11 +293,11 @@ async def generate_screening_answer(
     profile_ctx = "\n".join(profile_lines) if profile_lines else "No profile available."
     job_ctx_parts = []
     if body.job_title:
-        job_ctx_parts.append(f"Job: {request.job_title}")
+        job_ctx_parts.append(f"Job: {body.job_title}")
     if body.job_skills:
-        job_ctx_parts.append(f"Required skills: {', '.join(request.job_skills[:10])}")
+        job_ctx_parts.append(f"Required skills: {', '.join(body.job_skills[:10])}")
     if body.job_description:
-        job_ctx_parts.append(f"Description excerpt: {request.job_description[:400]}")
+        job_ctx_parts.append(f"Description excerpt: {body.job_description[:400]}")
     job_ctx = "\n".join(job_ctx_parts) if job_ctx_parts else ""
 
     system_prompt = (
