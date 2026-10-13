@@ -265,3 +265,44 @@ async def test_auto_approve_into_untrusted_candidate_takes_trusted_wording(db_se
     assert fact.statement == "Led a 160-server on-prem to Azure migration."
     assert fact.kind == "project"
     assert list(fact.embedding) == pytest.approx(trusted_vec)
+
+
+async def _force_hnsw(db):
+    """Make the planner use the HNSW index with a tiny candidate list, as on a large table.
+
+    The btree indexes are dropped inside this (never committed) transaction so the planner
+    cannot pick them on a tiny test table; the session rollback restores them."""
+    from sqlalchemy import text
+
+    await db.execute(text("DROP INDEX ix_facts_user_status"))
+    await db.execute(text("DROP INDEX ix_facts_user_id"))
+    await db.execute(text("SET LOCAL enable_seqscan = off"))
+    await db.execute(text("SET LOCAL hnsw.ef_search = 10"))
+
+
+@pytest.mark.asyncio
+async def test_search_recall_survives_closer_rows_of_other_users_and_statuses(db_session, test_user):
+    other = await _other_user(db_session)
+    for k in range(2, 152):
+        await _seed(db_session, other.id, f"theirs {k}", blend(0, k, 0.9), status="approved")
+    for k in range(152, 202):
+        await _seed(db_session, test_user.id, f"mine cand {k}", blend(0, k, 0.9), status="candidate")
+    mine = await _seed(db_session, test_user.id, "Mine approved", blend(0, 1, 0.5), status="approved")
+    await _force_hnsw(db_session)
+
+    results = await search_facts(db_session, test_user.id, unit(0), limit=5)
+    assert [f.id for f, _ in results] == [mine.id]
+    assert results[0][1] == pytest.approx(0.5, abs=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_dedupe_recall_survives_closer_rows_of_other_users(db_session, test_user):
+    other = await _other_user(db_session)
+    for k in range(2, 202):
+        await _seed(db_session, other.id, f"theirs {k}", blend(0, k, 0.99), status="approved")
+    mine = await _seed(db_session, test_user.id, "Migrated 160 servers.", blend(0, 1, 0.95), status="approved")
+    await _force_hnsw(db_session)
+
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=unit(0))):
+        fact, _ = await upsert_candidate_outcome(db_session, test_user.id, _cand("Moved 160 servers."))
+    assert fact.id == mine.id

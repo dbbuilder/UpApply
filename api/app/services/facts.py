@@ -40,17 +40,35 @@ def _source_entry(cand: FactCandidate) -> dict:
     }
 
 
+async def _exact_nearest(
+    db: AsyncSession, embedding: List[float], limit: int, *filters
+) -> List[Tuple[Fact, float]]:
+    """Exact cosine ranking over only the rows matching `filters`.
+
+    The filter runs first in a MATERIALIZED CTE, so the HNSW index can never return a global
+    top-K (other users' / other statuses' rows) that the WHERE then empties. Per-user fact
+    counts are small (hundreds), so the exact scan is cheap and pgvector-version independent."""
+    scoped = (
+        select(Fact.id.label("id"), Fact.embedding.label("embedding"))
+        .where(Fact.embedding.is_not(None), *filters)
+        .cte("scoped_facts")
+        .prefix_with("MATERIALIZED")
+    )
+    distance = scoped.c.embedding.cosine_distance(embedding)
+    rows = (await db.execute(
+        select(Fact, (1 - distance).label("similarity"))
+        .join(scoped, scoped.c.id == Fact.id)
+        .order_by(distance)
+        .limit(limit)
+    )).all()
+    return [(row[0], float(row[1])) for row in rows]
+
+
 async def _nearest(
     db: AsyncSession, user_id: str, embedding: List[float]
 ) -> Optional[Tuple[Fact, float]]:
-    distance = Fact.embedding.cosine_distance(embedding)
-    row = (await db.execute(
-        select(Fact, (1 - distance).label("similarity"))
-        .where(Fact.user_id == user_id, Fact.embedding.is_not(None))
-        .order_by(distance)
-        .limit(1)
-    )).first()
-    return (row[0], float(row[1])) if row else None
+    rows = await _exact_nearest(db, embedding, 1, Fact.user_id == user_id)
+    return rows[0] if rows else None
 
 
 async def upsert_candidate_outcome(
@@ -174,14 +192,9 @@ async def search_facts(
     status: str = "approved",
 ) -> List[Tuple[Fact, float]]:
     """Nearest facts by cosine similarity, most similar first."""
-    distance = Fact.embedding.cosine_distance(query_embedding)
-    rows = (await db.execute(
-        select(Fact, (1 - distance).label("similarity"))
-        .where(Fact.user_id == user_id, Fact.status == status, Fact.embedding.is_not(None))
-        .order_by(distance)
-        .limit(limit)
-    )).all()
-    return [(row[0], float(row[1])) for row in rows]
+    return await _exact_nearest(
+        db, query_embedding, limit, Fact.user_id == user_id, Fact.status == status
+    )
 
 
 async def credit_facts(
