@@ -76,3 +76,16 @@ def test_score_fails_on_unsupported_claims_or_thin_drafts():
     assert result["unsupported_claims"] == 1
     assert result["drafts_under_2_facts"] == ["j1"]
     assert result["passed"] is False
+
+
+def test_score_fails_when_claim_check_was_skipped():
+    from app.services.generation.verify import CLAIM_CHECK_SKIPPED
+
+    meta = dict(GOOD_META)
+    meta["j3"] = {"warnings": [CLAIM_CHECK_SKIPPED], "fact_ids_used": ["a", "b"]}
+    rows = [{"job_id": j, "preferred": s} for j, s in (("j1", "A"), ("j2", "B"), ("j3", "A"), ("j4", "B"))]
+    result = eval_generation.score(rows, _key(meta))
+    assert result["preference"] == 1.0
+    assert result["unsupported_claims"] == 0
+    assert result["claim_check_skipped"] == ["j3"]
+    assert result["passed"] is False

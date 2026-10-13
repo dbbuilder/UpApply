@@ -87,7 +87,10 @@ def write_score_sheet(path, job_ids: list[str]) -> None:
 
 def score(rows: list[dict], key: dict) -> dict:
     """Spec §4.2 pass bar: new preferred in >=75% of judged pairs (ties count against),
-    zero unsupported claims, every new draft cites >=2 facts."""
+    zero unsupported claims, every new draft cites >=2 facts. A draft whose claim check
+    was skipped was never verified, so it fails the run too."""
+    from app.services.generation.verify import CLAIM_CHECK_SKIPPED
+
     sides, new_meta = key["sides"], key["new_meta"]
     judged = [r for r in rows if r["preferred"].strip().upper() in ("A", "B", "TIE")]
     new_wins = sum(
@@ -100,14 +103,20 @@ def score(rows: list[dict], key: dict) -> dict:
     unsupported = sum(
         sum(1 for w in meta["warnings"] if w.startswith("Unsupported claim")) for meta in new_meta.values()
     )
+    skipped = sorted(job_id for job_id, meta in new_meta.items() if CLAIM_CHECK_SKIPPED in meta["warnings"])
     thin = sorted(job_id for job_id, meta in new_meta.items() if len(meta["fact_ids_used"]) < MIN_FACTS_CITED)
     return {
         "judged": len(judged),
         "new_preferred": new_wins,
         "preference": round(preference, 3),
         "unsupported_claims": unsupported,
+        "claim_check_skipped": skipped,
         "drafts_under_2_facts": thin,
-        "passed": bool(judged) and preference >= PASS_PREFERENCE and unsupported == 0 and not thin,
+        "passed": bool(judged)
+        and preference >= PASS_PREFERENCE
+        and unsupported == 0
+        and not skipped
+        and not thin,
     }
 
 
