@@ -197,15 +197,15 @@ def format_past_proposals(proposals: List[Dict]) -> str:
     if not proposals:
         return ""
 
+    # Declined/lost letters (was_hired is False) are never voice examples.
+    voice_proposals = [p for p in proposals if p.get("was_hired") is not False]
+
     formatted = []
-    for i, prop in enumerate(proposals, 1):
-        was_hired = prop.get("was_hired")
-        if was_hired is True:
+    for i, prop in enumerate(voice_proposals, 1):
+        if prop.get("was_hired") is True:
             tier = "[WON — This letter got hired ✓]"
-        elif was_hired is False:
-            tier = "[SUBMITTED — outcome unknown]"
         else:
-            tier = "[PAST PROPOSAL]"
+            tier = "[SUBMITTED — outcome pending]"
         entry = f"Example {i} {tier}"
         if prop.get("job_title"):
             entry += f" - For: {prop['job_title']}"
@@ -269,7 +269,7 @@ def build_user_prompt(
         if past_proposals_text:
             parts.append(
                 f"\n\nPAST PROPOSALS — ordered by outcome, most successful first:\n"
-                f"WON letters are ground truth. SUBMITTED letters show voice. Learn from both:\n"
+                f"WON letters are ground truth. SUBMITTED letters show voice only:\n"
                 f"{past_proposals_text}"
             )
 

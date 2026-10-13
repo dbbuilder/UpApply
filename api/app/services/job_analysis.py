@@ -778,6 +778,7 @@ async def find_relevant_proposals(
         FROM proposals
         WHERE user_id = :user_id
         AND embedding IS NOT NULL
+        AND was_hired IS DISTINCT FROM false
         """ + ("AND was_hired = true" if successful_only else "") + """
         ORDER BY
             CASE WHEN was_hired = true THEN 0 ELSE 1 END,
