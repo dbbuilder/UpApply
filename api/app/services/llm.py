@@ -70,5 +70,9 @@ async def structured_call(
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:
-        logger.warning("structured_call invalid JSON from %s: %.200s", model, text)
+        # Never log the output itself: it can carry client/user data.
+        logger.warning(
+            "structured_call invalid JSON from %s (stop_reason=%s, output_chars=%d, usage=%s)",
+            model, response.stop_reason, len(text), getattr(response, "usage", None),
+        )
         raise LLMError(f"structured_call returned invalid JSON (model={model}; {PROXY_HINT})") from exc

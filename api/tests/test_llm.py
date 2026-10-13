@@ -109,3 +109,20 @@ def test_get_anthropic_client_uses_base_url(monkeypatch):
 
 def test_extraction_model_default():
     assert settings.extraction_model == "claude-haiku-4-5"
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_log_never_contains_model_output(caplog):
+    secret = "Client Jane Doe paid $90k, phone 555-0100 {not json"
+    client = _fake_client(text=secret)
+    client.messages.create.return_value.usage = SimpleNamespace(input_tokens=11, output_tokens=22)
+    with caplog.at_level("DEBUG", logger="app.services.llm"):
+        with patch("app.services.llm.get_anthropic_client", return_value=client):
+            with pytest.raises(LLMError):
+                await structured_call("claude-haiku-4-5", "sys", "hello", SCHEMA)
+    logged = caplog.text
+    assert "Jane" not in logged and "555-0100" not in logged and "not json" not in logged
+    assert "claude-haiku-4-5" in logged
+    assert "end_turn" in logged
+    assert str(len(secret)) in logged
+    assert "22" in logged
