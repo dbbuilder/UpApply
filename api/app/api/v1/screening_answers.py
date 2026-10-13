@@ -40,6 +40,7 @@ class ScreeningAnswerGenerateRequest(BaseModel):
 class ScreeningAnswerGenerateResponse(BaseModel):
     answer: str
     verify_warnings: Optional[List[str]] = None
+    claims_verified: Optional[bool] = None  # v2 only; False when the claim check was skipped
 
 router = APIRouter()
 
@@ -304,6 +305,7 @@ async def generate_screening_answer(
         return ScreeningAnswerGenerateResponse(
             answer=answers[0]["answer"] if answers else "",
             verify_warnings=result.warnings,
+            claims_verified=result.claims_verified,
         )
 
     # Fetch past answers to similar questions via semantic search

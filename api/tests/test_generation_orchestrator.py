@@ -69,6 +69,44 @@ async def test_claim_check_skip_marker_does_not_trigger_repair():
     result, write, _ = await _run([_draft(CLEAN)], claims=[CLAIM_CHECK_SKIPPED])
     assert write.call_count == 1
     assert result.warnings == [CLAIM_CHECK_SKIPPED]
+    assert result.claims_verified is False
+
+
+@pytest.mark.asyncio
+async def test_clean_verified_draft_reports_claims_verified():
+    result, _, _ = await _run([_draft(CLEAN)])
+    assert result.claims_verified is True
+
+
+async def _run_claims(drafts, claim_results):
+    write = AsyncMock(side_effect=drafts)
+    with patch.object(orch, "build_job_brief", AsyncMock(return_value=BRIEF)), \
+         patch.object(orch, "select_evidence", AsyncMock(return_value=Evidence(facts=[FACT]))), \
+         patch.object(orch, "write_application", write), \
+         patch.object(orch, "check_claims", AsyncMock(side_effect=claim_results)):
+        result = await generate_application(
+            db=AsyncMock(), user=USER, profile=PROFILE, title="T", description="D", skills=[], questions=[]
+        )
+    return result, write
+
+
+@pytest.mark.asyncio
+async def test_repair_neither_treats_skip_as_violation_nor_drops_it():
+    result, write = await _run_claims([_draft(DIRTY), _draft(CLEAN)], [[CLAIM_CHECK_SKIPPED], [CLAIM_CHECK_SKIPPED]])
+    assert write.call_count == 2
+    notes = write.call_args_list[1].kwargs["repair_notes"]
+    assert all(CLAIM_CHECK_SKIPPED not in str(n) for n in notes)
+    assert result.warnings == [CLAIM_CHECK_SKIPPED]
+    assert result.claims_verified is False
+
+
+@pytest.mark.asyncio
+async def test_claims_verified_reflects_the_final_draft_only():
+    result, _ = await _run_claims([_draft(DIRTY), _draft(CLEAN)], [[CLAIM_CHECK_SKIPPED], []])
+    assert result.claims_verified is True
+    result, _ = await _run_claims([_draft(DIRTY), _draft(CLEAN)], [[], [CLAIM_CHECK_SKIPPED]])
+    assert result.claims_verified is False
+    assert result.warnings == [CLAIM_CHECK_SKIPPED]
 
 
 @pytest.mark.asyncio

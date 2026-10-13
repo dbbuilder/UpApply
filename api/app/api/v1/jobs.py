@@ -910,6 +910,7 @@ async def generate_cover_letter_endpoint(
         v2_fields = {
             "screening_answers": v2_result.draft.screening_answers,
             "verify_warnings": v2_result.warnings,
+            "claims_verified": v2_result.claims_verified,
             "facts_used": [
                 {"id": str(f.id), "statement": f.statement}
                 for f in v2_result.evidence.facts

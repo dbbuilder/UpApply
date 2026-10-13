@@ -532,6 +532,7 @@ export default function GeneratorPage() {
               applicationId={applicationId}
               verifyWarnings={draftMeta?.warnings ?? []}
               factsUsed={draftMeta?.factsUsed ?? []}
+              claimsVerified={draftMeta?.claimsVerified ?? true}
               onGenerate={handleGenerate}
               onGenerateAll={handleGenerateAll}
               onRetryGenerate={handleGenerate}

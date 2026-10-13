@@ -213,7 +213,7 @@ async def test_screening_generate_routes_to_v2_when_flag_on(client: AsyncClient,
             },
         )
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"answer": f"Answer to {question}", "verify_warnings": [WARNING]}
+    assert resp.json() == {"answer": f"Answer to {question}", "verify_warnings": [WARNING], "claims_verified": True}
     kwargs = engine.call_args.kwargs
     assert kwargs["questions"] == [question]
     assert kwargs["title"] == JOB_DATA["title"]
@@ -273,7 +273,7 @@ async def test_screening_generate_keeps_legacy_path_when_flag_off(client: AsyncC
         )
     assert resp.status_code == 200, resp.text
     engine.assert_not_called()
-    assert resp.json() == {"answer": "Legacy answer", "verify_warnings": None}
+    assert resp.json() == {"answer": "Legacy answer", "verify_warnings": None, "claims_verified": None}
 
 
 @pytest.mark.asyncio
@@ -335,3 +335,47 @@ async def test_screening_generate_v2_evidence_unavailable_is_503(client: AsyncCl
         )
     assert resp.status_code == 503
     assert "sk-secret" not in resp.text and "quota" not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_v2_responses_report_claims_not_verified_when_the_check_was_skipped(
+    client: AsyncClient, auth_headers_with_profile
+):
+    from app.services.generation.verify import CLAIM_CHECK_SKIPPED
+
+    await _enable_v2()
+    question = "How would you handle the cutover?"
+    skipped = _result([question])
+    skipped.warnings = [CLAIM_CHECK_SKIPPED]
+    skipped.claims_verified = False
+    with patch("app.api.v1.jobs.run_full_analysis", AsyncMock(return_value=_analysis())), \
+         patch("app.api.v1.jobs.generate_embedding", AsyncMock(side_effect=RuntimeError("no quota"))), \
+         patch("app.api.v1.jobs.generate_application", AsyncMock(return_value=skipped)):
+        letter = await client.post(
+            "/api/v1/jobs/cover-letters/generate",
+            headers=auth_headers_with_profile,
+            json={"job_data": JOB_DATA, "screening_questions": [question]},
+        )
+    with patch("app.api.v1.screening_answers.generate_application", AsyncMock(return_value=skipped)):
+        answer = await client.post(
+            "/api/v1/screening-answers/generate",
+            headers=auth_headers_with_profile,
+            json={"question": question},
+        )
+    assert letter.status_code == 200, letter.text
+    assert letter.json()["claims_verified"] is False
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["claims_verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_v2_cover_letter_reports_claims_verified_true(client: AsyncClient, auth_headers_with_profile):
+    await _enable_v2()
+    with patch("app.api.v1.jobs.run_full_analysis", AsyncMock(return_value=_analysis())), \
+         patch("app.api.v1.jobs.generate_embedding", AsyncMock(side_effect=RuntimeError("no quota"))), \
+         patch("app.api.v1.jobs.generate_application", AsyncMock(return_value=_result([]))):
+        resp = await client.post(
+            "/api/v1/jobs/cover-letters/generate", headers=auth_headers_with_profile, json={"job_data": JOB_DATA},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["claims_verified"] is True

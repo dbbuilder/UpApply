@@ -22,6 +22,7 @@ class GenerationResult:
     brief: JobBrief
     evidence: Evidence
     warnings: list[str]
+    claims_verified: bool = True  # False when the claim check was skipped for the final draft
 
 
 async def _verify(
@@ -107,10 +108,13 @@ async def generate_application(
         )
         warnings = await _verify(draft, brief, evidence, profile, prototype_url, answers_only)
 
+    claims_verified = CLAIM_CHECK_SKIPPED not in warnings
     warnings.extend(evidence.warnings)
     if not evidence.facts:
         warnings.append(NO_FACTS_WARNING)
 
     if credit_usage:
         await _credit_usage(db, user.id, evidence, draft)
-    return GenerationResult(draft=draft, brief=brief, evidence=evidence, warnings=warnings)
+    return GenerationResult(
+        draft=draft, brief=brief, evidence=evidence, warnings=warnings, claims_verified=claims_verified
+    )

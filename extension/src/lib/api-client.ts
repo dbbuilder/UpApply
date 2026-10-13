@@ -343,7 +343,7 @@ class ApiClient {
   }
 
   async generateScreeningAnswer(question: string, jobTitle?: string, jobDescription?: string, jobSkills?: string[], coverLetterId?: string) {
-    return this.request<{ answer: string; verify_warnings?: string[] | null }>('/api/v1/screening-answers/generate', {
+    return this.request<{ answer: string; verify_warnings?: string[] | null; claims_verified?: boolean | null }>('/api/v1/screening-answers/generate', {
       method: 'POST',
       body: { question, job_title: jobTitle, job_description: jobDescription, job_skills: jobSkills, cover_letter_id: coverLetterId },
     });
@@ -945,6 +945,7 @@ export interface CoverLetter {
   screening_answers?: { question: string; answer: string }[] | null;
   verify_warnings?: string[] | null;
   facts_used?: { id: string; statement: string }[] | null;
+  claims_verified?: boolean | null; // false when the claim check was skipped
 }
 
 export interface ApplicationCreate {

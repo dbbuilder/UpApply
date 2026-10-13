@@ -197,6 +197,7 @@ class CoverLetterResponse(BaseModel):
     screening_answers: Optional[List[dict]] = None
     verify_warnings: Optional[List[str]] = None
     facts_used: Optional[List[dict]] = None  # [{id, statement}] of facts the draft cites
+    claims_verified: Optional[bool] = None  # False when the claim check was skipped
 
     model_config = {"from_attributes": True}
 

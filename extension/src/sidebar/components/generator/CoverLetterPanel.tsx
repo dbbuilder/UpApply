@@ -23,6 +23,7 @@ interface CoverLetterPanelProps {
   applicationId: string | null;
   verifyWarnings: string[];
   factsUsed: { id: string; statement: string }[];
+  claimsVerified: boolean;
   onGenerate: () => void;
   onGenerateAll: () => void;
   onRetryGenerate: () => void;
@@ -62,6 +63,7 @@ export default function CoverLetterPanel({
   applicationId,
   verifyWarnings,
   factsUsed,
+  claimsVerified,
   onGenerate,
   onGenerateAll,
   onRetryGenerate,
@@ -192,6 +194,12 @@ export default function CoverLetterPanel({
               >
                 Cancel
               </button>
+            </div>
+          )}
+
+          {!claimsVerified && (
+            <div role="alert" className="mb-2 rounded-lg border border-red-300 bg-red-50 p-2 text-xs font-medium text-red-800">
+              Claims not verified — review specifics before sending
             </div>
           )}
 

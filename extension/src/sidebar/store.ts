@@ -15,6 +15,7 @@ export interface DraftMeta {
   warnings: string[];
   factsUsed: { id: string; statement: string }[];
   screeningAnswers: { question: string; answer: string }[];
+  claimsVerified: boolean;
 }
 
 interface AppState {
@@ -309,11 +310,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         savedJobId: result.job_id,
         coverLetterLoading: false,
         draftMeta:
-          result.verify_warnings || result.facts_used || result.screening_answers
+          result.verify_warnings || result.facts_used || result.screening_answers || result.claims_verified != null
             ? {
                 warnings: result.verify_warnings ?? [],
                 factsUsed: result.facts_used ?? [],
                 screeningAnswers: result.screening_answers ?? [],
+                claimsVerified: result.claims_verified !== false,
               }
             : null,
       });
