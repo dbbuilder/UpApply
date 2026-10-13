@@ -1,8 +1,5 @@
 """Extract atomic fact candidates from text the user wrote (cheap model, structured output)."""
-import html
 import logging
-import re
-import unicodedata
 from typing import List, Optional
 
 from pydantic import ValidationError
@@ -10,6 +7,8 @@ from pydantic import ValidationError
 from app.core.config import settings
 from app.schemas.fact import MAX_DETAIL, MAX_STATEMENT, MAX_TAG, MAX_TAGS, FactCandidate
 from app.services.llm import structured_call
+from app.services.untrusted import decode_entities as _decode_entities
+from app.services.untrusted import neutralise as _fence
 
 logger = logging.getLogger(__name__)
 
@@ -98,14 +97,6 @@ Hard rules:
 - If nothing qualifies, return {"facts": []}.
 """
 
-# Untrusted text can never form a tag: after NFKC (folds fullwidth/small-form brackets),
-# entity decoding and zero-width stripping, every angle bracket (literal or URL-encoded) is
-# replaced with a look-alike. Linear time; nothing to bypass with tag-name variants.
-_ZERO_WIDTH = re.compile("[\u00ad\u200b-\u200f\u2060\ufeff]")
-_URL_BRACKET = re.compile("%3([ce])", re.IGNORECASE)
-_BRACKETS = str.maketrans({"<": "\u2039", ">": "\u203a"})
-
-
 _QUOTE_CHARS = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
                               "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"'})
 
@@ -124,27 +115,6 @@ def _tags(values) -> List[str]:
     """Model-supplied tag list, bounded: at most MAX_TAGS items of MAX_TAG chars."""
     out = [s.strip()[:MAX_TAG] for s in (values or []) if isinstance(s, str) and s.strip()]
     return out[:MAX_TAGS]
-
-
-def _decode_entities(text: str) -> str:
-    """Decode HTML entities until a fixed point (any nesting depth). Each round that changes
-    the string makes it shorter, so this always terminates."""
-    while True:
-        decoded = html.unescape(text)
-        if decoded == text:
-            return text
-        text = decoded
-
-
-def _fence(text: str) -> str:
-    for _ in range(10):  # NFKC can surface new entities (fullwidth "&") and vice versa
-        normalised = _decode_entities(unicodedata.normalize("NFKC", text))
-        if normalised == text:
-            break
-        text = normalised
-    text = _ZERO_WIDTH.sub("", text)
-    text = _URL_BRACKET.sub(lambda m: "<" if m.group(1).lower() == "c" else ">", text)
-    return unicodedata.normalize("NFKC", text).translate(_BRACKETS)
 
 
 async def extract_facts(
