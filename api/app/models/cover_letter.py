@@ -4,7 +4,7 @@ from typing import Optional, List, TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import DateTime, String, Text, Integer, Boolean, Numeric, func, ForeignKey
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -58,6 +58,12 @@ class CoverLetter(Base):
     # Versioning
     version: Mapped[int] = mapped_column(Integer, default=1)
     is_final: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Generation v2 traceability (migration 023) — what §3 learning scores against
+    brief: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    fact_ids_used: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String(36)), nullable=True)
+    voice_sample_ids: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String(36)), nullable=True)
+    verify_warnings: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
