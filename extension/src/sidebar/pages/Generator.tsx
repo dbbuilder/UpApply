@@ -16,6 +16,7 @@ export default function GeneratorPage() {
     coverLetter,
     coverLetterLoading,
     coverLetterError,
+    coverLetterId,
     draftMeta,
     savedJobId,
     applicationId,
@@ -111,6 +112,14 @@ export default function GeneratorPage() {
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, []);
+
+  // Link this draft to the job so the Upwork Submit-click capture can PUT /final
+  useEffect(() => {
+    if (!coverLetterId || !currentJob?.url) return;
+    chrome.storage.local.set({
+      activeDraft: { coverLetterId, jobUrl: currentJob.url, timestamp: Date.now() },
+    });
+  }, [coverLetterId, currentJob?.url]);
 
   const handleRefreshJob = () => {
     chrome.runtime.sendMessage({ type: 'REQUEST_JOB_EXTRACTION' }, (response) => {

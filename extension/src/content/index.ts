@@ -12,7 +12,8 @@ import {
 import type { ScreeningQuestion, JobData, AttachmentInfo, JobPostingData } from '../types';
 import { initDraftSaver } from './draft-saver';
 import { logger } from '../lib/logger';
-import { extractAllProposals, scrapeProposalDetail } from './scrapers/proposals';
+import { extractAllProposals, extractProposals, scrapeProposalDetail } from './scrapers/proposals';
+import { isSubmitButton, readSubmission } from './submit-capture';
 import { scrapeAllContracts } from './scrapers/contracts';
 import './scoring';
 
@@ -797,6 +798,54 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
  * Guard against re-injection. The background script may re-inject
  * the content script, but we only want to initialize once per page.
  */
+/**
+ * Capture what was actually submitted (spec §3.2): on the apply page's Submit
+ * click, read the cover letter + screening answers and hand them to the background.
+ * Never blocks or delays Upwork's own submission: no preventDefault, all errors swallowed.
+ */
+function handleSubmitClick(event: MouseEvent): void {
+  try {
+    if (!window.location.href.includes('/apply')) return;
+    if (!isSubmitButton(event.target as Element | null)) return;
+    const submission = readSubmission(document);
+    if (!submission.coverLetter) return;
+    chrome.runtime.sendMessage({
+      type: 'CAPTURE_SUBMISSION',
+      data: { ...submission, pageUrl: window.location.href },
+    }).catch(() => { /* background unavailable */ });
+  } catch {
+    // capture is best-effort; never interfere with Upwork's submit
+  }
+}
+
+let lastOutcomeSyncUrl: string | null = null;
+
+/**
+ * Outcome sync (spec §3.3): when the Proposals page is opened, post the statuses
+ * visible on the first page. No pagination clicks, no background polling.
+ */
+function syncProposalOutcomes(): void {
+  if (!isMyProposalsPage()) return;
+  const url = window.location.href;
+  if (url === lastOutcomeSyncUrl) return;
+  lastOutcomeSyncUrl = url;
+  setTimeout(() => {
+    const items = extractProposals().flatMap((p) =>
+      p.proposalId && p.status
+        ? [{
+            upwork_proposal_id: p.proposalId,
+            job_title: p.jobTitle ?? undefined,
+            status: p.status,
+            submitted_at: p.submittedAt ?? undefined,
+          }]
+        : []
+    );
+    if (items.length) {
+      chrome.runtime.sendMessage({ type: 'SYNC_PROPOSAL_OUTCOMES', items }).catch(() => {});
+    }
+  }, 4000); // Upwork's list hydrates late (see extractAllProposals)
+}
+
 const INIT_FLAG = '__upapply_initialized__';
 
 /**
@@ -876,6 +925,12 @@ function init() {
   // Initialize draft saver on proposal/apply pages
   initDraftSaver();
 
+  // Submit-click capture (capture phase so it runs before Upwork's own handlers)
+  document.addEventListener('click', handleSubmitClick, true);
+
+  // Outcome sync when landing directly on the Proposals page
+  syncProposalOutcomes();
+
   // Watch for SPA navigation
   let lastUrl = window.location.href;
   const observer = new MutationObserver(() => {
@@ -904,6 +959,9 @@ function init() {
 
       // Check for pending Quick Apply fill after SPA navigation
       checkPendingAutoFill().catch(() => {});
+
+      // Outcome sync after SPA navigation to the Proposals page
+      syncProposalOutcomes();
     }
   });
 

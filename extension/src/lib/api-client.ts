@@ -283,6 +283,27 @@ class ApiClient {
     });
   }
 
+  async refineCoverLetter(id: string, message: string, screeningAnswers?: QAPair[]) {
+    return this.request<RefineResponse>(`/api/v1/jobs/cover-letters/${id}/refine`, {
+      method: 'POST',
+      body: { message, screening_answers: screeningAnswers },
+    });
+  }
+
+  async submitFinal(id: string, finalText: string, finalAnswers: QAPair[]) {
+    return this.request<FinalSubmitResponse>(`/api/v1/jobs/cover-letters/${id}/final`, {
+      method: 'PUT',
+      body: { final_text: finalText, final_answers: finalAnswers },
+    });
+  }
+
+  async syncProposalOutcomes(items: ProposalOutcomeItem[]) {
+    return this.request<ProposalOutcomeSyncResponse>('/api/v1/proposals/outcomes', {
+      method: 'POST',
+      body: { items },
+    });
+  }
+
   async improveCoverLetter(id: string) {
     return this.request<{
       cover_letter_id: string;
@@ -946,6 +967,50 @@ export interface CoverLetter {
   verify_warnings?: string[] | null;
   facts_used?: { id: string; statement: string }[] | null;
   claims_verified?: boolean | null; // false when the claim check was skipped
+}
+
+export interface QAPair {
+  question: string;
+  answer: string;
+}
+
+export interface RefineMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  screening_answers?: QAPair[];
+  warnings?: string[];
+  claims_verified?: boolean;
+  at: string;
+}
+
+export interface RefineResponse {
+  cover_letter: string;
+  screening_answers: QAPair[];
+  warnings: string[];
+  refine_messages: RefineMessage[];
+  claims_verified: boolean; // false when the claim check was skipped for this draft
+}
+
+export interface FinalSubmitResponse {
+  id: string;
+  edit_distance_pct: number;
+  author: 'chris' | 'chris_edited_ai';
+  proposal_id: string | null;
+  fact_candidates: number;
+}
+
+export interface ProposalOutcomeItem {
+  upwork_proposal_id?: string;
+  proposal_id?: string;
+  job_title?: string;
+  status: string;
+  submitted_at?: string;
+}
+
+export interface ProposalOutcomeSyncResponse {
+  updated: number;
+  credited: number;
+  not_found: number;
 }
 
 export interface ApplicationCreate {
