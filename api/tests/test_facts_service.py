@@ -1,0 +1,209 @@
+"""Facts service: dedupe/merge/auto-approve, search, credit (embeddings mocked)."""
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from sqlalchemy import func, select
+
+from app.models.fact import Fact
+from app.schemas.fact import FactCandidate
+from app.services.facts import (
+    DEDUPE_THRESHOLD,
+    credit_facts,
+    search_facts,
+    upsert_candidate,
+    upsert_candidate_outcome,
+)
+from tests.vector_utils import blend, unit
+
+
+def _cand(statement: str, strength: float = 0.7, **kw) -> FactCandidate:
+    return FactCandidate(
+        kind=kw.pop("kind", "metric"),
+        statement=statement,
+        strength=strength,
+        source_type=kw.pop("source_type", "upwork_proposal"),
+        source_ref=kw.pop("source_ref", "p1"),
+        source_snippet=kw.pop("source_snippet", "snippet"),
+        **kw,
+    )
+
+
+async def _seed(db, user_id, statement, embedding, status="candidate", strength=0.6, **kw) -> Fact:
+    fact = Fact(
+        user_id=user_id, kind="metric", statement=statement, status=status, strength=strength,
+        source_type="bio_memory", source_ref="m1",
+        sources=[{"source_type": "bio_memory", "source_ref": "m1", "snippet": None}],
+        embedding=embedding, **kw,
+    )
+    db.add(fact)
+    await db.flush()
+    return fact
+
+
+async def _count(db) -> int:
+    return (await db.execute(select(func.count()).select_from(Fact))).scalar_one()
+
+
+def test_threshold_constant():
+    assert DEDUPE_THRESHOLD == 0.92
+
+
+@pytest.mark.asyncio
+async def test_new_candidate_is_created(db_session, test_user):
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=unit(0))):
+        fact, outcome = await upsert_candidate_outcome(
+            db_session, test_user.id, _cand("Cut Azure spend 38%.", skills=["Azure"], job_types=["cloud"])
+        )
+    assert outcome == "created"
+    assert fact.status == "candidate"
+    assert fact.skills == ["Azure"]
+    assert fact.sources == [{"source_type": "upwork_proposal", "source_ref": "p1", "snippet": "snippet"}]
+    assert fact.source_type == "upwork_proposal"
+
+
+@pytest.mark.asyncio
+async def test_match_to_approved_auto_approves_and_keeps_wording(db_session, test_user):
+    existing = await _seed(
+        db_session, test_user.id, "Migrated 160 servers to Azure.", unit(0),
+        status="approved", strength=0.6, skills=["Azure"],
+    )
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=blend(0, 1, 0.95))):
+        fact, outcome = await upsert_candidate_outcome(
+            db_session, test_user.id,
+            _cand("Moved 160 on-prem servers into Azure.", strength=0.9, skills=["SQL Server"]),
+        )
+    assert outcome == "auto_approved"
+    assert fact.id == existing.id
+    assert fact.statement == "Migrated 160 servers to Azure."
+    assert fact.strength == 0.9
+    assert fact.skills == ["Azure", "SQL Server"]
+    assert [s["source_ref"] for s in fact.sources] == ["m1", "p1"]
+    assert await _count(db_session) == 1
+
+
+@pytest.mark.asyncio
+async def test_match_to_candidate_merges_and_takes_stronger_wording(db_session, test_user):
+    existing = await _seed(db_session, test_user.id, "Did an Azure migration.", unit(0), strength=0.4)
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=blend(0, 1, 0.93))):
+        fact, outcome = await upsert_candidate_outcome(
+            db_session, test_user.id, _cand("Migrated 160 servers to Azure.", strength=0.9)
+        )
+    assert outcome == "merged"
+    assert fact.id == existing.id
+    assert fact.status == "candidate"
+    assert fact.statement == "Migrated 160 servers to Azure."
+    assert fact.strength == 0.9
+
+
+@pytest.mark.asyncio
+async def test_auto_approve_promotes_matched_candidate(db_session, test_user):
+    await _seed(db_session, test_user.id, "Founded a SaaS company in 2001.", unit(0))
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=blend(0, 1, 0.97))):
+        fact, outcome = await upsert_candidate_outcome(
+            db_session, test_user.id, _cand("Founded a SaaS company in 2001.", source_type="bio_memory"),
+            auto_approve=True,
+        )
+    assert outcome == "auto_approved"
+    assert fact.status == "approved"
+
+
+@pytest.mark.asyncio
+async def test_rejected_match_stays_rejected(db_session, test_user):
+    await _seed(db_session, test_user.id, "Knows Excel.", unit(0), status="rejected")
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=unit(0))):
+        fact, outcome = await upsert_candidate_outcome(
+            db_session, test_user.id, _cand("Knows Excel."), auto_approve=True
+        )
+    assert outcome == "merged"
+    assert fact.status == "rejected"
+    assert await _count(db_session) == 1
+
+
+@pytest.mark.asyncio
+async def test_below_threshold_creates_new_row(db_session, test_user):
+    await _seed(db_session, test_user.id, "Migrated 160 servers to Azure.", unit(0), status="approved")
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=blend(0, 1, 0.85))):
+        fact, outcome = await upsert_candidate_outcome(
+            db_session, test_user.id, _cand("Optimised Azure SQL costs.")
+        )
+    assert outcome == "created"
+    assert await _count(db_session) == 2
+
+
+@pytest.mark.asyncio
+async def test_auto_approve_new_fact_and_wrapper_returns_fact(db_session, test_user):
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=unit(4))):
+        fact = await upsert_candidate(
+            db_session, test_user.id, _cand("Holds an MBA.", kind="credential"), auto_approve=True
+        )
+    assert isinstance(fact, Fact)
+    assert fact.status == "approved"
+
+
+@pytest.mark.asyncio
+async def test_search_returns_only_requested_status_sorted(db_session, test_user):
+    a = await _seed(db_session, test_user.id, "A", unit(0), status="approved")
+    b = await _seed(db_session, test_user.id, "B", blend(0, 1, 0.5), status="approved")
+    await _seed(db_session, test_user.id, "C", unit(0), status="candidate")
+
+    results = await search_facts(db_session, test_user.id, unit(0), limit=8)
+    assert [f.id for f, _ in results] == [a.id, b.id]
+    assert results[0][1] == pytest.approx(1.0, abs=1e-6)
+    assert results[1][1] == pytest.approx(0.5, abs=1e-6)
+
+    candidates = await search_facts(db_session, test_user.id, unit(0), status="candidate")
+    assert [f.statement for f, _ in candidates] == ["C"]
+
+
+@pytest.mark.asyncio
+async def test_credit_facts_increments_counters(db_session, test_user):
+    fact = await _seed(db_session, test_user.id, "A", unit(0), status="approved")
+    await credit_facts(db_session, [fact.id], won=False, user_id=test_user.id)
+    await credit_facts(db_session, [fact.id], won=False, user_id=test_user.id)
+    await credit_facts(db_session, [fact.id], won=True, user_id=test_user.id)
+    await credit_facts(db_session, [], won=True, user_id=test_user.id)
+    await db_session.refresh(fact)
+    assert fact.times_used == 2
+    assert fact.times_in_won == 1
+
+
+async def _other_user(db):
+    from app.models.user import User
+
+    user = User(email="facts-other@example.com", hashed_password="not-a-real-hash")
+    db.add(user)
+    await db.commit()
+    return user
+
+
+@pytest.mark.asyncio
+async def test_dedupe_never_matches_another_users_fact(db_session, test_user):
+    other = await _other_user(db_session)
+    theirs = await _seed(db_session, other.id, "Migrated 160 servers to Azure.", unit(0), status="approved")
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=unit(0))):
+        fact, outcome = await upsert_candidate_outcome(
+            db_session, test_user.id, _cand("Migrated 160 servers to Azure.")
+        )
+    assert outcome == "created"
+    assert fact.id != theirs.id
+    assert fact.user_id == test_user.id
+    await db_session.refresh(theirs)
+    assert len(theirs.sources) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_is_scoped_to_user(db_session, test_user):
+    other = await _other_user(db_session)
+    await _seed(db_session, other.id, "Theirs", unit(0), status="approved")
+    mine = await _seed(db_session, test_user.id, "Mine", unit(0), status="approved")
+    results = await search_facts(db_session, test_user.id, unit(0))
+    assert [f.id for f, _ in results] == [mine.id]
+
+
+@pytest.mark.asyncio
+async def test_credit_facts_ignores_other_users_facts(db_session, test_user):
+    other = await _other_user(db_session)
+    theirs = await _seed(db_session, other.id, "Theirs", unit(0), status="approved")
+    await credit_facts(db_session, [theirs.id], won=True, user_id=test_user.id)
+    await db_session.refresh(theirs)
+    assert theirs.times_in_won == 0
