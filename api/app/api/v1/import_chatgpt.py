@@ -113,7 +113,7 @@ async def _extract_from_conversation(
     prompt = f'Conversation title: "{title}"\n\n{conv_text}'
     try:
         resp = await client.messages.create(
-            model=settings.cover_letter_model,
+            model=settings.legacy_cover_letter_model,
             system=_EXTRACT_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=2000,

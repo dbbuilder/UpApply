@@ -126,3 +126,25 @@ async def test_invalid_json_log_never_contains_model_output(caplog):
     assert "end_turn" in logged
     assert str(len(secret)) in logged
     assert "22" in logged
+
+
+def test_model_defaults():
+    from app.core.config import Settings
+
+    fields = Settings.model_fields
+    assert fields["cover_letter_model"].default == "claude-opus-5-5"
+    assert fields["extraction_model"].default == "claude-haiku-4-5"
+    assert fields["writer_effort"].default == "high"
+    assert fields["legacy_cover_letter_model"].default == "claude-sonnet-4-6"
+
+
+@pytest.mark.asyncio
+async def test_structured_call_passes_cached_system_blocks_through():
+    blocks = [{"type": "text", "text": "rules", "cache_control": {"type": "ephemeral"}}]
+    client = _fake_client()
+    client.messages.create.return_value.usage = SimpleNamespace(
+        input_tokens=10, output_tokens=5, cache_read_input_tokens=8, cache_creation_input_tokens=0
+    )
+    with patch("app.services.llm.get_anthropic_client", return_value=client):
+        assert await structured_call("claude-opus-5-5", blocks, "u", SCHEMA) == {"a": 1}
+    assert client.messages.create.call_args.kwargs["system"] == blocks

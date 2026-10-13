@@ -423,7 +423,7 @@ async def generate_cover_letter(
     )
 
     response = await client.messages.create(
-        model=model or settings.cover_letter_model,
+        model=model or settings.legacy_cover_letter_model,
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
         max_tokens=1200,
@@ -464,7 +464,7 @@ Job: {job_title}
 Please revise the cover letter based on this feedback while maintaining personalization for the job. Remember: NO salutation line, NO signature, NO placeholders."""
 
     response = await client.messages.create(
-        model=model or settings.cover_letter_model,
+        model=model or settings.legacy_cover_letter_model,
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
         max_tokens=1000,
@@ -534,7 +534,7 @@ Respond with JSON only, no markdown:
 {{"improvement_notes": ["note 1", "note 2", ...], "improved_content": "the full rewritten letter"}}"""
 
     response = await client.messages.create(
-        model=model or settings.cover_letter_model,
+        model=model or settings.legacy_cover_letter_model,
         system=system,
         messages=[{"role": "user", "content": user}],
         max_tokens=1500,

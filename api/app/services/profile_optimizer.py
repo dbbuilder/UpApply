@@ -175,7 +175,7 @@ async def optimize_profile(profile: UserProfile) -> ProfileOptimizeResponse:
     prompt = _build_optimization_prompt(profile)
 
     response = await client.messages.create(
-        model=settings.cover_letter_model,
+        model=settings.legacy_cover_letter_model,
         system=(
             "You are an expert Upwork profile consultant. "
             "You respond ONLY with valid JSON — no markdown, no explanation, no code fences. "

@@ -236,3 +236,29 @@ def test_system_prompt_includes_always_include_items():
     prompt = build_system_prompt(profile)
     assert "SchoolVision 20yr SaaS" in prompt
     assert "MBA" in prompt
+
+
+@pytest.mark.asyncio
+async def test_legacy_generate_is_pinned_to_legacy_model():
+    """Flag-off path must keep its model (Opus 5.5 rejects the legacy temperature param)."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from app.core.config import settings
+    from app.services.cover_letter import generate_cover_letter
+
+    profile = SimpleNamespace(
+        full_name=None, professional_title=None, bio=None, career_goals=None,
+        communication_style=None, unique_strengths=None, proposal_anchors=None,
+        skills_to_highlight=None, preferred_closing=None,
+    )
+    message = MagicMock()
+    message.content = [MagicMock(text="Body text.")]
+    client = MagicMock()
+    client.messages.create = AsyncMock(return_value=message)
+    with patch("app.services.cover_letter._get_anthropic_client", return_value=client):
+        await generate_cover_letter(
+            job_title="T", job_description="D", job_skills=[], budget=None,
+            skill_matches=[], missing_skills=[], relevant_memories=[], profile=profile,
+        )
+    assert client.messages.create.call_args.kwargs["model"] == settings.legacy_cover_letter_model

@@ -61,6 +61,19 @@ async def structured_call(
     except APIError as exc:
         raise LLMError(f"structured_call API error from {model}: {exc} ({PROXY_HINT})") from exc
 
+    # Usage only — never prompt or output content.
+    usage = getattr(response, "usage", None)
+    if usage is not None:
+        logger.info(
+            "llm model=%s stop_reason=%s in=%s out=%s cache_read=%s cache_write=%s",
+            model,
+            response.stop_reason,
+            getattr(usage, "input_tokens", None),
+            getattr(usage, "output_tokens", None),
+            getattr(usage, "cache_read_input_tokens", None),
+            getattr(usage, "cache_creation_input_tokens", None),
+        )
+
     if response.stop_reason in ("refusal", "max_tokens"):
         raise LLMError(f"structured_call stopped with {response.stop_reason} (model={model})")
 
