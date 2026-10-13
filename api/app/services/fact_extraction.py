@@ -1,4 +1,5 @@
 """Extract atomic fact candidates from text the user wrote (cheap model, structured output)."""
+import html
 import logging
 import re
 from typing import List, Optional
@@ -94,11 +95,18 @@ Hard rules:
 - If nothing qualifies, return {"facts": []}.
 """
 
-# Any open/close tag of our fences inside untrusted text is defanged so it cannot break out.
-_FENCE_TAG = re.compile(r"<\s*/?\s*(source_text|context)\s*>", re.IGNORECASE)
+# Any open/close tag of our fences inside untrusted text (attributes, whitespace, any case)
+# is defanged so it cannot break out.
+_FENCE_TAG = re.compile(r"<\s*/?\s*(source_text|context)\b[^>]*>", re.IGNORECASE)
 
 
 def _fence(text: str) -> str:
+    # Decode HTML entities first (repeatedly, for double-encoding) so &lt;source_text&gt; is caught too.
+    for _ in range(5):
+        decoded = html.unescape(text)
+        if decoded == text:
+            break
+        text = decoded
     return _FENCE_TAG.sub(lambda m: f"[{m.group(1)}]", text)
 
 
