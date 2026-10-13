@@ -306,3 +306,48 @@ async def test_dedupe_recall_survives_closer_rows_of_other_users(db_session, tes
     with patch("app.services.facts.generate_embedding", AsyncMock(return_value=unit(0))):
         fact, _ = await upsert_candidate_outcome(db_session, test_user.id, _cand("Moved 160 servers."))
     assert fact.id == mine.id
+
+
+@pytest.mark.parametrize("source_type,kind", [
+    ("client_feedback", "outcome"),
+    ("upwork_contract", "project"),
+    ("chatgpt_user_turn", "client_quote"),
+])
+@pytest.mark.asyncio
+async def test_client_sourced_candidate_into_approved_merges_provenance_only(db_session, test_user, source_type, kind):
+    existing = await _seed(db_session, test_user.id, "Saved the launch.", unit(0),
+                           status="approved", strength=0.5, skills=["Azure"])
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=unit(0))):
+        fact, outcome = await upsert_candidate_outcome(
+            db_session, test_user.id,
+            _cand("Saved the launch!", strength=1.0, skills=["AI"], source_type=source_type, kind=kind),
+            auto_approve=True,
+        )
+    assert fact.id == existing.id
+    assert outcome == "merged"
+    assert fact.statement == "Saved the launch."
+    assert fact.strength == 0.5 and fact.skills == ["Azure"]
+    assert [s["source_type"] for s in fact.sources] == ["bio_memory", source_type]
+
+
+@pytest.mark.parametrize("source_type,kind", [
+    ("client_feedback", "outcome"),
+    ("upwork_contract", "project"),
+    ("chatgpt_user_turn", "client_quote"),
+])
+@pytest.mark.asyncio
+async def test_client_sourced_candidates_are_never_auto_approved(db_session, test_user, source_type, kind):
+    pending = await _seed(db_session, test_user.id, "Pending wording.", unit(1), status="candidate", strength=0.4)
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=unit(0))):
+        new, outcome_new = await upsert_candidate_outcome(
+            db_session, test_user.id, _cand("Brand new claim.", source_type=source_type, kind=kind), auto_approve=True,
+        )
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=unit(1))):
+        merged, outcome_merged = await upsert_candidate_outcome(
+            db_session, test_user.id, _cand("Stronger wording.", strength=1.0, source_type=source_type, kind=kind),
+            auto_approve=True,
+        )
+    assert (outcome_new, new.status) == ("created", "candidate")
+    assert merged.id == pending.id
+    assert (outcome_merged, merged.status) == ("merged", "candidate")
+    assert merged.statement == "Pending wording." and merged.strength == 0.4

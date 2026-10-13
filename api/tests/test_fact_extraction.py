@@ -183,3 +183,22 @@ async def test_extract_facts_validates_kind_and_clips_model_output():
     assert len(c.source_snippet) == 200
     assert len(c.skills) == 50 and all(len(s) <= 100 for s in c.skills)
     assert len(c.industries) == 50 and all(len(s) <= 100 for s in c.industries)
+
+
+def _quote(statement: str) -> dict:
+    return {"kind": "client_quote", "statement": statement, "detail": "", "skills": [], "industries": [],
+            "job_types": [], "strength": 0.8, "evidence_quote": ""}
+
+
+@pytest.mark.asyncio
+async def test_client_quote_must_be_verbatim_in_source():
+    source = 'Chris  saved our   launch.\nHe’s the “best” engineer we have hired.'
+    raw = {"facts": [
+        _quote("Chris saved our launch."),                           # whitespace differs -> kept
+        _quote('"He\'s the "best" engineer we have hired."'),         # quote styles differ -> kept
+        _quote("Chris saved our launch and doubled revenue."),       # embellished -> dropped
+        _quote("Best engineer ever."),                               # paraphrase -> dropped
+    ]}
+    with patch("app.services.fact_extraction.structured_call", AsyncMock(return_value=raw)):
+        cands = await extract_facts(source, source_type="client_feedback")
+    assert [c.statement for c in cands] == ["Chris saved our launch.", '"He\'s the "best" engineer we have hired."']

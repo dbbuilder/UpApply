@@ -102,20 +102,39 @@ Hard rules:
 _FENCE_TAG = re.compile(r"<\s*/?\s*(source_text|context)\b[^>]*>", re.IGNORECASE)
 
 
+_QUOTE_CHARS = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
+                              "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"'})
+
+
+def _quote_normalised(text: str) -> str:
+    return " ".join(text.translate(_QUOTE_CHARS).split())
+
+
+def _is_verbatim(statement: str, source: str) -> bool:
+    """client_quote statements must quote the source exactly (whitespace/quote styles aside)."""
+    quote = _quote_normalised(statement).strip("'\" ")
+    return bool(quote) and quote in _quote_normalised(source)
+
+
 def _tags(values) -> List[str]:
     """Model-supplied tag list, bounded: at most MAX_TAGS items of MAX_TAG chars."""
     out = [s.strip()[:MAX_TAG] for s in (values or []) if isinstance(s, str) and s.strip()]
     return out[:MAX_TAGS]
 
 
-def _fence(text: str) -> str:
-    # Decode HTML entities first (repeatedly, for double-encoding) so &lt;source_text&gt; is caught too.
+def _decode_entities(text: str) -> str:
+    """Decode HTML entities (repeatedly, for double-encoding)."""
     for _ in range(5):
         decoded = html.unescape(text)
         if decoded == text:
             break
         text = decoded
-    return _FENCE_TAG.sub(lambda m: f"[{m.group(1)}]", text)
+    return text
+
+
+def _fence(text: str) -> str:
+    # Decode entities first so &lt;source_text&gt; is caught too.
+    return _FENCE_TAG.sub(lambda m: f"[{m.group(1)}]", _decode_entities(text))
 
 
 async def extract_facts(
@@ -155,6 +174,9 @@ async def extract_facts(
             continue
         if raw.get("kind") not in KINDS:
             logger.warning("Dropping fact candidate with unknown kind")
+            continue
+        if raw["kind"] == "client_quote" and not _is_verbatim(statement, _decode_entities(text)):
+            logger.warning("Dropping client_quote that is not verbatim in the source")
             continue
         try:
             candidates.append(FactCandidate(

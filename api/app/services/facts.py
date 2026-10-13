@@ -18,6 +18,13 @@ from app.services.fact_extraction import extract_facts
 logger = logging.getLogger(__name__)
 
 DEDUPE_THRESHOLD = 0.92
+# Records written by clients / Upwork about the user (contracts, feedback). Never auto-approved,
+# not even by matching an approved fact (§1.7): they only ever add provenance.
+CLIENT_SOURCE_TYPES = frozenset({"client_feedback", "upwork_contract"})
+
+
+def _is_client_sourced(cand: FactCandidate) -> bool:
+    return cand.source_type in CLIENT_SOURCE_TYPES or cand.kind == "client_quote"
 MAX_CONCURRENT_EXTRACTIONS = 5  # parallel Haiku calls per request
 MAX_EXTRACTION_ATTEMPTS = 3     # an item that fails this often is given up on
 MAX_ITEMS_PER_RUN = 25          # /from-memories and /from-contracts batch size
@@ -78,12 +85,19 @@ async def upsert_candidate_outcome(
     auto_approve: bool = False,
 ) -> Tuple[Fact, str]:
     """Insert or merge one candidate; returns (fact, 'created' | 'merged' | 'auto_approved')."""
+    client_sourced = _is_client_sourced(cand)
+    if client_sourced:
+        auto_approve = False
     embedding = await generate_embedding(fact_embedding_text(cand.statement, cand.detail))
     nearest = await _nearest(db, user_id, embedding)
 
     if nearest and nearest[1] >= DEDUPE_THRESHOLD:
         fact = nearest[0]
         fact.sources = [*(fact.sources or []), _source_entry(cand)]
+        if client_sourced:
+            # Client/contract records: provenance only; wording, ranking and status untouched.
+            await db.flush()
+            return fact, "merged"
         if fact.status == "approved" and not auto_approve:
             # Untrusted candidate matching an approved fact: provenance only. Ranking fields
             # (tags, strength) change only via user PATCH, manual create or a trusted source.
