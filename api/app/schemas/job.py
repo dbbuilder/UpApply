@@ -244,7 +244,9 @@ class CoverLetterRefineRequest(BaseModel):
     """One refine-thread message from the user."""
 
     message: str = Field(..., max_length=MAX_REFINE_MESSAGE)
-    # Sidebar's current answers; only read on the first turn (later turns use the thread)
+    # The draft as the sidebar shows it (includes hand edits); falls back to the stored letter
+    current_draft: Optional[str] = Field(None, max_length=MAX_FINAL_TEXT)
+    # Sidebar's current answers (includes hand edits); falls back to the thread's last answers
     screening_answers: Optional[List[QAPair]] = Field(None, max_length=MAX_SCREENING_QUESTIONS)
 
 

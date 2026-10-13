@@ -10,7 +10,7 @@ vi.hoisted(() => {
 });
 
 vi.mock('../../lib/api-client', () => ({
-  apiClient: { refineCoverLetter: vi.fn() },
+  apiClient: { refineCoverLetter: vi.fn(), regenerateCoverLetter: vi.fn(), improveCoverLetter: vi.fn() },
 }));
 
 import { createElement } from 'react';
@@ -21,6 +21,8 @@ import { useAppStore } from '../store';
 import Generator from './Generator';
 
 const refineMock = apiClient.refineCoverLetter as unknown as ReturnType<typeof vi.fn>;
+const regenerateMock = apiClient.regenerateCoverLetter as unknown as ReturnType<typeof vi.fn>;
+const improveMock = apiClient.improveCoverLetter as unknown as ReturnType<typeof vi.fn>;
 
 let container: HTMLDivElement;
 let root: Root;
@@ -59,6 +61,8 @@ function clickButton(label: string) {
 
 beforeEach(() => {
   refineMock.mockReset();
+  regenerateMock.mockReset();
+  improveMock.mockReset();
   useAppStore.setState({
     currentJob: { title: 'Job', url: 'https://www.upwork.com/jobs/1', screeningQuestions: [], skills: [] } as never,
     coverLetter: 'Draft one.',
@@ -123,5 +127,47 @@ describe('Generator refine chat', () => {
     expect(useAppStore.getState().coverLetterId).toBe('cl-2');
     expect(container.textContent).not.toContain('You: shorter');
     expect(container.textContent).not.toContain('old draft warning');
+  });
+
+  it('refines the draft as the sidebar shows it, including local edits', async () => {
+    refineMock.mockResolvedValue(refineResult('Refined.', 'shorter'));
+    await act(async () => { root.render(createElement(Generator)); });
+    // The popup editor writes hand edits into the store only (never to the API).
+    await act(async () => { useAppStore.getState().setCoverLetter('Draft one, edited by hand.'); });
+    await sendRefine('shorter');
+    expect(refineMock).toHaveBeenCalledWith('cl-1', 'shorter', [], 'Draft one, edited by hand.');
+  });
+});
+
+describe('Generator on a legacy (generation_v2 off) letter', () => {
+  beforeEach(() => {
+    useAppStore.setState({ draftMeta: null });
+  });
+
+  it('offers regenerate-with-feedback and Improve instead of the v2-only refine chat', async () => {
+    regenerateMock.mockResolvedValue({ id: 'cl-2', content: 'Regenerated.' });
+    await act(async () => { root.render(createElement(Generator)); });
+    expect(container.textContent).not.toContain('Refine');
+
+    const input = container.querySelector<HTMLInputElement>('input[placeholder^="What should be different"]')!;
+    expect(input).not.toBeNull();
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(input, 'more technical');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { clickButton('Regenerate'); });
+    expect(regenerateMock).toHaveBeenCalledWith('cl-1', 'more technical', true);
+    expect(useAppStore.getState().coverLetter).toBe('Regenerated.');
+    expect(useAppStore.getState().coverLetterId).toBe('cl-2');
+
+    improveMock.mockResolvedValue({
+      cover_letter_id: 'cl-3', improved_content: 'Improved.', improvement_notes: ['Tighter opening'],
+      hired_examples_used: 1,
+    });
+    await act(async () => { clickButton('✨ Improve'); });
+    expect(improveMock).toHaveBeenCalledWith('cl-2');
+    expect(useAppStore.getState().coverLetter).toBe('Improved.');
+    expect(container.textContent).toContain('Tighter opening');
   });
 });

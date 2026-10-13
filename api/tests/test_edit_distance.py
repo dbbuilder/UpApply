@@ -28,3 +28,15 @@ def test_tail_beyond_cap_counts_as_edits():
     extra = " ".join(f"x{i}" for i in range(MAX_TOKENS))
     # identical first MAX_TOKENS words, then MAX_TOKENS added words -> half changed
     assert word_edit_distance_pct(base, base + " " + extra) == 0.5
+
+
+def test_identical_long_texts_are_zero():
+    text = " ".join(f"w{i}" for i in range(1500))
+    assert word_edit_distance_pct(text, text) == 0.0
+
+
+def test_one_word_changed_in_long_text_is_exact():
+    words = [f"w{i}" for i in range(1500)]
+    edited = list(words)
+    edited[750] = "changed"
+    assert word_edit_distance_pct(" ".join(words), " ".join(edited)) == round(1 / 1500, 4)

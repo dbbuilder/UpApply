@@ -147,12 +147,76 @@ async def test_second_turn_uses_answers_from_thread(client, auth_headers_with_pr
          patch(f"{JOBS}.upsert_candidate", AsyncMock()):
         r = await client.post(f"/api/v1/jobs/cover-letters/{letter_id}/refine",
                               headers=auth_headers_with_profile,
-                              json={"message": "warmer", "screening_answers": [
-                                  {"question": "What is your migration approach?", "answer": "Ignored."}]})
+                              json={"message": "warmer"})
     assert r.status_code == 200, r.text
     assert refine.await_args.args[5].screening_answers[0]["answer"] == "From thread."
     assert len(refine.await_args.args[6]) == 2
     assert len(r.json()["refine_messages"]) == 4
+
+
+@pytest.mark.asyncio
+async def test_refine_revises_the_sidebar_draft_and_answers(client, auth_headers_with_profile):
+    """Hand edits made in the sidebar (letter and answers) are what the model revises."""
+    uid = await _user_id(client, auth_headers_with_profile)
+    _, letter_id = await _seed_letter(uid)
+    async with TestSessionLocal() as s:
+        letter = (await s.execute(select(CoverLetter).where(CoverLetter.id == letter_id))).scalar_one()
+        letter.refine_messages = [
+            {"role": "user", "content": "shorter", "at": "2026-10-12T00:00:00+00:00"},
+            {"role": "assistant", "content": ORIGINAL, "warnings": [], "at": "2026-10-12T00:00:00+00:00",
+             "screening_answers": [{"question": "What is your migration approach?", "answer": "From thread."}]},
+        ]
+        await s.commit()
+    edited = "Hand-edited paragraph about the Azure cutover.\n\nWarm regards,\nChris"
+    result = RefineResult(draft=Draft(cover_letter=edited, screening_answers=[], fact_ids_used=[]),
+                          warnings=[], found_facts=[])
+    with patch(f"{JOBS}.refine_application", AsyncMock(return_value=result)) as refine, \
+         patch(f"{JOBS}.extract_facts", AsyncMock(return_value=[])), \
+         patch(f"{JOBS}.upsert_candidate", AsyncMock()):
+        r = await client.post(f"/api/v1/jobs/cover-letters/{letter_id}/refine",
+                              headers=auth_headers_with_profile,
+                              json={"message": "mention the Azure work", "current_draft": edited,
+                                    "screening_answers": [
+                                        {"question": "What is your migration approach?", "answer": "Hand edit."}]})
+    assert r.status_code == 200, r.text
+    current = refine.await_args.args[5]
+    assert current.cover_letter == edited
+    assert current.screening_answers[0]["answer"] == "Hand edit."
+
+
+@pytest.mark.asyncio
+async def test_refine_current_draft_too_long_is_422(client, auth_headers_with_profile):
+    uid = await _user_id(client, auth_headers_with_profile)
+    _, letter_id = await _seed_letter(uid)
+    r = await client.post(f"/api/v1/jobs/cover-letters/{letter_id}/refine",
+                          headers=auth_headers_with_profile,
+                          json={"message": "shorter", "current_draft": "x" * 20001})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_refine_evidence_excludes_facts_rejected_since_generation(client, auth_headers_with_profile):
+    uid = await _user_id(client, auth_headers_with_profile)
+    kept = await _seed_fact(uid, "Led a 160-server on-prem to Azure migration.")
+    rejected = await _seed_fact(uid, "Cut Azure spend by 90%.")
+    _, letter_id = await _seed_letter(uid, fact_ids=[kept, rejected])
+    async with TestSessionLocal() as s:
+        fact = (await s.execute(select(Fact).where(Fact.id == rejected))).scalar_one()
+        fact.status = "rejected"
+        await s.commit()
+    result = RefineResult(
+        draft=Draft(cover_letter=ORIGINAL, screening_answers=[], fact_ids_used=[kept, rejected]),
+        warnings=[], found_facts=[],
+    )
+    with patch(f"{JOBS}.refine_application", AsyncMock(return_value=result)) as refine, \
+         patch(f"{JOBS}.extract_facts", AsyncMock(return_value=[])), \
+         patch(f"{JOBS}.upsert_candidate", AsyncMock()):
+        r = await client.post(f"/api/v1/jobs/cover-letters/{letter_id}/refine",
+                              headers=auth_headers_with_profile, json={"message": "shorter"})
+    assert r.status_code == 200, r.text
+    evidence = refine.await_args.args[4]
+    assert [str(f.id) for f in evidence.facts] == [kept]
+    assert refine.await_args.args[5].fact_ids_used == [kept]
 
 
 @pytest.mark.asyncio

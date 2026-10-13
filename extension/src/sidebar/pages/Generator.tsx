@@ -7,6 +7,7 @@ import CoverLetterPanel from '../components/generator/CoverLetterPanel';
 import ScreeningPanel from '../components/generator/ScreeningPanel';
 import MilestonesPanel from '../components/generator/MilestonesPanel';
 import RefineChat from '../components/generator/RefineChat';
+import LegacyRevise from '../components/generator/LegacyRevise';
 
 export default function GeneratorPage() {
   const {
@@ -50,6 +51,11 @@ export default function GeneratorPage() {
   const [refineWarnings, setRefineWarnings] = useState<string[]>([]);
   const [refining, setRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
+
+  // Legacy (generation_v2 off) revision state: refine only works on v2 letters
+  const [legacyRegenerating, setLegacyRegenerating] = useState(false);
+  const [improving, setImproving] = useState(false);
+  const [improvementNotes, setImprovementNotes] = useState<string[] | null>(null);
 
   // Application tracking state
   const [showAppliedPrompt, setShowAppliedPrompt] = useState(false);
@@ -135,6 +141,7 @@ export default function GeneratorPage() {
     setRefineMessages([]);
     setRefineWarnings([]);
     setRefineError(null);
+    setImprovementNotes(null);
   };
 
   const handleGenerate = () => {
@@ -189,7 +196,9 @@ export default function GeneratorPage() {
       .map((q, i) => ({ question: q.question, answer: questionAnswers[`q${i}`] ?? '' }))
       .filter(a => a.answer);
     try {
-      const result = await apiClient.refineCoverLetter(refinedId, message, currentAnswers);
+      const result = await apiClient.refineCoverLetter(
+        refinedId, message, currentAnswers, useAppStore.getState().coverLetter ?? undefined,
+      );
       if (isStale()) return;
       useAppStore.getState().setCoverLetter(result.cover_letter);
       // The first draft's warnings no longer apply (RefineChat shows the latest ones);
@@ -222,6 +231,39 @@ export default function GeneratorPage() {
       setRefineError(err instanceof Error ? err.message : 'Refine failed');
     } finally {
       setRefining(false);
+    }
+  };
+
+  const handleLegacyRegenerate = async (feedback: string) => {
+    if (!coverLetterId) return;
+    _resetFeedbackLoopState();
+    setLegacyRegenerating(true);
+    try {
+      const result = await apiClient.regenerateCoverLetter(coverLetterId, feedback, includeCallOffer);
+      useAppStore.setState({ coverLetter: result.content, coverLetterId: result.id, coverLetterError: null });
+    } catch (err) {
+      useAppStore.setState({ coverLetterError: err instanceof Error ? err.message : 'Regeneration failed' });
+    } finally {
+      setLegacyRegenerating(false);
+    }
+  };
+
+  const handleImprove = async () => {
+    if (!coverLetterId) return;
+    setImproving(true);
+    setImprovementNotes(null);
+    try {
+      const result = await apiClient.improveCoverLetter(coverLetterId);
+      useAppStore.setState({ coverLetter: result.improved_content, coverLetterId: result.cover_letter_id });
+      setImprovementNotes(result.improvement_notes);
+      setSubmitted(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('422') || msg.includes('Need at least')) {
+        alert('Need at least 1 won proposal in your corpus. Apply to jobs and mark outcomes to build your winning letter library.');
+      }
+    } finally {
+      setImproving(false);
     }
   };
 
@@ -576,13 +618,23 @@ export default function GeneratorPage() {
               onDismissAppliedPrompt={() => setShowAppliedPrompt(false)}
             />
 
-            {coverLetter && coverLetterId && (
+            {/* Refine needs a v2 letter (draftMeta is only set by the v2 engine) */}
+            {coverLetter && coverLetterId && draftMeta && (
               <RefineChat
                 messages={refineMessages}
                 warnings={refineWarnings}
                 sending={refining}
                 error={refineError}
                 onSend={handleRefine}
+              />
+            )}
+            {coverLetter && coverLetterId && !draftMeta && (
+              <LegacyRevise
+                busy={legacyRegenerating}
+                improving={improving}
+                improvementNotes={improvementNotes}
+                onRegenerate={handleLegacyRegenerate}
+                onImprove={handleImprove}
               />
             )}
 

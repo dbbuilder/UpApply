@@ -14,6 +14,7 @@ from app.models.job import Job
 from app.models.cover_letter import CoverLetter
 from app.models.proposal import Proposal
 from app.api.v1.proposals import _job_needs_embedding
+from app.services.outcomes import apply_outcome
 from app.models.application import Application, ApplicationStatus
 from app.schemas.application import (
     ApplicationCreate,
@@ -336,9 +337,9 @@ async def _promote_winning_letter(
         existing = existing_result.scalar_one_or_none()
 
         if existing:
-            # Update existing proposal to mark as hired
+            # Mark as hired through the outcome service so the letter's facts are credited once
+            await apply_outcome(db, existing, "hired")
             existing.was_hired = True
-            existing.outcome = "hired"
             existing.cover_letter_text = letter_text
             if existing.embedding is None:
                 existing.embedding = await generate_embedding(letter_text)
@@ -353,8 +354,6 @@ async def _promote_winning_letter(
                 cover_letter_text=letter_text,
                 job_title=job_title,
                 job_skills=job_skills,
-                was_hired=True,
-                outcome="hired",
                 source="extension",
                 author="chris_edited_ai",  # began as an UpApply draft (matches migration 022)
                 job_text=job.description if job else None,
@@ -363,6 +362,8 @@ async def _promote_winning_letter(
                 embedding=embedding,
             )
             db.add(proposal)
+            await db.flush()
+            await apply_outcome(db, proposal, "hired")  # sets was_hired; credits facts once
 
         await db.commit()
     except Exception:
@@ -424,8 +425,8 @@ async def backfill_proposals_corpus(
         if existing:
             # Only upgrade was_hired, never downgrade
             if existing.was_hired is not True and was_hired is True:
+                await apply_outcome(db, existing, "hired")  # sets was_hired; credits facts once
                 existing.was_hired = True
-                existing.outcome = "hired"
                 updated += 1
             else:
                 skipped += 1
@@ -443,7 +444,7 @@ async def backfill_proposals_corpus(
             upwork_job_url=job.upwork_url,
             was_hired=was_hired,
             status=status_value,
-            outcome="hired" if was_hired else ("declined" if status_value == ApplicationStatus.DECLINED.value else None),
+            outcome="declined" if not was_hired and status_value == ApplicationStatus.DECLINED.value else None,
             source="extension",
             author="chris_edited_ai",  # began as an UpApply draft (matches migration 022)
             job_text=job.description,
@@ -451,6 +452,9 @@ async def backfill_proposals_corpus(
             submitted_at=app.submitted_at or app.created_at,
         )
         db.add(proposal)
+        if was_hired:
+            await db.flush()
+            await apply_outcome(db, proposal, "hired")  # credits the letter's facts once
 
         try:
             embedding_text = f"Job: {job.title}\n\n{snippet}\n\nProposal:\n{text}"

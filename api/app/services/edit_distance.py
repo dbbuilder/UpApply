@@ -11,8 +11,9 @@ A lower edit distance over time = user trusts the agent more = higher autonomy.
 import re
 from typing import List
 
-# Cost cap: Levenshtein runs on at most MAX_TOKENS words per side (≤ ~1M cell updates).
-# Words past the cap count as edits (an upper bound), so long inputs never go O(n*m).
+# Cost cap: the shared prefix and suffix are stripped first (linear), then Levenshtein runs
+# on at most MAX_TOKENS words per side of what differs (≤ ~1M cell updates). Differing words
+# past the cap count as edits (an upper bound), so long inputs never go O(n*m).
 MAX_TOKENS = 1000
 
 
@@ -38,7 +39,16 @@ def word_edit_distance_pct(original: str, edited: str) -> float:
         return 1.0
 
     la, lb = len(a), len(b)
-    tail = max(la - MAX_TOKENS, lb - MAX_TOKENS, 0)
+    # Unchanged leading/trailing words cost nothing; only the differing middle is compared.
+    pre = 0
+    while pre < min(la, lb) and a[pre] == b[pre]:
+        pre += 1
+    suf = 0
+    while suf < min(la, lb) - pre and a[la - 1 - suf] == b[lb - 1 - suf]:
+        suf += 1
+    a, b = a[pre:la - suf], b[pre:lb - suf]
+
+    tail = max(len(a) - MAX_TOKENS, len(b) - MAX_TOKENS, 0)
     a, b = a[:MAX_TOKENS], b[:MAX_TOKENS]
 
     # Wagner-Fischer DP

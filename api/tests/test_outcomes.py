@@ -166,3 +166,17 @@ async def test_apply_outcome_is_user_scoped(db_session):
     assert await apply_outcome(db_session, proposal, "hired") is False
     await db_session.refresh(theirs)
     assert theirs.times_in_won == 0
+
+
+async def test_apply_outcome_does_not_credit_rejected_facts(db_session):
+    user = await _make_user(db_session, "outcomes-g@example.com")
+    kept = await _fact(db_session, user.id)
+    rejected = await _fact(db_session, user.id, statement="Cut Azure spend by 90%.")
+    rejected.status = "rejected"
+    proposal = await _proposal_with_letter(db_session, user.id, [kept.id, rejected.id])
+
+    assert await apply_outcome(db_session, proposal, "replied") is True
+    await db_session.refresh(kept)
+    await db_session.refresh(rejected)
+    assert kept.times_in_won == 1
+    assert rejected.times_in_won == 0

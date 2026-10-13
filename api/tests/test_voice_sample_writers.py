@@ -167,3 +167,69 @@ async def test_backfill_job_embeddings_fills_voice_rows_only(client: AsyncClient
     assert rows[ids["own"]].job_needs_embedding is not None
     assert rows[ids["ai"]].job_needs_embedding is None
     assert rows[ids["theirs"]].job_needs_embedding is None
+
+
+async def _seed_fact_on_letter(letter_id: str, uid: str) -> str:
+    from app.models.fact import Fact
+
+    async with TestSessionLocal() as s:
+        fact = Fact(user_id=uid, kind="project", statement="Led a 160-server Azure migration.",
+                    status="approved", source_type="bio_memory", sources=[], times_used=1, times_in_won=0)
+        s.add(fact)
+        await s.flush()
+        letter = (await s.execute(select(CoverLetter).where(CoverLetter.id == letter_id))).scalar_one()
+        letter.fact_ids_used = [str(fact.id)]
+        await s.commit()
+        return str(fact.id)
+
+
+async def _times_in_won(fact_id: str) -> int:
+    from app.models.fact import Fact
+
+    async with TestSessionLocal() as s:
+        return (await s.execute(select(Fact.times_in_won).where(Fact.id == fact_id))).scalar_one()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing_row", [False, True])
+async def test_hired_outcome_promotion_credits_facts_once(client: AsyncClient, auth_headers: dict, fake_embed,
+                                                         existing_row: bool):
+    """A hire recorded in UpApply credits the letter's facts; a later Upwork sync never re-credits."""
+    uid = await _uid(client, auth_headers)
+    job_id, letter_id = await _seed_job_and_letter(uid)
+    fact_id = await _seed_fact_on_letter(letter_id, uid)
+    async with TestSessionLocal() as s:
+        if existing_row:
+            s.add(Proposal(user_id=uid, job_id=job_id, cover_letter_text="Final", job_title="Azure SQL migration",
+                           source="extension", author="chris_edited_ai", upwork_proposal_id="777"))
+        app_row = Application(user_id=uid, job_id=job_id, cover_letter_id=letter_id, status=ApplicationStatus.SUBMITTED)
+        s.add(app_row)
+        await s.commit()
+        app_id = app_row.id
+    r = await client.put(f"/api/v1/applications/{app_id}/outcome", headers=auth_headers, json={"status": "hired"})
+    assert r.status_code == 200
+    [p] = await _proposals(uid)
+    assert p.outcome == "hired" and p.was_hired is True
+    assert p.facts_credited_at is not None
+    assert await _times_in_won(fact_id) == 1
+
+    if existing_row:
+        r = await client.post("/api/v1/proposals/outcomes", headers=auth_headers,
+                              json={"items": [{"upwork_proposal_id": "777", "status": "hired"}]})
+        assert r.json()["credited"] == 0
+        assert await _times_in_won(fact_id) == 1
+
+
+@pytest.mark.asyncio
+async def test_backfill_hired_credits_facts(client: AsyncClient, auth_headers: dict, fake_embed):
+    uid = await _uid(client, auth_headers)
+    job_id, letter_id = await _seed_job_and_letter(uid)
+    fact_id = await _seed_fact_on_letter(letter_id, uid)
+    async with TestSessionLocal() as s:
+        s.add(Application(user_id=uid, job_id=job_id, cover_letter_id=letter_id, status=ApplicationStatus.HIRED))
+        await s.commit()
+    r = await client.post("/api/v1/applications/backfill-proposals", headers=auth_headers)
+    assert r.json()["created"] == 1
+    [p] = await _proposals(uid)
+    assert p.outcome == "hired" and p.facts_credited_at is not None
+    assert await _times_in_won(fact_id) == 1

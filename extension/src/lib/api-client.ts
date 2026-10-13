@@ -276,11 +276,29 @@ class ApiClient {
     });
   }
 
-  async refineCoverLetter(id: string, message: string, screeningAnswers?: QAPair[]) {
+  // currentDraft: the letter as the sidebar shows it (hand edits included), so they are revised, not lost
+  async refineCoverLetter(id: string, message: string, screeningAnswers?: QAPair[], currentDraft?: string) {
     return this.request<RefineResponse>(`/api/v1/jobs/cover-letters/${id}/refine`, {
       method: 'POST',
-      body: { message, screening_answers: screeningAnswers },
+      body: { message, screening_answers: screeningAnswers, current_draft: currentDraft },
     });
+  }
+
+  // Legacy (generation_v2 off) revision paths; v2 letters use refineCoverLetter
+  async regenerateCoverLetter(id: string, feedback?: string, includeCallOffer: boolean = true) {
+    return this.request<CoverLetter>(`/api/v1/jobs/cover-letters/${id}/regenerate`, {
+      method: 'POST',
+      body: { feedback, include_call_offer: includeCallOffer },
+    });
+  }
+
+  async improveCoverLetter(id: string) {
+    return this.request<{
+      cover_letter_id: string;
+      improved_content: string;
+      improvement_notes: string[];
+      hired_examples_used: number;
+    }>(`/api/v1/jobs/cover-letters/${id}/improve`, { method: 'POST' });
   }
 
   async submitFinal(id: string, finalText: string, finalAnswers: QAPair[]) {

@@ -12,7 +12,8 @@ import {
 import type { ScreeningQuestion, JobData, AttachmentInfo, JobPostingData } from '../types';
 import { initDraftSaver } from './draft-saver';
 import { logger } from '../lib/logger';
-import { extractAllProposals, extractProposals, scrapeProposalDetail } from './scrapers/proposals';
+import { extractAllProposals, scrapeProposalDetail } from './scrapers/proposals';
+import { extractOutcomeItems } from './outcome-sync';
 import { isSubmitButton, readSubmission } from './submit-capture';
 import { scrapeAllContracts } from './scrapers/contracts';
 import './scoring';
@@ -830,16 +831,8 @@ function syncProposalOutcomes(): void {
   if (url === lastOutcomeSyncUrl) return;
   lastOutcomeSyncUrl = url;
   setTimeout(() => {
-    const items = extractProposals().flatMap((p) =>
-      p.proposalId && p.status
-        ? [{
-            upwork_proposal_id: p.proposalId,
-            job_title: p.jobTitle ?? undefined,
-            status: p.status,
-            submitted_at: p.submittedAt ?? undefined,
-          }]
-        : []
-    );
+    // All sections (incl. interview and archived hired/declined rows), not just numeric-id links
+    const items = extractOutcomeItems(document).slice(0, 500); // API cap
     if (items.length) {
       chrome.runtime.sendMessage({ type: 'SYNC_PROPOSAL_OUTCOMES', items }).catch(() => {});
     }

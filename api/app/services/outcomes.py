@@ -10,6 +10,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.cover_letter import CoverLetter
+from app.models.fact import Fact
 from app.models.proposal import Proposal
 from app.services.facts import credit_facts
 
@@ -94,6 +95,14 @@ async def apply_outcome(db: AsyncSession, proposal: Proposal, outcome: Optional[
     )).scalar_one_or_none()
     if not letter or not letter.fact_ids_used:
         return False
+    # Only approved facts earn win credit; one rejected since the draft was written gets none.
+    approved_ids = [str(fid) for fid in (await db.execute(
+        select(Fact.id).where(
+            Fact.id.in_([str(x) for x in letter.fact_ids_used]),
+            Fact.user_id == proposal.user_id,
+            Fact.status == "approved",
+        )
+    )).scalars()]
 
     stamp = datetime.now(timezone.utc)
     claimed = (await db.execute(
@@ -106,5 +115,6 @@ async def apply_outcome(db: AsyncSession, proposal: Proposal, outcome: Optional[
     if claimed is None:
         return False
     proposal.facts_credited_at = stamp
-    await credit_facts(db, list(letter.fact_ids_used), won=True, user_id=proposal.user_id)
+    if approved_ids:
+        await credit_facts(db, approved_ids, won=True, user_id=proposal.user_id)
     return True

@@ -3,7 +3,8 @@ import json
 import logging
 import re
 from typing import List, Optional
-from datetime import datetime
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select, text
@@ -263,10 +264,31 @@ Job titles that went SILENT ({len(silent_titles)} sample):
     return {"insights": insights, "proposal_count": len(proposals), "response_rate": round(len(active_titles) / len(proposals) * 100)}
 
 
+TITLE_MATCH_WINDOW = timedelta(days=1)  # Upwork shows a local date; allow for the timezone skew
+
+
+def _title_day_key(job_title: Optional[str], submitted_at: Optional[str]) -> Optional[tuple]:
+    """(title, submit day) used by the title fallback; None when either is missing."""
+    day = parse_submitted_at(submitted_at)
+    if not job_title or day is None:
+        return None
+    return (job_title, day.date())
+
+
+def _ambiguous_title_days(keys) -> set:
+    """Title+day keys seen more than once in one batch: those rows cannot be told apart."""
+    counts = Counter(k for k in keys if k is not None)
+    return {k for k, n in counts.items() if n > 1}
+
+
 async def _find_proposal_for_outcome(
-    db: AsyncSession, user_id: str, item: ProposalOutcomeItem
+    db: AsyncSession, user_id: str, item: ProposalOutcomeItem, ambiguous: frozenset | set = frozenset()
 ) -> Optional[Proposal]:
-    """Match by internal id, then Upwork id, then the newest same-title click-captured proposal lacking an Upwork id."""
+    """Match by internal id, then Upwork id, then a click-captured proposal lacking an Upwork id.
+
+    The title fallback only binds when the title AND the submit day (±1 day) match exactly one
+    click-captured row, and no other item in the batch shares that title and day. Generic
+    titles are common, and a wrong bind would credit the wrong letter's facts permanently."""
     if item.proposal_id:
         return (await db.execute(
             select(Proposal).where(Proposal.id == item.proposal_id, Proposal.user_id == user_id)
@@ -279,19 +301,23 @@ async def _find_proposal_for_outcome(
             Proposal.user_id == user_id,
         )
     )).scalar_one_or_none()
-    if prop or not item.job_title:
+    key = _title_day_key(item.job_title, item.submitted_at)
+    if prop or key is None or key in ambiguous:
         return prop
-    return (await db.execute(
+    day_start = datetime(key[1].year, key[1].month, key[1].day, tzinfo=timezone.utc)
+    candidates = (await db.execute(
         select(Proposal)
         .where(
             Proposal.user_id == user_id,
             Proposal.upwork_proposal_id.is_(None),
             Proposal.source == "extension",  # only click-captured rows (Task 3.4), never chatgpt_import
             Proposal.job_title == item.job_title,
+            Proposal.submitted_at >= day_start - TITLE_MATCH_WINDOW,
+            Proposal.submitted_at < day_start + timedelta(days=1) + TITLE_MATCH_WINDOW,
         )
-        .order_by(Proposal.created_at.desc())
-        .limit(1)
-    )).scalar_one_or_none()
+        .limit(2)
+    )).scalars().all()
+    return candidates[0] if len(candidates) == 1 else None
 
 
 @router.post("/outcomes", response_model=ProposalOutcomeSyncResponse)
@@ -304,8 +330,9 @@ async def sync_proposal_outcomes(
 ):
     """Bulk status sync from the Proposals page → proposals.outcome; credit facts on wins."""
     updated = credited = not_found = 0
+    ambiguous = _ambiguous_title_days(_title_day_key(i.job_title, i.submitted_at) for i in body.items)
     for item in body.items:
-        prop = await _find_proposal_for_outcome(db, current_user.id, item)
+        prop = await _find_proposal_for_outcome(db, current_user.id, item, ambiguous)
         if prop is None:
             not_found += 1
             continue
@@ -655,6 +682,11 @@ async def import_proposals_from_upwork(
     """
     created_proposals = []
     skipped = 0
+    ambiguous = _ambiguous_title_days(
+        _title_day_key(str(r.get("jobTitle") or "").strip()[:MAX_JOB_TITLE_CHARS] or None,
+                       str(r.get("submittedAt") or "")[:50] or None)
+        for r in request.proposals if isinstance(r, dict)
+    )
 
     for raw_data in request.proposals:
         upwork_proposal_id = raw_data.get("proposalId")
@@ -692,7 +724,9 @@ async def import_proposals_from_upwork(
                 ProposalOutcomeItem(
                     upwork_proposal_id=str(upwork_proposal_id)[:100], job_title=job_title,
                     status=str(status_str or "submitted")[:50],
+                    submitted_at=str(submitted_at_str or "")[:50] or None,
                 ),
+                ambiguous,
             )
             if existing:
                 if not existing.upwork_proposal_id:

@@ -59,6 +59,7 @@ from app.services.generation.evidence import EvidenceUnavailable
 from app.services.llm import LLMError
 from app.models.fact import Fact
 from app.services.facts import credit_facts, upsert_candidate
+from app.services.outcomes import apply_outcome
 from app.services.fact_extraction import extract_facts
 from app.services.generation.brief import JobBrief
 from app.services.generation.evidence import Evidence
@@ -635,9 +636,9 @@ async def import_contracts(
             prop = existing_prop.scalar_one_or_none()
             if prop:
                 prop.cover_letter_text = contract.cover_letter_text.strip()
-                prop.was_hired = True
-                prop.outcome = "hired"
                 prop.job_id = job.id
+                await apply_outcome(db, prop, "hired")  # sets was_hired; credits facts once
+                prop.was_hired = True
                 if prop.job_needs_embedding is None:
                     prop.job_needs_embedding = await _job_needs_embedding(job.title, job.description)
             else:
@@ -654,12 +655,13 @@ async def import_contracts(
                     cover_letter_text=contract.cover_letter_text.strip(),
                     was_hired=True,
                     status="hired",
-                    outcome="hired",
                     source="contract_import",
                     embedding=prop_embedding,
                     job_needs_embedding=await _job_needs_embedding(job.title, job.description),
                 )
                 db.add(prop)
+                await db.flush()
+                await apply_outcome(db, prop, "hired")  # credits the job's letter facts once
 
     await db.commit()
     return ContractImportResponse(imported=imported, updated=updated, total=len(request.contracts))
@@ -1309,8 +1311,13 @@ async def refine_cover_letter_endpoint(
     facts = []
     if known_ids:
         facts = list((await db.execute(
-            select(Fact).where(Fact.id.in_(known_ids), Fact.user_id == current_user.id)
+            select(Fact).where(
+                Fact.id.in_(known_ids),
+                Fact.user_id == current_user.id,
+                Fact.status == "approved",  # a fact rejected since generation is no longer evidence
+            )
         )).scalars())
+    known_ids = [fid for fid in known_ids if fid in {str(f.id) for f in facts}]
     voice = []
     if letter.voice_sample_ids:
         voice = list((await db.execute(
@@ -1322,12 +1329,14 @@ async def refine_cover_letter_endpoint(
 
     history = [m for m in (letter.refine_messages or []) if isinstance(m, dict)]
     last = next((m for m in reversed(history) if m.get("role") == "assistant"), None)
+    # Revise what the sidebar shows (hand edits included); stored copies are the fallback.
+    if body.screening_answers is not None:
+        current_answers = [a.model_dump() for a in body.screening_answers]
+    else:
+        current_answers = list(last.get("screening_answers") or []) if last else []
     current = Draft(
-        cover_letter=letter.content,
-        screening_answers=(
-            list(last.get("screening_answers") or []) if last
-            else [a.model_dump() for a in (body.screening_answers or [])]
-        ),
+        cover_letter=(body.current_draft or "").strip() or letter.content,
+        screening_answers=current_answers,
         fact_ids_used=known_ids,
     )
 

@@ -45,6 +45,11 @@ async def _seed(user_id: str, *, upwork_id: str | None, title: str, days_ago: in
         return {"proposal_id": prop.id, "fact_id": fact_ids[0] if fact_ids else None}
 
 
+def _upwork_date(days_ago: int) -> str:
+    d = datetime.now(timezone.utc) - timedelta(days=days_ago)
+    return f"{d:%b} {d.day}, {d.year}"  # Upwork list format, e.g. "Mar 3, 2026"
+
+
 async def _prop(pid: str) -> Proposal:
     async with TestSessionLocal() as s:
         return (await s.execute(select(Proposal).where(Proposal.id == pid))).scalar_one()
@@ -85,7 +90,8 @@ async def test_title_fallback_stamps_upwork_id(client, auth_headers):
     uid = await _uid(client, auth_headers)
     seeded = await _seed(uid, upwork_id=None, title="Build a Next.js dashboard")
     r = await client.post(URL, headers=auth_headers, json={"items": [
-        {"upwork_proposal_id": "222", "job_title": "Build a Next.js dashboard", "status": "interviewed"},
+        {"upwork_proposal_id": "222", "job_title": "Build a Next.js dashboard", "status": "interviewed",
+         "submitted_at": _upwork_date(2)},
     ]})
     assert r.json() == {"updated": 1, "credited": 1, "not_found": 0}
     prop = await _prop(seeded["proposal_id"])
@@ -142,6 +148,7 @@ async def test_detail_import_links_click_capture_and_credits_once(client, auth_h
     payload = {"proposals": [{
         "proposalId": "999", "jobTitle": "Fabric data platform build",
         "coverLetter": "final", "status": "Interviewing", "outcome": "interviewed",
+        "submittedAt": _upwork_date(2),
     }]}
     with patch("app.api.v1.proposals.generate_embedding", AsyncMock(return_value=[0.1] * 1536)):
         r = await client.post("/api/v1/proposals/import-from-upwork", headers=auth_headers, json=payload)
@@ -160,3 +167,66 @@ async def test_rejects_more_than_500_items(client, auth_headers):
     items = [{"upwork_proposal_id": str(i), "status": "viewed"} for i in range(501)]
     r = await client.post(URL, headers=auth_headers, json={"items": items})
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_title_fallback_ignores_same_title_proposal_from_another_day(client, auth_headers):
+    """A direct-on-Upwork proposal with a generic title must not bind to a click-captured row."""
+    uid = await _uid(client, auth_headers)
+    captured = await _seed(uid, upwork_id=None, title="React Developer", days_ago=1)
+    r = await client.post(URL, headers=auth_headers, json={"items": [
+        {"upwork_proposal_id": "A", "job_title": "React Developer", "status": "hired",
+         "submitted_at": _upwork_date(30)},
+        {"upwork_proposal_id": "B", "job_title": "React Developer", "status": "submitted",
+         "submitted_at": _upwork_date(1)},
+    ]})
+    assert r.json() == {"updated": 0, "credited": 0, "not_found": 1}
+    prop = await _prop(captured["proposal_id"])
+    assert prop.upwork_proposal_id == "B" and prop.outcome is None and prop.was_hired is not True
+    assert await _times_in_won(captured["fact_id"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_title_fallback_needs_a_submitted_date(client, auth_headers):
+    uid = await _uid(client, auth_headers)
+    captured = await _seed(uid, upwork_id=None, title="Full Stack Developer")
+    r = await client.post(URL, headers=auth_headers, json={"items": [
+        {"upwork_proposal_id": "A", "job_title": "Full Stack Developer", "status": "hired"},
+    ]})
+    assert r.json() == {"updated": 0, "credited": 0, "not_found": 1}
+    assert (await _prop(captured["proposal_id"])).upwork_proposal_id is None
+
+
+@pytest.mark.asyncio
+async def test_title_fallback_skips_ambiguous_same_day_items(client, auth_headers):
+    """Two same-title, same-day Upwork rows: neither can be told apart, so neither binds."""
+    uid = await _uid(client, auth_headers)
+    captured = await _seed(uid, upwork_id=None, title="Full Stack Developer")
+    r = await client.post(URL, headers=auth_headers, json={"items": [
+        {"upwork_proposal_id": "A", "job_title": "Full Stack Developer", "status": "hired",
+         "submitted_at": _upwork_date(2)},
+        {"upwork_proposal_id": "B", "job_title": "Full Stack Developer", "status": "submitted",
+         "submitted_at": _upwork_date(2)},
+    ]})
+    assert r.json() == {"updated": 0, "credited": 0, "not_found": 2}
+    prop = await _prop(captured["proposal_id"])
+    assert prop.upwork_proposal_id is None and prop.outcome is None
+    assert await _times_in_won(captured["fact_id"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_detail_import_does_not_overwrite_same_title_row_from_another_day(client, auth_headers):
+    from unittest.mock import AsyncMock, patch
+
+    uid = await _uid(client, auth_headers)
+    captured = await _seed(uid, upwork_id=None, title="React Developer", days_ago=1)
+    payload = {"proposals": [{
+        "proposalId": "OLD", "jobTitle": "React Developer", "coverLetter": "A much longer old letter " * 5,
+        "status": "Hired", "outcome": "hired", "submittedAt": _upwork_date(40),
+    }]}
+    with patch("app.api.v1.proposals.generate_embedding", AsyncMock(return_value=[0.1] * 1536)):
+        r = await client.post("/api/v1/proposals/import-from-upwork", headers=auth_headers, json=payload)
+    assert r.status_code == 200, r.text
+    prop = await _prop(captured["proposal_id"])
+    assert prop.upwork_proposal_id is None and prop.cover_letter_text == "final" and prop.outcome is None
+    assert await _times_in_won(captured["fact_id"]) == 0
