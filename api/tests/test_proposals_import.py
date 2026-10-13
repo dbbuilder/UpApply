@@ -59,7 +59,7 @@ async def test_outcome_derivation_and_author_validation(client: AsyncClient, aut
     by_id = {p["upwork_proposal_id"]: p for p in r.json()}
     assert by_id["201"]["outcome"] == "interviewed"
     assert by_id["202"]["outcome"] == "replied"
-    assert by_id["202"]["author"] == "chris_edited_ai"
+    assert by_id["202"]["author"] == "chris"  # client-sent author is ignored (no UpApply draft)
     assert by_id["203"]["author"] == "chris"
     assert by_id["203"]["outcome"] is None
     assert by_id["204"]["outcome"] == "declined"
@@ -178,3 +178,61 @@ def test_proposal_uniqueness_is_scoped_to_user():
     assert not table.c.upwork_proposal_id.unique
     uniques = [tuple(c.name for c in con.columns) for con in table.constraints if isinstance(con, UniqueConstraint)]
     assert ("user_id", "upwork_proposal_id") in uniques
+
+
+async def _seed_generated_letter(email: str, *, url: str, title: str, upwork_job_id=None):
+    from app.models.cover_letter import CoverLetter
+    from app.models.job import Job
+    from app.models.user import User
+
+    async with TestSessionLocal() as s:
+        user = (await s.execute(select(User).where(User.email == email))).scalar_one()
+        job = Job(user_id=user.id, upwork_url=url, title=title, description="desc", upwork_job_id=upwork_job_id)
+        s.add(job)
+        await s.flush()
+        s.add(CoverLetter(user_id=user.id, job_id=job.id, content="Generated draft", model_used="m"))
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_author_is_decided_by_server_from_generated_letters(client: AsyncClient, auth_headers: dict, fake_embed):
+    other = await _second_user_headers(client)
+    await _seed_generated_letter("test@example.com", url="https://www.upwork.com/jobs/~01aaa", title="Azure SQL migration")
+    await _seed_generated_letter("test@example.com", url="https://www.upwork.com/jobs/x", title="Other",
+                                 upwork_job_id="~01ccc")
+    await _seed_generated_letter("other@example.com", url="https://www.upwork.com/jobs/~01bbb", title="Theirs")
+
+    r = await client.post(URL, headers=auth_headers, json={"proposals": [
+        # matched by job url
+        {"proposalId": "a1", "jobTitle": "Renamed", "coverLetter": "x", "jobUrl": "https://www.upwork.com/jobs/~01aaa"},
+        # matched by job title
+        {"proposalId": "a2", "jobTitle": "azure sql migration ", "coverLetter": "x"},
+        # matched by upwork job id in the url
+        {"proposalId": "a3", "jobTitle": "Z", "coverLetter": "x", "jobUrl": "https://www.upwork.com/jobs/Title_~01ccc/"},
+        # client claims an AI draft but none exists for this user
+        {"proposalId": "a4", "jobTitle": "Unrelated", "coverLetter": "x", "author": "chris_edited_ai"},
+        # another user's generated letter does not count; client-sent 'ai' is ignored too
+        {"proposalId": "a5", "jobTitle": "Theirs", "coverLetter": "x", "jobUrl": "https://www.upwork.com/jobs/~01bbb", "author": "ai"},
+    ]})
+    assert r.status_code == 200
+    by_id = {p["upwork_proposal_id"]: p["author"] for p in r.json()}
+    assert by_id == {"a1": "chris_edited_ai", "a2": "chris_edited_ai", "a3": "chris_edited_ai", "a4": "chris", "a5": "chris"}
+
+
+@pytest.mark.asyncio
+async def test_scraped_letter_that_is_really_the_job_description_is_skipped(client: AsyncClient, auth_headers: dict, fake_embed):
+    job = ("We need an experienced engineer to migrate our on-prem SQL Server estate to Azure "
+           "with zero downtime and set up monitoring for the new environment.")
+    r = await client.post(URL, headers=auth_headers, json={"proposals": [
+        {"proposalId": "j1", "jobTitle": "A", "coverLetter": job, "jobDescription": job},
+        {"proposalId": "j2", "jobTitle": "B", "coverLetter": "Job details:\n" + job.upper(), "jobDescription": job},
+        {"proposalId": "j3", "jobTitle": "C", "coverLetter": job.replace("zero", "no").replace("new", "fresh"),
+         "jobDescription": job},
+        {"proposalId": "j4", "jobTitle": "D", "jobDescription": job,
+         "coverLetter": "Moved a 160-server estate to Azure last year without an outage; happy to walk you through it."},
+    ]})
+    assert r.status_code == 200
+    assert [p["upwork_proposal_id"] for p in r.json()] == ["j4"]
+    async with TestSessionLocal() as s:
+        ids = (await s.execute(select(Proposal.upwork_proposal_id))).scalars().all()
+    assert sorted(ids) == ["j4"]

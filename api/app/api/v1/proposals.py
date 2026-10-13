@@ -1,10 +1,12 @@
 """Proposal endpoints with pgvector semantic search."""
 import json
+import logging
+import re
 from typing import List, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -12,6 +14,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.embeddings import generate_embedding, get_openai_client
 from app.core.rate_limit import limiter
+from app.models.cover_letter import CoverLetter
 from app.models.job import Job
 from app.models.user import User
 from app.models.proposal import PENDING_PROPOSAL_STATUSES, Proposal
@@ -27,6 +30,7 @@ from app.schemas.proposal import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=ProposalResponse, status_code=status.HTTP_201_CREATED)
@@ -480,7 +484,6 @@ async def bulk_create_proposals(
     return created_proposals
 
 
-VOICE_AUTHORS = {"chris", "chris_edited_ai", "ai"}
 VOICE_OUTCOMES = {"no_response", "viewed", "replied", "interviewed", "hired", "declined"}
 MAX_JOB_TEXT_CHARS = 20_000
 MAX_COVER_LETTER_CHARS = 20_000
@@ -507,6 +510,49 @@ def _derive_outcome(raw_outcome: Optional[str], status_str: Optional[str], was_h
     if s == "viewed":
         return "viewed"
     return None
+
+
+_UPWORK_JOB_SLUG = re.compile(r"~(0[0-9a-zA-Z]+)")
+_WORD = re.compile(r"[a-z0-9]+")
+LETTER_IS_JOB_JACCARD = 0.8
+MIN_CONTAINED_CHARS = 50
+
+
+def _normalized(text_: str) -> str:
+    return " ".join(_WORD.findall(text_.lower()))
+
+
+def _letter_is_job_description(letter: str, job_text: Optional[str]) -> bool:
+    """A scraped 'cover letter' that is really the job post (scraper picked the wrong node)."""
+    if not letter or not job_text:
+        return False
+    a, b = _normalized(letter), _normalized(job_text)
+    if not a or not b:
+        return False
+    shorter, longer = sorted((a, b), key=len)
+    if len(shorter) >= MIN_CONTAINED_CHARS and shorter in longer:
+        return True
+    ta, tb = set(a.split()), set(b.split())
+    return len(ta & tb) / len(ta | tb) > LETTER_IS_JOB_JACCARD
+
+
+async def _server_author(db: AsyncSession, user_id: str, job_url: Optional[str], job_title: str) -> str:
+    """'chris_edited_ai' when UpApply generated a letter for this user's matching job, else 'chris'.
+    Never taken from the client."""
+    conds = [func.lower(func.trim(Job.title)) == job_title.strip().lower()]
+    if job_url:
+        conds.append(Job.upwork_url == job_url)
+        slug = _UPWORK_JOB_SLUG.search(job_url)
+        if slug:
+            conds.append(Job.upwork_job_id.in_([slug.group(1), f"~{slug.group(1)}"]))
+            conds.append(Job.upwork_url.contains(f"~{slug.group(1)}"))
+    hit = (await db.execute(
+        select(CoverLetter.id)
+        .join(Job, CoverLetter.job_id == Job.id)
+        .where(CoverLetter.user_id == user_id, Job.user_id == user_id, or_(*conds))
+        .limit(1)
+    )).first()
+    return "chris_edited_ai" if hit else "chris"
 
 
 def _clean_answers(raw) -> Optional[list]:
@@ -546,6 +592,7 @@ async def import_proposals_from_upwork(
     letter, screening answers, job text and the latest outcome. Returns created rows only.
     """
     created_proposals = []
+    skipped = 0
 
     for raw_data in request.proposals:
         upwork_proposal_id = raw_data.get("proposalId")
@@ -558,10 +605,11 @@ async def import_proposals_from_upwork(
         submitted_at_str = raw_data.get("submittedAt")
         screening_answers = _clean_answers(raw_data.get("screeningAnswers"))
         job_text = (raw_data.get("jobDescription") or "").strip()[:MAX_JOB_TEXT_CHARS] or None
-        author = raw_data.get("author") if raw_data.get("author") in VOICE_AUTHORS else "chris"
-
         # Require at least a job title to import
         if not job_title:
+            continue
+        if _letter_is_job_description(cover_letter_text, job_text):
+            skipped += 1
             continue
 
         # Allow explicit wasHired override from the scraper (e.g. archived proposals
@@ -631,7 +679,7 @@ async def import_proposals_from_upwork(
             submitted_at=submitted_at,
             source="scraped",
             embedding=embedding,
-            author=author,
+            author=await _server_author(db, current_user.id, job_url, job_title),
             outcome=outcome,
             job_text=job_text,
             screening_answers=screening_answers,
@@ -642,6 +690,8 @@ async def import_proposals_from_upwork(
         created_proposals.append(proposal)
 
     await db.commit()
+    if skipped:
+        logger.info("import-from-upwork skipped %d letter(s) matching their job description", skipped)
 
     for proposal in created_proposals:
         await db.refresh(proposal)
