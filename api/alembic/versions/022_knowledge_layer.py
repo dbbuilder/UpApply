@@ -105,8 +105,17 @@ def upgrade() -> None:
         "WHERE outcome IS NULL AND lower(status) LIKE '%declin%'"
     )
 
+    # upwork_proposal_id was globally UNIQUE (004): one tenant could squat on another's id.
+    # Scope uniqueness to the owning user.
+    op.execute("ALTER TABLE proposals DROP CONSTRAINT IF EXISTS proposals_upwork_proposal_id_key")
+    op.create_unique_constraint(
+        'uq_proposals_user_upwork_proposal_id', 'proposals', ['user_id', 'upwork_proposal_id']
+    )
+
 
 def downgrade() -> None:
+    op.drop_constraint('uq_proposals_user_upwork_proposal_id', 'proposals', type_='unique')
+    op.create_unique_constraint('proposals_upwork_proposal_id_key', 'proposals', ['upwork_proposal_id'])
     op.drop_column('memories', 'exclude_from_retrieval')
     op.drop_table('fact_ingest_log')
     op.execute("DROP INDEX IF EXISTS ix_proposals_job_needs_embedding_hnsw")

@@ -144,3 +144,37 @@ async def test_reimport_recomputes_job_embedding_when_job_text_arrives(client: A
     assert "Fractional CTO\n\nLead our 5-person team" in texts
     row = await _row("601")
     assert list(row.job_needs_embedding) == pytest.approx(unit(7))
+
+
+async def _second_user_headers(client: AsyncClient) -> dict:
+    r = await client.post("/api/v1/auth/register", json={"email": "other@example.com", "password": "testpass123"})
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+@pytest.mark.asyncio
+async def test_same_upwork_id_is_unique_per_user_not_globally(client: AsyncClient, auth_headers: dict, fake_embed):
+    """Another tenant cannot squat on (or collide with) a user's Upwork proposal id."""
+    other = await _second_user_headers(client)
+    item = {"proposalId": "777", "jobTitle": "Azure", "coverLetter": "Letter", "status": "submitted"}
+
+    r1 = await client.post(URL, headers=other, json={"proposals": [item]})
+    assert r1.status_code == 200 and len(r1.json()) == 1
+    r2 = await client.post(URL, headers=auth_headers, json={"proposals": [item]})
+    assert r2.status_code == 200 and len(r2.json()) == 1
+
+    # same user again -> upsert path, no duplicate row
+    r3 = await client.post(URL, headers=auth_headers, json={"proposals": [{**item, "coverLetter": "Longer letter text"}]})
+    assert r3.status_code == 200 and r3.json() == []
+    async with TestSessionLocal() as s:
+        rows = (await s.execute(select(Proposal).where(Proposal.upwork_proposal_id == "777"))).scalars().all()
+    assert len(rows) == 2
+    assert {r.user_id for r in rows} and len({r.user_id for r in rows}) == 2
+
+
+def test_proposal_uniqueness_is_scoped_to_user():
+    from sqlalchemy import UniqueConstraint
+
+    table = Proposal.__table__
+    assert not table.c.upwork_proposal_id.unique
+    uniques = [tuple(c.name for c in con.columns) for con in table.constraints if isinstance(con, UniqueConstraint)]
+    assert ("user_id", "upwork_proposal_id") in uniques

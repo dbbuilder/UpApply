@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 from uuid import uuid4
 
-from sqlalchemy import DateTime, String, Text, Numeric, Boolean, func, ForeignKey, Index
+from sqlalchemy import DateTime, String, Text, Numeric, Boolean, func, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -40,9 +40,9 @@ class Proposal(Base):
         nullable=True,
     )
 
-    # Upwork identifiers for deduplication
+    # Upwork identifiers for deduplication (unique per user, not globally: see __table_args__)
     upwork_proposal_id: Mapped[Optional[str]] = mapped_column(
-        String(100), nullable=True, unique=True
+        String(100), nullable=True
     )
     upwork_job_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
@@ -115,6 +115,7 @@ class Proposal(Base):
     job: Mapped[Optional["Job"]] = relationship("Job", back_populates="proposals")
 
     __table_args__ = (
+        UniqueConstraint("user_id", "upwork_proposal_id", name="uq_proposals_user_upwork_proposal_id"),
         Index(
             "ix_proposals_embedding_hnsw",
             "embedding",
