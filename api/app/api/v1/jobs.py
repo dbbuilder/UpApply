@@ -1409,12 +1409,17 @@ async def submit_final_cover_letter(
     """Record what was actually submitted on Upwork → voice sample + fact candidates.
 
     The voice-sample author is decided here from the edit distance, never by the client.
-    Idempotent: resubmitting the same text reuses the proposal row and skips extraction."""
+    Idempotent: resubmitting the same text reuses the proposal row and skips extraction.
+    The letter row is locked so concurrent captures (double Submit click) serialize."""
+    final_text = body.final_text.strip()
+    if not final_text:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Final text is empty")
+
     result = await db.execute(
         select(CoverLetter).where(
             CoverLetter.id == letter_id,
             CoverLetter.user_id == current_user.id,
-        )
+        ).with_for_update()
     )
     letter = result.scalar_one_or_none()
     if not letter:
@@ -1424,15 +1429,15 @@ async def submit_final_cover_letter(
         select(Job).where(Job.id == letter.job_id, Job.user_id == current_user.id)
     )).scalar_one_or_none()
     answers = [a.model_dump() for a in (body.final_answers or [])]
-    already_captured = letter.final_text == body.final_text
-    edit_pct = word_edit_distance_pct(letter.content, body.final_text)
+    already_captured = letter.final_text == final_text
+    edit_pct = word_edit_distance_pct(letter.content, final_text)
     author = "chris" if edit_pct >= CHRIS_REWRITE_THRESHOLD else "chris_edited_ai"
     now = datetime.now(timezone.utc)
 
-    letter.final_text = body.final_text
+    letter.final_text = final_text
     letter.final_answers = answers
     letter.edit_distance_pct = edit_pct
-    letter.submitted_text = body.final_text
+    letter.submitted_text = final_text
     letter.was_submitted = True
     letter.submitted_at = letter.submitted_at or now
     letter.is_final = True
@@ -1448,7 +1453,7 @@ async def submit_final_cover_letter(
         prop = Proposal(
             user_id=current_user.id,
             job_id=letter.job_id,
-            cover_letter_text=body.final_text,
+            cover_letter_text=final_text,
             job_title=job.title if job else None,
             job_skills=(job.skills_required or []) if job else [],
             source="extension",
@@ -1458,12 +1463,12 @@ async def submit_final_cover_letter(
         db.add(prop)
     # Same meaning as Phase 1 Task 1.8: job_text is the job description only (title lives in job_title)
     job_text = (job.description or None) if job else None
-    prop.cover_letter_text = body.final_text
+    prop.cover_letter_text = final_text
     prop.author = author
     prop.job_text = job_text
     prop.screening_answers = answers or None  # voice-sample answers (Phase 1 column)
     if not already_captured:
-        prop.embedding = await _embed_or_none(body.final_text)
+        prop.embedding = await _embed_or_none(final_text)
         if job:
             # Same text shape as Phase 1 Task 1.8 and Phase 2 select_evidence's voice query
             prop.job_needs_embedding = await _embed_or_none(
@@ -1476,7 +1481,7 @@ async def submit_final_cover_letter(
         qa = "\n\n".join(f"Q: {a['question']}\nA: {a['answer']}" for a in answers if a["answer"])
         fact_candidates = await _capture_fact_candidates(
             db, current_user.id,
-            body.final_text + (f"\n\n{qa}" if qa else ""),
+            final_text + (f"\n\n{qa}" if qa else ""),
             "upwork_submission", letter.id,
             context=job.title if job else None,
         )

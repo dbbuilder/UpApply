@@ -1,4 +1,5 @@
 """API tests for the refine + final endpoints (LLM, embeddings and extraction mocked)."""
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -402,3 +403,46 @@ async def test_final_rejects_oversized_text_and_answers(client, auth_headers_wit
     long_answer = await client.put(url, headers=auth_headers_with_profile, json={
         "final_text": "ok", "final_answers": [{"question": "q", "answer": "a" * 5001}]})
     assert too_long.status_code == too_many.status_code == long_answer.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blank", ["", "   ", "\n\t "])
+async def test_final_rejects_blank_text_and_writes_nothing(client, auth_headers_with_profile, blank):
+    uid = await _user_id(client, auth_headers_with_profile)
+    job_id, letter_id = await _seed_letter(uid)
+    with patch(f"{JOBS}.generate_embedding", AsyncMock(return_value=[0.2] * 1536)) as embed, \
+         patch(f"{JOBS}.extract_facts", AsyncMock(return_value=[])) as extract:
+        r = await client.put(f"/api/v1/jobs/cover-letters/{letter_id}/final",
+                             headers=auth_headers_with_profile, json={"final_text": blank})
+    assert r.status_code == 422
+    embed.assert_not_awaited()
+    extract.assert_not_awaited()
+    letter = await _letter(letter_id)
+    assert letter.final_text is None and letter.submitted_text is None
+    assert await _extension_proposal(uid, job_id) is None
+
+
+@pytest.mark.asyncio
+async def test_final_concurrent_double_submit_does_not_duplicate(client, auth_headers_with_profile):
+    """A double Submit click fires two PUTs at once; they must serialize on the letter row."""
+    uid = await _user_id(client, auth_headers_with_profile)
+    job_id, letter_id = await _seed_letter(uid)
+
+    async def slow_embed(_text):
+        await asyncio.sleep(0.05)  # let the other request reach the letter read
+        return [0.2] * 1536
+
+    with patch(f"{JOBS}.generate_embedding", AsyncMock(side_effect=slow_embed)), \
+         patch(f"{JOBS}.extract_facts", AsyncMock(return_value=[])) as extract, \
+         patch(f"{JOBS}.upsert_candidate", AsyncMock()):
+        url = f"/api/v1/jobs/cover-letters/{letter_id}/final"
+        first, second = await asyncio.gather(
+            client.put(url, headers=auth_headers_with_profile, json={"final_text": ORIGINAL}),
+            client.put(url, headers=auth_headers_with_profile, json={"final_text": ORIGINAL}),
+        )
+    assert first.status_code == 200 and second.status_code == 200, (first.text, second.text)
+    assert extract.await_count == 1
+    assert first.json()["proposal_id"] == second.json()["proposal_id"]
+    async with TestSessionLocal() as s:
+        props = (await s.execute(select(Proposal).where(Proposal.job_id == job_id))).scalars().all()
+    assert len(props) == 1
