@@ -250,7 +250,9 @@ def load_bio_memories(bio_file: Path) -> list[dict]:
             print(f"  Skipping bio item {i}: missing title or content")
             continue
         item.setdefault("category", "achievement")
-        item.setdefault("source", "bio_import")
+        # Curated bio file: always 'bio_import' (the origin /facts/from-memories trusts), even
+        # when the file carries another source such as 'chatgpt_corpus'.
+        item["source"] = "bio_import"
         item.setdefault("importance_score", 0.8)
         memories.append(item)
     return memories

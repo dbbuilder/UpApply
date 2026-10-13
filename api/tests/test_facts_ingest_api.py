@@ -401,3 +401,24 @@ async def test_memory_typed_in_ui_is_stored_as_manual(client: AsyncClient, auth_
                               json={"title": "Led X", "content": "Led a migration", "importance_score": 0.9})
     assert r.status_code in (200, 201), r.text
     assert r.json()["source"] == "manual"
+
+
+@pytest.mark.asyncio
+async def test_bulk_imported_memories_are_never_trusted_by_from_memories(client: AsyncClient, auth_headers: dict, fake_embed):
+    """Bulk rows without a source (extension memory.json / resume import) must not be stored as 'manual'."""
+    with patch("app.api.v1.memories.generate_embedding", fake_embed):
+        r = await client.post("/api/v1/memories/bulk-import", headers=auth_headers, json={"memories": [
+            {"title": "Imported", "content": "Client said we doubled revenue", "importance_score": 1.0},
+            {"title": "Explicit manual", "content": "Claimed manual", "importance_score": 1.0, "source": "manual"},
+            {"title": "Explicit null", "content": "Claimed null", "importance_score": 1.0, "source": None},
+            {"title": "Seed", "content": "Curated bio", "importance_score": 1.0, "source": "bio_import"},
+        ]})
+    assert r.status_code in (200, 201), r.text
+    assert [m["source"] for m in r.json()] == ["bulk_import", "bulk_import", "bulk_import", "bio_import"]
+    seed_id = r.json()[3]["id"]
+
+    extract = AsyncMock(side_effect=_per_ref_extract)
+    with patch("app.services.facts.extract_facts", extract):
+        r = await client.post(f"{BASE}/from-memories", headers=auth_headers)
+    assert r.status_code == 200
+    assert [c.args[2] for c in extract.await_args_list] == [seed_id]

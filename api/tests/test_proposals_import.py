@@ -1,4 +1,5 @@
 """import-from-upwork captures full voice samples (letter + answers + job text + outcome)."""
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -236,3 +237,40 @@ async def test_scraped_letter_that_is_really_the_job_description_is_skipped(clie
     async with TestSessionLocal() as s:
         ids = (await s.execute(select(Proposal.upwork_proposal_id))).scalars().all()
     assert sorted(ids) == ["j4"]
+
+
+JOB = ("We need an experienced engineer to migrate our on-prem SQL Server estate to Azure "
+       "with zero downtime and set up monitoring for the new environment.")
+
+
+@pytest.mark.asyncio
+async def test_reimport_never_swaps_in_the_stored_job_post_as_the_letter(client: AsyncClient, auth_headers: dict, fake_embed):
+    """Re-import without jobDescription must still be checked against the row's stored job text."""
+    r = await client.post(URL, headers=auth_headers, json={"proposals": [
+        {"proposalId": "p9", "jobTitle": "A", "coverLetter": "Short real letter.", "jobDescription": JOB}]})
+    assert r.status_code == 200
+    async with TestSessionLocal() as s:
+        row = (await s.execute(select(Proposal).where(Proposal.upwork_proposal_id == "p9"))).scalar_one()
+        row.facts_ingested_at = datetime.now(timezone.utc)
+        await s.commit()
+    r = await client.post(URL, headers=auth_headers, json={"proposals": [
+        {"proposalId": "p9", "jobTitle": "A", "coverLetter": JOB}]})
+    assert r.status_code == 200
+    row = await _row("p9")
+    assert row.cover_letter_text == "Short real letter."
+    assert row.facts_ingested_at is not None
+
+
+@pytest.mark.asyncio
+async def test_reimport_with_job_post_as_letter_still_updates_outcome_and_job_text(client: AsyncClient, auth_headers: dict, fake_embed):
+    r = await client.post(URL, headers=auth_headers, json={"proposals": [
+        {"proposalId": "P1", "jobTitle": "A", "coverLetter": "Short real letter.", "status": "submitted"}]})
+    assert r.status_code == 200
+    r = await client.post(URL, headers=auth_headers, json={"proposals": [
+        {"proposalId": "P1", "jobTitle": "A", "coverLetter": JOB, "jobDescription": JOB,
+         "status": "hired", "wasHired": True}]})
+    assert r.status_code == 200
+    row = await _row("P1")
+    assert row.cover_letter_text == "Short real letter."
+    assert row.outcome == "hired"
+    assert row.job_text == JOB

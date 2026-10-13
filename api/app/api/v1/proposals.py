@@ -608,9 +608,7 @@ async def import_proposals_from_upwork(
         # Require at least a job title to import
         if not job_title:
             continue
-        if _letter_is_job_description(cover_letter_text, job_text):
-            skipped += 1
-            continue
+        letter_is_job = _letter_is_job_description(cover_letter_text, job_text)
 
         # Allow explicit wasHired override from the scraper (e.g. archived proposals
         # whose status string doesn't say "hired" but the scraper detected a contract)
@@ -633,6 +631,11 @@ async def import_proposals_from_upwork(
                 )
             )).scalar_one_or_none()
             if existing:
+                if letter_is_job or _letter_is_job_description(cover_letter_text, existing.job_text):
+                    # The scraped "letter" is the job post: never store it as the user's letter,
+                    # but still apply the outcome / job text / screening-answer updates below.
+                    skipped += 1
+                    cover_letter_text = ""
                 if cover_letter_text and len(cover_letter_text) > len(existing.cover_letter_text or ""):
                     existing.cover_letter_text = cover_letter_text
                     existing.embedding = await generate_embedding(f"Job: {job_title}\n\n{cover_letter_text}")
@@ -649,6 +652,10 @@ async def import_proposals_from_upwork(
                 if outcome and _OUTCOME_RANK[outcome] > _OUTCOME_RANK.get(existing.outcome, 0):
                     existing.outcome = outcome
                 continue
+
+        if letter_is_job:
+            skipped += 1
+            continue
 
         # Parse submitted_at — try ISO first, then "Mar 3, 2026" format
         submitted_at = None

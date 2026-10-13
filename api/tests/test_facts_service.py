@@ -351,3 +351,33 @@ async def test_client_sourced_candidates_are_never_auto_approved(db_session, tes
     assert merged.id == pending.id
     assert (outcome_merged, merged.status) == ("merged", "candidate")
     assert merged.statement == "Pending wording." and merged.strength == 0.4
+
+
+@pytest.mark.parametrize("first_source,first_kind", [
+    ("upwork_contract", "project"),
+    ("client_feedback", "outcome"),
+    ("chatgpt_user_turn", "metric"),
+])
+@pytest.mark.asyncio
+async def test_trusted_promotion_drops_untrusted_or_client_ranking_fields(db_session, test_user, first_source, first_kind):
+    """Approving a candidate via a trusted match takes tags/strength/origin from the trusted candidate only."""
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=unit(0))):
+        first, outcome = await upsert_candidate_outcome(
+            db_session, test_user.id,
+            _cand("Ran the Kubernetes platform.", strength=1.0, skills=["Kubernetes"], industries=["Fintech"],
+                  job_types=["cloud"], source_type=first_source, kind=first_kind, source_ref="c1"),
+        )
+    assert (outcome, first.status) == ("created", "candidate")
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=blend(0, 1, 0.95))):
+        fact, outcome = await upsert_candidate_outcome(
+            db_session, test_user.id,
+            _cand("Ran the platform on Azure.", strength=0.3, skills=["Azure"], source_type="bio_memory",
+                  kind="project", source_ref="m9"),
+            auto_approve=True,
+        )
+    assert fact.id == first.id
+    assert (outcome, fact.status) == ("auto_approved", "approved")
+    assert fact.strength == 0.3
+    assert fact.skills == ["Azure"] and fact.industries == [] and fact.job_types == []
+    assert (fact.source_type, fact.source_ref) == ("bio_memory", "m9")
+    assert [s["source_type"] for s in fact.sources] == [first_source, "bio_memory"]

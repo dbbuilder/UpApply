@@ -103,23 +103,31 @@ async def upsert_candidate_outcome(
             # (tags, strength) change only via user PATCH, manual create or a trusted source.
             await db.flush()
             return fact, "auto_approved"
-        fact.skills = _union(fact.skills, cand.skills)
-        fact.industries = _union(fact.industries, cand.industries)
-        fact.job_types = _union(fact.job_types, list(cand.job_types))
         if auto_approve and fact.status == "candidate":
-            # A trusted source approving an unreviewed candidate: the trusted wording wins, so
-            # an untrusted candidate's own (possibly inflated) claim is never approved (§1.7).
+            # A trusted source approving an unreviewed candidate: the trusted wording AND ranking
+            # fields win, so nothing an untrusted or client-sourced candidate added (inflated
+            # claim, tags, strength, origin) is carried into the approved fact (§1.7).
             fact.kind = cand.kind
             fact.statement = cand.statement
             fact.detail = cand.detail
             fact.embedding = embedding
+            fact.skills = list(cand.skills)
+            fact.industries = list(cand.industries)
+            fact.job_types = list(cand.job_types)
+            fact.strength = cand.strength
+            fact.source_type = cand.source_type
+            fact.source_ref = cand.source_ref
             fact.status = "approved"
-        elif fact.status != "approved" and cand.strength > fact.strength:
-            # Unreviewed fact: keep the strongest wording. Approved wording is never touched.
-            fact.statement = cand.statement
-            fact.detail = cand.detail
-            fact.embedding = embedding
-        fact.strength = max(fact.strength, cand.strength)
+        else:
+            fact.skills = _union(fact.skills, cand.skills)
+            fact.industries = _union(fact.industries, cand.industries)
+            fact.job_types = _union(fact.job_types, list(cand.job_types))
+            if fact.status != "approved" and cand.strength > fact.strength:
+                # Unreviewed fact: keep the strongest wording. Approved wording is never touched.
+                fact.statement = cand.statement
+                fact.detail = cand.detail
+                fact.embedding = embedding
+            fact.strength = max(fact.strength, cand.strength)
         await db.flush()
         return fact, ("auto_approved" if fact.status == "approved" else "merged")
 

@@ -97,9 +97,19 @@ Hard rules:
 - If nothing qualifies, return {"facts": []}.
 """
 
-# Any open/close tag of our fences inside untrusted text (attributes, whitespace, any case)
-# is defanged so it cannot break out.
-_FENCE_TAG = re.compile(r"<\s*/?\s*(source_text|context)\b[^>]*>", re.IGNORECASE)
+# Any open/close tag of our fences inside untrusted text (attributes, whitespace, any case,
+# fullwidth/small-form or URL-encoded brackets, zero-width characters inside the tag) is
+# defanged so it cannot break out.
+_ZW = "[\u00ad\u200b-\u200f\u2060\ufeff]*"
+_LT = "(?:<|\uff1c|\ufe64|%3c)"
+_GT = "(?:>|\uff1e|\ufe65|%3e)"
+_FENCE_TAG = re.compile(
+    _LT + _ZW + r"\s*" + _ZW + "(?:/|\uff0f|%2f)?" + _ZW + r"\s*" + _ZW
+    + "(" + "|".join(_ZW.join(name) for name in ("source_text", "context")) + ")"
+    + r"(?![\w])(?:(?!" + _GT + r")[\s\S])*" + _GT,
+    re.IGNORECASE,
+)
+_ZW_CHARS = re.compile(_ZW)
 
 
 _QUOTE_CHARS = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
@@ -123,18 +133,18 @@ def _tags(values) -> List[str]:
 
 
 def _decode_entities(text: str) -> str:
-    """Decode HTML entities (repeatedly, for double-encoding)."""
-    for _ in range(5):
+    """Decode HTML entities until a fixed point (any nesting depth). Each round that changes
+    the string makes it shorter, so this always terminates."""
+    while True:
         decoded = html.unescape(text)
         if decoded == text:
-            break
+            return text
         text = decoded
-    return text
 
 
 def _fence(text: str) -> str:
     # Decode entities first so &lt;source_text&gt; is caught too.
-    return _FENCE_TAG.sub(lambda m: f"[{m.group(1)}]", _decode_entities(text))
+    return _FENCE_TAG.sub(lambda m: f"[{_ZW_CHARS.sub('', m.group(1)).lower()}]", _decode_entities(text))
 
 
 async def extract_facts(
@@ -192,5 +202,8 @@ async def extract_facts(
                 source_snippet=(raw.get("evidence_quote") or "").strip()[:MAX_EVIDENCE] or None,
             ))
         except (KeyError, TypeError, ValueError, ValidationError) as exc:
-            logger.warning("Dropping malformed fact candidate (%s): %.120s", exc, statement)
+            # Type and field names only: the exception text and statement carry source content.
+            fields = [".".join(map(str, e["loc"])) for e in exc.errors()] if isinstance(exc, ValidationError) else []
+            logger.warning("Dropping malformed fact candidate (%s, fields=%s, len=%d)",
+                           type(exc).__name__, fields, len(statement))
     return candidates

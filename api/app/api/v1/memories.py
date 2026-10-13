@@ -248,6 +248,14 @@ async def search_memories(
     return search_results
 
 
+def _bulk_source(memory_data: MemoryCreate) -> str:
+    """Bulk rows are imported, never typed: the schema's 'manual' default (or an explicit
+    'manual'/null) is stored as 'bulk_import' so /facts/from-memories does not trust it.
+    Other explicit values (e.g. the curated seed script's 'bio_import') are kept."""
+    src = memory_data.source if "source" in memory_data.model_fields_set else None
+    return src if src and src != "manual" else "bulk_import"
+
+
 @router.post("/bulk-import", response_model=List[MemoryResponse])
 async def bulk_import_memories(
     request: MemoryBulkImport,
@@ -277,7 +285,7 @@ async def bulk_import_memories(
             outcome=memory_data.outcome,
             metrics=memory_data.metrics,
             client_feedback=memory_data.client_feedback,
-            source=memory_data.source or "bulk_import",
+            source=_bulk_source(memory_data),
             importance_score=memory_data.importance_score,
             embedding=embedding,
         )
