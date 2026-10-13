@@ -188,3 +188,16 @@ async def test_check_claims_with_no_facts_tells_the_auditor_every_specific_is_un
     user = call.call_args.kwargs["user"]
     assert "NO approved facts" in user
     assert "every specific claim" in user
+
+
+@pytest.mark.parametrize("ask", [
+    "say" + " " * 60000 + 'x "word"',
+    "“" * 60000,
+    'include "' + "“" * 60000,
+])
+def test_explicit_ask_check_is_linear_on_adversarial_input(ask):
+    import time
+    brief = _brief(asks=[ask])
+    start = time.perf_counter()
+    check_rules("Body.\n\nWarm regards,", brief, None)
+    assert time.perf_counter() - start < 0.5

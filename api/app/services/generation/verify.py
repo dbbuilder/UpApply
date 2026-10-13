@@ -25,12 +25,13 @@ CLAIM_CHECK_SKIPPED = "Claim check skipped (verifier unavailable) - review speci
 _SALUTATION = re.compile(r"^(hello|hi|hey|dear|greetings|good (morning|afternoon|evening)|subject:)\b", re.IGNORECASE)
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 _STARTS_WITH_I = re.compile(r"^[\"'“‘(\-–—*\s]*I\b")
-_QUOTED = re.compile(r"[\"“]([^\"”]+)[\"”]")
+# The inner class excludes opening quotes too, so an unclosed run cannot rescan (linear).
+_QUOTED = re.compile(r"[\"“]([^\"“”]+)[\"”]")
 # A quoted span is a required word only when the words just before it ask for it
 # ('start with "blue"', 'include the word "pineapple"'); 'In your answer to "Describe..."' is a reference.
 _REQUIRES_QUOTE = re.compile(
     r"\b(with|word|words|phrase|term|keyword|code|codeword|include|including|mention|use|using|write|say|type|"
-    r"put|add|begin|start)\s*[:,]?\s*$",
+    r"put|add|begin|start)\s*(?:[:,]\s*)?$",
     re.IGNORECASE,
 )
 # 'Do not use the phrase "I am excited"': the quoted span must be ABSENT.

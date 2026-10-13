@@ -195,3 +195,29 @@ async def test_writer_evidence_block_keeps_all_facts_at_maximum_size():
     user = call.call_args.kwargs["user"]
     assert "[f7] (project)" in user
     assert user.count("d" * MAX_DETAIL) == 8
+
+
+@pytest.mark.parametrize("evil", [
+    "\n" + " \n" * 30000 + "x",
+    "Regards" + " " * 60000 + "!",
+    "Body.\nRegards" + " " * 60000 + "!",
+    "Body.\nBest," + " \n" * 30000 + "x",
+])
+def test_finalize_letter_is_linear_on_adversarial_input(evil):
+    import time
+    from app.services.generation.writer import finalize_letter
+    start = time.perf_counter()
+    finalize_letter(evil, "Chris")
+    assert time.perf_counter() - start < 0.5
+
+
+@pytest.mark.parametrize("raw, body", [
+    ("Body.\n\nBest regards,\nChris Therriault\nFractional CTO", "Body."),
+    ("Body.\n\nKind regards,\nChris\n\n", "Body."),
+    ("Body.\n\nWarm regards,", "Body."),
+    ("Body.\n\nBest practice is to test the rollback first.", "Body.\n\nBest practice is to test the rollback first."),
+    ("Body.\n\nThanks for the detailed brief!", "Body.\n\nThanks for the detailed brief!"),
+])
+def test_finalize_letter_replaces_model_signoff_with_the_closing(raw, body):
+    from app.services.generation.writer import finalize_letter
+    assert finalize_letter(raw, "Chris") == f"{body}\n\nWarm regards,\nChris"

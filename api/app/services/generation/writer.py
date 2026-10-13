@@ -1,12 +1,11 @@
 """Generation v2 step 3: one writing-model call produces the letter and screening answers together."""
-import re
 from typing import Optional
 
 from pydantic import BaseModel
 
 from app.core.config import settings
 from app.schemas.job import MAX_GEN_DESCRIPTION, MAX_GEN_TITLE, MAX_SCREENING_QUESTION
-from app.services.cover_letter import BANNED_PHRASES, clean_cover_letter, format_inclusions
+from app.services.cover_letter import BANNED_PHRASES, clean_cover_letter, format_inclusions, strip_trailing_signoff
 from app.services.generation.brief import JobBrief
 from app.services.generation.evidence import Evidence, format_facts
 from app.services.generation.verify import expected_closing, length_band
@@ -39,17 +38,21 @@ WRITER_SCHEMA: dict = {
     "additionalProperties": False,
 }
 
-_TRAILING_SIGNOFF = re.compile(
-    r"\n+\s*(warm regards|best regards|kind regards|regards|best|sincerely|thanks|thank you),?\s*"
-    r"(\n[^\n]{0,60}){0,2}\s*$",
-    re.IGNORECASE,
+WRITER_SIGNOFFS = (
+    "warm regards", "best regards", "kind regards", "regards", "best", "sincerely", "thanks", "thank you",
 )
+SIGNATURE_LINE_MAX = 60
+
+
+def _bare_signoff(rest: str, following: list[str]) -> bool:
+    """The sign-off line is only the phrase (optional comma); what follows is a short signature."""
+    return rest.strip() in ("", ",") and all(len(line) <= SIGNATURE_LINE_MAX for line in following)
 
 
 def finalize_letter(raw: str, preferred_closing: Optional[str]) -> str:
     """Strip salutations/placeholders and any model-written sign-off, then append the
     exact closing in code. Shared with the Phase 3 refine thread."""
-    body = _TRAILING_SIGNOFF.sub("", clean_cover_letter(raw or "")).strip()
+    body = strip_trailing_signoff(clean_cover_letter(raw or ""), WRITER_SIGNOFFS, _bare_signoff).strip()
     return f"{body}\n\n{expected_closing(preferred_closing)}"
 
 

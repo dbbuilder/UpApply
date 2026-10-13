@@ -1,6 +1,6 @@
 """Cover letter generation service using Claude (Anthropic)."""
 import re
-from typing import Dict, Any, List, Optional
+from typing import Callable, Dict, Any, List, Optional
 
 from anthropic import AsyncAnthropic
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -29,6 +29,42 @@ BANNED_PHRASES = [
     "I am writing to",
     "I am reaching out",
 ]
+
+
+GENERIC_SIGNOFFS = ("sincerely", "best regards", "regards", "best", "thank you", "thanks")
+SIGNOFF_WINDOW = 3  # a sign-off is only looked for among the last 3 non-empty lines
+
+
+def _signoff_rest(line: str, phrases) -> Optional[str]:
+    """Lower-cased text after the sign-off phrase that opens `line` (on a word boundary), else None."""
+    lowered = line.strip().lower()
+    for phrase in phrases:
+        if lowered.startswith(phrase) and not lowered[len(phrase):len(phrase) + 1].isalnum():
+            return lowered[len(phrase):]
+    return None
+
+
+def strip_trailing_signoff(
+    text: str, phrases, accept: Callable[[str, List[str]], bool]
+) -> str:
+    """Linear, line-based sign-off removal: drop trailing blank lines; if one of the last
+    SIGNOFF_WINDOW non-empty lines (never the first line) opens with a sign-off phrase and
+    `accept(rest_of_line, following_lines)` agrees, truncate from that line."""
+    lines = text.rstrip().split("\n")
+    tail = [i for i, line in enumerate(lines) if line.strip()][-SIGNOFF_WINDOW:]
+    for i in tail:
+        if i == 0:
+            continue
+        rest = _signoff_rest(lines[i], phrases)
+        if rest is not None and accept(rest, lines[i + 1:]):
+            return "\n".join(lines[:i]).rstrip()
+    return "\n".join(lines)
+
+
+def _word_chars_only(rest: str, following: List[str]) -> bool:
+    """Sign-off, optional comma, then only word characters and whitespace to the end."""
+    tail = (rest[1:] if rest.startswith(",") else rest) + "".join(following)
+    return all(c.isalnum() or c == "_" or c.isspace() for c in tail)
 
 
 def _get_anthropic_client() -> AsyncAnthropic:
@@ -74,7 +110,7 @@ def clean_cover_letter(content: str) -> str:
     result = re.sub(r'\n{3,}', '\n\n', result)
 
     # Remove trailing generic sign-offs (but preserve "Warm regards,")
-    result = re.sub(r'\n+(Sincerely|Best regards|Regards|Best|Thank you|Thanks),?\s*\n*[\w\s]*$', '', result, flags=re.IGNORECASE)
+    result = strip_trailing_signoff(result, GENERIC_SIGNOFFS, _word_chars_only)
 
     return result.strip()
 
