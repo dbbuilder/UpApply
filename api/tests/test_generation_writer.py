@@ -220,6 +220,8 @@ def test_finalize_letter_is_linear_on_adversarial_input(evil):
     ("Body.\n\nBest practice is to test the rollback first.", "Body.\n\nBest practice is to test the rollback first."),
     ("Body.\n\nThanks for the detailed brief!", "Body.\n\nThanks for the detailed brief!"),
     ("Body.\n\nBest regards\nChris Therriault\nFounder\nServiceVision LLC", "Body."),
+    ("Body.\n\nBest,\nC.", "Body."),
+    ("Body.\n\nThanks,\nChris", "Body."),
 ])
 def test_finalize_letter_replaces_model_signoff_with_the_closing(raw, body):
     from app.services.generation.writer import finalize_letter

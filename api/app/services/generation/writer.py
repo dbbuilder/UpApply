@@ -53,9 +53,10 @@ def finalize_letter(raw: str, preferred_closing: Optional[str]) -> str:
     """Strip salutations/placeholders and any model-written sign-off, then append the
     exact closing in code. Shared with the Phase 3 refine thread."""
     # restore_fenced: the writer saw '&' as '＆' in every fenced block and may echo it.
-    body = strip_trailing_signoff(
-        clean_cover_letter(restore_fenced(raw or "")), WRITER_SIGNOFFS, _bare_signoff
-    ).strip()
+    # Strip the sign-off before clean_cover_letter too: it drops a bare "Best," line on its
+    # own, which would leave the signature under it ("Best,\nC.") stranded in the body.
+    raw = strip_trailing_signoff(restore_fenced(raw or ""), WRITER_SIGNOFFS, _bare_signoff)
+    body = strip_trailing_signoff(clean_cover_letter(raw), WRITER_SIGNOFFS, _bare_signoff).strip()
     return f"{body}\n\n{expected_closing(preferred_closing)}"
 
 
