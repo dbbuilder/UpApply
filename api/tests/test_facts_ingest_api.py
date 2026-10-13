@@ -194,3 +194,36 @@ async def test_ingest_is_scoped_to_the_calling_user(client: AsyncClient, auth_he
             "source_type": "chatgpt_user_turn", "items": [{"text": "Built X", "source_ref": "conv-1"}],
         })
     assert r.json()["skipped"] == 0 and r.json()["created"] == 1
+
+
+@pytest.mark.asyncio
+async def test_from_contracts_ingests_contract_jobs_once_as_candidates(client: AsyncClient, auth_headers: dict, fake_embed):
+    from app.models.job import Job
+
+    uid = await _user_id(client, auth_headers)
+    async with TestSessionLocal() as s:
+        other = User(email="other-contracts@example.com", hashed_password="x")
+        s.add(other)
+        await s.flush()
+        s.add_all([
+            Job(user_id=uid, upwork_job_id="contract_1", upwork_url="https://www.upwork.com/nx/wm/workroom/1/overview",
+                title="SQL Server tuning", description="SQL Server tuning\nRate: $95/hr\nClient: Acme Health",
+                source="contract_import", is_saved=True),
+            Job(user_id=uid, upwork_job_id="~01abc", upwork_url="https://www.upwork.com/jobs/~01abc",
+                title="Not a contract", description="A job post", source="extension"),
+            Job(user_id=other.id, upwork_job_id="contract_2", upwork_url="https://www.upwork.com/nx/wm/workroom/2/overview",
+                title="Other user's contract", description="Other user's contract", source="contract_import"),
+        ])
+        await s.commit()
+
+    extract = AsyncMock(side_effect=_per_ref_extract)
+    with patch("app.services.facts.extract_facts", extract):
+        r = await client.post(f"{BASE}/from-contracts", headers=auth_headers)
+        assert r.status_code == 200
+        assert r.json()["created"] == 1
+        r = await client.post(f"{BASE}/from-contracts", headers=auth_headers)
+        assert r.json()["created"] == 0
+    assert [(c.args[1], c.args[2]) for c in extract.await_args_list] == [("upwork_contract", "contract_1")]
+    assert "Acme Health" in extract.await_args_list[0].args[0]
+    candidates = (await client.get(BASE, headers=auth_headers, params={"status": "candidate"})).json()
+    assert [f["source_type"] for f in candidates] == ["upwork_contract"]

@@ -116,3 +116,14 @@ def test_ingest_item_limits_free_text_length():
         FactIngestItem(text="x" * 50_001)
     with pytest.raises(ValidationError):
         FactIngestItem(text="ok", context="x" * 50_001)
+
+
+@pytest.mark.asyncio
+async def test_client_feedback_is_labelled_as_a_record_not_the_freelancers_words():
+    mock = AsyncMock(return_value={"facts": []})
+    with patch("app.services.fact_extraction.structured_call", mock):
+        await extract_facts("Chris saved our launch. Would hire again.", source_type="client_feedback")
+    user = mock.call_args.kwargs["user"]
+    assert "client feedback about the freelancer" in user
+    assert "written by the freelancer" not in user
+    assert "<source_text>\nChris saved our launch. Would hire again.\n</source_text>" in user

@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.core.embeddings import generate_embedding
 from app.core.security import get_current_user
 from app.models.fact import Fact
+from app.models.job import Job
 from app.models.memory import Memory
 from app.models.proposal import Proposal
 from app.models.user import User
@@ -26,7 +27,7 @@ from app.schemas.fact import (
     FactStatus,
     FactUpdate,
 )
-from app.services.facts import fact_embedding_text, ingest_items, upsert_manual_fact
+from app.services.facts import _already_ingested, fact_embedding_text, ingest_items, upsert_manual_fact
 
 router = APIRouter()
 
@@ -195,3 +196,31 @@ async def facts_from_proposals(
             p.facts_ingested_at = now  # zero-fact letters too, so the next call moves on
     await db.commit()
     return FactIngestResult(**counts, remaining=len(pending) - len(batch) + len(failed))
+
+
+@router.post("/from-contracts", response_model=FactIngestResult)
+async def facts_from_contracts(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fact candidates from imported Upwork contracts (spec §1.3.3). Never auto-approved."""
+    jobs = (await db.execute(
+        select(Job)
+        .where(
+            Job.user_id == current_user.id,
+            Job.source == "contract_import",
+            Job.upwork_job_id.is_not(None),
+        )
+        .order_by(Job.created_at.desc())
+    )).scalars().all()
+    pending = [
+        j for j in jobs
+        if not await _already_ingested(db, current_user.id, "upwork_contract", j.upwork_job_id)
+    ][:100]
+    items = [
+        FactIngestItem(text=(j.description or j.title)[:MAX_INGEST_TEXT], source_ref=j.upwork_job_id)
+        for j in pending
+    ]
+    counts = await ingest_items(db, current_user.id, "upwork_contract", items)
+    await db.commit()
+    return FactIngestResult(**counts)

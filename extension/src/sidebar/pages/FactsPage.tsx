@@ -28,6 +28,8 @@ export default function FactsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackContract, setFeedbackContract] = useState('');
 
   const load = async (s: FactStatus) => {
     setLoading(true);
@@ -105,12 +107,18 @@ export default function FactsPage() {
     }
   };
 
-  const runExtraction = async (from: 'memories' | 'proposals') => {
+  const runExtraction = async (from: 'memories' | 'proposals' | 'contracts') => {
     setBusy(true);
     setError(null);
-    setNotice(from === 'memories' ? 'Extracting facts from bio memories…' : 'Extracting facts from Upwork proposals…');
+    setNotice(
+      from === 'memories' ? 'Extracting facts from bio memories…'
+        : from === 'proposals' ? 'Extracting facts from Upwork proposals…'
+        : 'Extracting facts from Upwork contracts…',
+    );
     try {
-      const r = from === 'memories' ? await apiClient.factsFromMemories() : await apiClient.factsFromProposals(10);
+      const r = from === 'memories' ? await apiClient.factsFromMemories()
+        : from === 'proposals' ? await apiClient.factsFromProposals(10)
+        : await apiClient.factsFromContracts();
       setNotice(
         `${r.created} new · ${r.merged} merged · ${r.auto_approved} auto-approved · ${r.skipped} already done` +
         (r.failed ? ` · ${r.failed} failed` : '') +
@@ -120,6 +128,26 @@ export default function FactsPage() {
     } catch (err) {
       setError(errorText(err, 'Extraction failed.'));
       setNotice(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitFeedback = async () => {
+    const text = feedbackText.trim();
+    if (!text) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await apiClient.ingestFacts('client_feedback', [
+        { text, context: feedbackContract.trim() ? `Contract: ${feedbackContract.trim()}` : undefined },
+      ]);
+      setNotice(`${r.created} new · ${r.merged} merged · ${r.auto_approved} auto-approved from client feedback`);
+      setFeedbackText('');
+      setFeedbackContract('');
+      await load(status);
+    } catch (err) {
+      setError(errorText(err, 'Could not extract facts from that feedback.'));
     } finally {
       setBusy(false);
     }
@@ -159,6 +187,14 @@ export default function FactsPage() {
         >
           From Upwork proposals
         </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => runExtraction('contracts')}
+          className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white hover:border-emerald-300 disabled:opacity-50"
+        >
+          From Upwork contracts
+        </button>
         {status === 'candidate' && selected.size > 0 && (
           <button
             type="button"
@@ -169,6 +205,34 @@ export default function FactsPage() {
           </button>
         )}
       </div>
+
+      <details className="bg-white border border-gray-100 rounded-xl p-3">
+        <summary className="text-xs font-medium text-gray-700 cursor-pointer">Add client feedback</summary>
+        <div className="mt-2 space-y-2">
+          <input
+            type="text"
+            value={feedbackContract}
+            onChange={e => setFeedbackContract(e.target.value)}
+            placeholder="Contract title (optional)"
+            className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5"
+          />
+          <textarea
+            value={feedbackText}
+            onChange={e => setFeedbackText(e.target.value)}
+            rows={4}
+            placeholder="Paste the client's feedback from Upwork"
+            className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5"
+          />
+          <button
+            type="button"
+            disabled={busy || !feedbackText.trim()}
+            onClick={submitFeedback}
+            className="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+          >
+            Extract facts
+          </button>
+        </div>
+      </details>
 
       {notice && <p className="text-xs text-gray-600 bg-gray-100 rounded-lg px-3 py-2">{notice}</p>}
       {error && <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}

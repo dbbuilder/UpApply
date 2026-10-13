@@ -700,6 +700,20 @@ class ApiClient {
   async factsFromProposals(limit = 10): Promise<FactIngestResult> {
     return this.request<FactIngestResult>(`/api/v1/facts/from-proposals?limit=${limit}`, { method: 'POST' });
   }
+
+  async factsFromContracts(): Promise<FactIngestResult> {
+    return this.request<FactIngestResult>('/api/v1/facts/from-contracts', { method: 'POST' });
+  }
+
+  async ingestFacts(
+    sourceType: string,
+    items: { text: string; source_ref?: string; context?: string }[],
+  ): Promise<FactIngestResult> {
+    return this.request<FactIngestResult>('/api/v1/facts/ingest', {
+      method: 'POST',
+      body: { source_type: sourceType, items },
+    });
+  }
 }
 
 export class ApiError extends Error {
