@@ -82,7 +82,7 @@ async def test_writer_user_prompt_carries_job_evidence_voice_and_options():
     assert "Has migrated SQL Server to Azure without downtime" in user
     assert "zero downtime cutover" in user
     assert 'Start your reply with "Azure"' in user
-    assert "[fact-1] (project) Led a 160-server on-prem to Azure migration." in user
+    assert '"id": "fact-1"' in user and "Led a 160-server on-prem to Azure migration." in user
     assert "Consolidated the distributed SQL estate." in user
     assert VOICE.cover_letter_text in user and "outcome: hired" in user
     assert "200-350 words" in user
@@ -195,7 +195,7 @@ async def test_writer_evidence_block_keeps_all_facts_at_maximum_size():
     with patch("app.services.generation.writer.structured_call", call):
         await write_application(PROFILE, BRIEF, Evidence(facts=facts), True, None, None)
     user = call.call_args.kwargs["user"]
-    assert "[f7] (project)" in user
+    assert '"id": "f7"' in user
     assert user.count("d" * MAX_DETAIL) == 8
 
 

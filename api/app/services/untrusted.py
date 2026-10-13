@@ -17,16 +17,18 @@ _UNTRUSTED = str.maketrans({"<": "\u2039", ">": "\u203a", "&": "\uff06"})
 _RESTORE = str.maketrans({"\u2039": "<", "\u203a": ">", "\uff06": "&"})
 _MAX_ROUNDS = 16
 DEFAULT_MAX_CHARS = 50_000
+TRUNCATION_MARK = " \u2026[truncated]"
 
 
 def decode_entities(text: str) -> str:
-    """Decode HTML entities until a fixed point (any nesting depth). Each round that changes
-    the string makes it shorter, so this always terminates."""
-    while True:
+    """Decode HTML entities to a fixed point, at most _MAX_ROUNDS rounds (each round is a
+    full pass, so unbounded nesting would be quadratic)."""
+    for _ in range(_MAX_ROUNDS):
         decoded = html.unescape(text)
         if decoded == text:
-            return text
+            break
         text = decoded
+    return text
 
 
 def _decode_round(text: str) -> str:
@@ -37,13 +39,20 @@ def _decode_round(text: str) -> str:
 
 def neutralise(text: str, max_chars: int = DEFAULT_MAX_CHARS) -> str:
     """`max_chars` caps the OUTPUT: NFKC can expand a code point up to 18 chars (U+FDFA).
-    Each round is clipped too, so the work stays bounded; the final translate is 1:1."""
+    Each round is clipped too, so the work stays bounded; the final translate is 1:1.
+    Clipped text ends with TRUNCATION_MARK so the model knows it saw only part of it."""
+    truncated = False
     for _ in range(_MAX_ROUNDS):
-        decoded = _decode_round(text)[:max_chars]
+        decoded = _decode_round(text)
+        if len(decoded) > max_chars:
+            truncated, decoded = True, decoded[:max_chars]
         if decoded == text:
             break
         text = decoded
-    return unicodedata.normalize("NFKC", text).translate(_UNTRUSTED)[:max_chars]
+    out = unicodedata.normalize("NFKC", text).translate(_UNTRUSTED)
+    if truncated or len(out) > max_chars:
+        out = out[: max_chars - len(TRUNCATION_MARK)] + TRUNCATION_MARK
+    return out
 
 
 def restore_fenced(text: str) -> str:

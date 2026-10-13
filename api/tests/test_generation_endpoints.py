@@ -415,7 +415,7 @@ async def test_cover_letter_v2_failures_disclose_no_exception_text(
             "/api/v1/jobs/cover-letters/generate", headers=auth_headers_with_profile, json={"job_data": JOB_DATA},
         )
     logged = _assert_generic_failure(resp, status_code, caplog, ["sk-ant-SECRET", "claude-x", "embedding failed"])
-    assert type(exc).__name__ in logged and "sk-ant-SECRET" in logged
+    assert type(exc).__name__ in logged and "sk-ant-SECRET" not in logged
 
 
 @pytest.mark.asyncio
@@ -438,4 +438,4 @@ async def test_screening_v2_failures_disclose_no_exception_text(
             json={"question": "How would you handle the cutover?"},
         )
     logged = _assert_generic_failure(resp, status_code, caplog, ["sk-ant-SECRET", "claude-x", "embedding failed"])
-    assert type(exc).__name__ in logged
+    assert type(exc).__name__ in logged and "sk-ant-SECRET" not in logged

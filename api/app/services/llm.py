@@ -23,7 +23,12 @@ PROXY_HINT = "check that ANTHROPIC_BASE_URL passes output_config through"
 
 
 class LLMError(RuntimeError):
-    """A structured call produced no usable JSON (refusal, truncation, bad JSON)."""
+    """A structured call produced no usable JSON (refusal, truncation, bad JSON). `reason` is a
+    fixed category that is safe to log; the message may hold upstream text and is not."""
+
+    def __init__(self, message: str, reason: str = "unknown"):
+        super().__init__(message)
+        self.reason = reason
 
 
 def get_anthropic_client() -> AsyncAnthropic:
@@ -59,7 +64,7 @@ async def structured_call(
             output_config=output_config,
         )
     except APIError as exc:
-        raise LLMError(f"structured_call API error from {model}: {exc} ({PROXY_HINT})") from exc
+        raise LLMError(f"structured_call API error from {model}: {exc} ({PROXY_HINT})", reason="api_error") from exc
 
     # Usage only — never prompt or output content.
     usage = getattr(response, "usage", None)
@@ -75,11 +80,11 @@ async def structured_call(
         )
 
     if response.stop_reason in ("refusal", "max_tokens"):
-        raise LLMError(f"structured_call stopped with {response.stop_reason} (model={model})")
+        raise LLMError(f"structured_call stopped with {response.stop_reason} (model={model})", reason=str(response.stop_reason))
 
     text = next((b.text for b in response.content if b.type == "text"), None)
     if text is None:
-        raise LLMError(f"structured_call returned no text block (model={model})")
+        raise LLMError(f"structured_call returned no text block (model={model})", reason="no_text")
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:
@@ -88,4 +93,4 @@ async def structured_call(
             "structured_call invalid JSON from %s (stop_reason=%s, output_chars=%d, usage=%s)",
             model, response.stop_reason, len(text), getattr(response, "usage", None),
         )
-        raise LLMError(f"structured_call returned invalid JSON (model={model}; {PROXY_HINT})") from exc
+        raise LLMError(f"structured_call returned invalid JSON (model={model}; {PROXY_HINT})", reason="invalid_json") from exc

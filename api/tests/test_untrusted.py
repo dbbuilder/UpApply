@@ -3,7 +3,7 @@ import re
 
 import pytest
 
-from app.services.untrusted import neutralise
+from app.services.untrusted import neutralise, TRUNCATION_MARK
 
 
 @pytest.mark.parametrize("variant", [
@@ -75,4 +75,6 @@ def test_neutralise_caps_output_after_nfkc_expansion():
 
 
 def test_neutralise_honours_a_smaller_caller_limit():
-    assert neutralise("ﷺ" * 100, max_chars=300) == ("صلى الله عليه وسلم" * 17)[:300]
+    out = neutralise("ﷺ" * 100, max_chars=300)
+    assert len(out) == 300 and out.endswith(TRUNCATION_MARK)
+    assert out.startswith(("صلى الله عليه وسلم" * 17)[:300 - len(TRUNCATION_MARK)])

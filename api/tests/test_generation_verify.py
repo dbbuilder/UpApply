@@ -110,7 +110,7 @@ async def test_check_claims_reports_unsupported_claims():
     assert warnings == ["Unsupported claim: Saved a client $2M (no matching fact)"]
     kwargs = call.call_args.kwargs
     assert kwargs["model"] == settings.extraction_model
-    assert "[fact-1] (metric) Cut report runtime from 40 min to 90 s." in kwargs["user"]
+    assert '"id": "fact-1"' in kwargs["user"] and "Cut report runtime from 40 min to 90 s." in kwargs["user"]
     assert "Saved a client $2M last year." in kwargs["user"]
     assert "Report runtime went from 40 min to 90 s." in kwargs["user"]
 

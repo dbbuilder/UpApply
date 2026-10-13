@@ -1,4 +1,5 @@
 """Generation v2 step 2: choose the facts and voice samples a draft may use (no LLM)."""
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
@@ -52,16 +53,19 @@ class Evidence:
 
 
 def format_facts(facts: list[Fact]) -> str:
-    """Render facts as `[id] (kind) statement` lines; ids are what the writer cites.
-    Statement and detail can hold client text (client_quote), so each is neutralised."""
+    """Render facts as a JSON array of {id, kind, statement, detail?}; ids are what the writer
+    cites. JSON escapes newlines/quotes, so fact text cannot forge another entry, and statement
+    and detail (which can hold client text) are neutralised."""
     if not facts:
         return "(no approved facts matched this job)"
-    lines = []
+    entries = []
     for fact in facts:
-        lines.append(f"[{fact.id}] ({fact.kind}) {neutralise(fact.statement or '', MAX_STATEMENT)}")
+        entry = {"id": str(fact.id), "kind": fact.kind,
+                 "statement": neutralise(fact.statement or "", MAX_STATEMENT)}
         if fact.detail:
-            lines.append(f"    {neutralise(fact.detail, MAX_DETAIL)}")
-    return "\n".join(lines)
+            entry["detail"] = neutralise(fact.detail, MAX_DETAIL)
+        entries.append(entry)
+    return json.dumps(entries, ensure_ascii=False, indent=1)
 
 
 def _select_facts(per_need: list[list[tuple[Fact, float]]]) -> list[Fact]:
