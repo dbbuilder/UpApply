@@ -40,6 +40,7 @@ from app.services.untrusted import escape_brackets, neutralise
 logger = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 4
+MAX_TOOL_CALLS = 6  # tool_use blocks executed per refine turn, across all rounds
 SEARCH_LIMIT = 5
 MAX_FOUND_FACTS = 8  # distinct facts search_facts may return in one refine turn
 MAX_ADDED_WARNING_CHARS = 300
@@ -222,6 +223,7 @@ async def refine_application(
     found: dict[str, Fact] = {}
 
     rounds = 0
+    calls = 0
     while True:
         try:
             resp = await client.messages.create(
@@ -247,11 +249,18 @@ async def refine_application(
         rounds += 1
         # Unchanged: Opus 5.5 preserves thinking and rejects edited assistant content.
         messages.append({"role": "assistant", "content": resp.content})
-        messages.append({"role": "user", "content": [
-            await _run_tool(db, user_id, block, found)
-            for block in resp.content
-            if block.type == "tool_use"
-        ]})
+        # One response can hold many parallel tool_use blocks, each an embedding + DB query.
+        # Every block still gets a tool_result in this one user message.
+        results = []
+        for block in resp.content:
+            if block.type != "tool_use":
+                continue
+            if calls >= MAX_TOOL_CALLS:
+                results.append(_tool_error(block, "tool call limit reached"))
+                continue
+            calls += 1
+            results.append(await _run_tool(db, user_id, block, found))
+        messages.append({"role": "user", "content": results})
 
     if resp.stop_reason in ("refusal", "max_tokens"):
         raise RefineError(f"Refine stopped with {resp.stop_reason}.", reason=str(resp.stop_reason))

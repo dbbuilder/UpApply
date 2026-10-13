@@ -374,3 +374,53 @@ async def test_facts_added_via_search_are_surfaced_as_warnings():
     assert "AnalyzeMyCloud" in added[0]
     assert "<" not in added[0] and ">" not in added[0] and "\n" not in added[0]
     assert result.claims_verified is True
+
+
+@pytest.mark.asyncio
+async def test_parallel_tool_calls_are_capped_per_turn():
+    """MAX_TOOL_ROUNDS counts rounds; one response can still hold many tool_use blocks."""
+    parallel = SimpleNamespace(
+        stop_reason="tool_use",
+        content=[SimpleNamespace(type="tool_use", id=f"tu_{i}", name="search_facts", input={"query": f"q{i}"})
+                 for i in range(10)],
+    )
+    client = _client([parallel, _final(REVISED)])
+    search = AsyncMock(return_value=[])
+    embed = AsyncMock(return_value=[0.1] * 1536)
+    with patch(f"{MOD}.get_anthropic_client", return_value=client), \
+         patch(f"{MOD}.generate_embedding", embed), \
+         patch(f"{MOD}.search_facts", search), \
+         patch(f"{MOD}.check_rules", return_value=[]), \
+         patch(f"{MOD}.check_claims", AsyncMock(return_value=[])):
+        await refine_application(None, "u1", _profile(), _brief(), _evidence(), _current(), [], "go")
+
+    assert refine_mod.MAX_TOOL_CALLS == 6
+    assert search.await_count == 6
+    assert embed.await_count == 6
+    results = client.messages.create.await_args_list[1].kwargs["messages"][2]
+    assert results["role"] == "user"
+    assert [r["tool_use_id"] for r in results["content"]] == [f"tu_{i}" for i in range(10)]
+    assert all(not r.get("is_error") for r in results["content"][:6])
+    for r in results["content"][6:]:
+        assert r["is_error"] is True
+        assert r["content"] == "tool call limit reached"
+
+
+@pytest.mark.asyncio
+async def test_tool_call_cap_spans_rounds():
+    four = lambda base: SimpleNamespace(  # noqa: E731
+        stop_reason="tool_use",
+        content=[SimpleNamespace(type="tool_use", id=f"tu_{base + i}", name="search_facts",
+                                 input={"query": f"q{base + i}"}) for i in range(4)],
+    )
+    client = _client([four(0), four(4), _final(REVISED)])
+    search = AsyncMock(return_value=[])
+    with patch(f"{MOD}.get_anthropic_client", return_value=client), \
+         patch(f"{MOD}.generate_embedding", AsyncMock(return_value=[0.1] * 1536)), \
+         patch(f"{MOD}.search_facts", search), \
+         patch(f"{MOD}.check_rules", return_value=[]), \
+         patch(f"{MOD}.check_claims", AsyncMock(return_value=[])):
+        await refine_application(None, "u1", _profile(), _brief(), _evidence(), _current(), [], "go")
+    assert search.await_count == 6
+    second_round = client.messages.create.await_args_list[2].kwargs["messages"][4]["content"]
+    assert [bool(r.get("is_error")) for r in second_round] == [False, False, True, True]
