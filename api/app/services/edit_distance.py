@@ -11,6 +11,10 @@ A lower edit distance over time = user trusts the agent more = higher autonomy.
 import re
 from typing import List
 
+# Cost cap: Levenshtein runs on at most MAX_TOKENS words per side (≤ ~1M cell updates).
+# Words past the cap count as edits (an upper bound), so long inputs never go O(n*m).
+MAX_TOKENS = 1000
+
 
 def _tokenize(text: str) -> List[str]:
     """Split text into lowercase word tokens, stripping punctuation."""
@@ -34,11 +38,13 @@ def word_edit_distance_pct(original: str, edited: str) -> float:
         return 1.0
 
     la, lb = len(a), len(b)
+    tail = max(la - MAX_TOKENS, lb - MAX_TOKENS, 0)
+    a, b = a[:MAX_TOKENS], b[:MAX_TOKENS]
 
     # Wagner-Fischer DP
-    prev = list(range(lb + 1))
+    prev = list(range(len(b) + 1))
     for i, wa in enumerate(a, 1):
-        curr = [i] + [0] * lb
+        curr = [i] + [0] * len(b)
         for j, wb in enumerate(b, 1):
             if wa == wb:
                 curr[j] = prev[j - 1]
@@ -46,5 +52,5 @@ def word_edit_distance_pct(original: str, edited: str) -> float:
                 curr[j] = 1 + min(prev[j - 1], prev[j], curr[j - 1])
         prev = curr
 
-    dist = prev[lb]
-    return round(dist / max(la, lb), 4)
+    dist = prev[len(b)] + tail
+    return round(min(dist / max(la, lb), 1.0), 4)

@@ -64,6 +64,7 @@ from app.services.generation.brief import JobBrief
 from app.services.generation.evidence import Evidence
 from app.services.generation.writer import Draft
 from app.services.generation.refine import MAX_HISTORY, RefineError, refine_application
+from app.services.edit_distance import word_edit_distance_pct
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -1381,6 +1382,114 @@ async def refine_cover_letter_endpoint(
         warnings=[str(w) for w in outcome.warnings],
         refine_messages=letter.refine_messages,
         claims_verified=outcome.claims_verified,
+    )
+
+
+CHRIS_REWRITE_THRESHOLD = 0.9  # ≥90% of words changed → treat the submission as Chris's own text
+
+
+async def _embed_or_none(text: str) -> Optional[List[float]]:
+    try:
+        return await generate_embedding(text)
+    except Exception as exc:
+        # Content-free: exception messages can carry user text.
+        logger.warning("Embedding failed (%d chars): %s", len(text), type(exc).__name__)
+        return None
+
+
+@router.put("/cover-letters/{letter_id}/final", response_model=CoverLetterFinalResponse)
+@limiter.limit("60/hour")
+async def submit_final_cover_letter(
+    request: Request,
+    letter_id: str,
+    body: CoverLetterFinalRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record what was actually submitted on Upwork → voice sample + fact candidates.
+
+    The voice-sample author is decided here from the edit distance, never by the client.
+    Idempotent: resubmitting the same text reuses the proposal row and skips extraction."""
+    result = await db.execute(
+        select(CoverLetter).where(
+            CoverLetter.id == letter_id,
+            CoverLetter.user_id == current_user.id,
+        )
+    )
+    letter = result.scalar_one_or_none()
+    if not letter:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover letter not found")
+
+    job = (await db.execute(
+        select(Job).where(Job.id == letter.job_id, Job.user_id == current_user.id)
+    )).scalar_one_or_none()
+    answers = [a.model_dump() for a in (body.final_answers or [])]
+    already_captured = letter.final_text == body.final_text
+    edit_pct = word_edit_distance_pct(letter.content, body.final_text)
+    author = "chris" if edit_pct >= CHRIS_REWRITE_THRESHOLD else "chris_edited_ai"
+    now = datetime.now(timezone.utc)
+
+    letter.final_text = body.final_text
+    letter.final_answers = answers
+    letter.edit_distance_pct = edit_pct
+    letter.submitted_text = body.final_text
+    letter.was_submitted = True
+    letter.submitted_at = letter.submitted_at or now
+    letter.is_final = True
+
+    prop = (await db.execute(
+        select(Proposal).where(
+            Proposal.user_id == current_user.id,
+            Proposal.job_id == letter.job_id,
+            Proposal.source == "extension",
+        )
+    )).scalars().first()
+    if prop is None:
+        prop = Proposal(
+            user_id=current_user.id,
+            job_id=letter.job_id,
+            cover_letter_text=body.final_text,
+            job_title=job.title if job else None,
+            job_skills=(job.skills_required or []) if job else [],
+            source="extension",
+            status="submitted",
+            submitted_at=now,
+        )
+        db.add(prop)
+    # Same meaning as Phase 1 Task 1.8: job_text is the job description only (title lives in job_title)
+    job_text = (job.description or None) if job else None
+    prop.cover_letter_text = body.final_text
+    prop.author = author
+    prop.job_text = job_text
+    prop.screening_answers = answers or None  # voice-sample answers (Phase 1 column)
+    if not already_captured:
+        prop.embedding = await _embed_or_none(body.final_text)
+        if job:
+            # Same text shape as Phase 1 Task 1.8 and Phase 2 select_evidence's voice query
+            prop.job_needs_embedding = await _embed_or_none(
+                "\n\n".join(t for t in (job.title, job.description) if t)
+            )
+    await db.flush()
+
+    fact_candidates = 0
+    if not already_captured:
+        qa = "\n\n".join(f"Q: {a['question']}\nA: {a['answer']}" for a in answers if a["answer"])
+        fact_candidates = await _capture_fact_candidates(
+            db, current_user.id,
+            body.final_text + (f"\n\n{qa}" if qa else ""),
+            "upwork_submission", letter.id,
+            context=job.title if job else None,
+        )
+        # Already extracted here, so /facts/from-proposals (Phase 1 Task 1.6) skips this letter
+        prop.facts_ingested_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return CoverLetterFinalResponse(
+        id=letter.id,
+        edit_distance_pct=edit_pct,
+        author=author,
+        proposal_id=prop.id,
+        fact_candidates=fact_candidates,
     )
 
 

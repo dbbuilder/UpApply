@@ -265,3 +265,140 @@ async def test_refine_surfaces_claims_verified_and_trims_thread(client, auth_hea
     assert len(body["refine_messages"]) == 20
     assert body["refine_messages"][-2]["content"] == "warmer"
     assert len((await _letter(letter_id)).refine_messages) == 20
+
+
+async def _extension_proposal(user_id: str, job_id: str) -> Proposal | None:
+    async with TestSessionLocal() as s:
+        return (await s.execute(select(Proposal).where(
+            Proposal.user_id == user_id, Proposal.job_id == job_id, Proposal.source == "extension",
+        ))).scalars().first()
+
+
+@pytest.mark.asyncio
+async def test_final_light_edit_is_chris_edited_ai(client, auth_headers_with_profile):
+    uid = await _user_id(client, auth_headers_with_profile)
+    job_id, letter_id = await _seed_letter(uid)
+    edited = ORIGINAL.replace("rehearsed rollback", "rehearsed and timed rollback")
+    with patch(f"{JOBS}.generate_embedding", AsyncMock(return_value=[0.2] * 1536)) as embed, \
+         patch(f"{JOBS}.extract_facts", AsyncMock(return_value=[
+             FactCandidate(kind="outcome", statement="No outage across 160 cutovers.",
+                           source_type="upwork_submission")])) as extract, \
+         patch(f"{JOBS}.upsert_candidate", AsyncMock()) as upsert:
+        r = await client.put(
+            f"/api/v1/jobs/cover-letters/{letter_id}/final",
+            headers=auth_headers_with_profile,
+            json={"final_text": edited,
+                  "final_answers": [{"question": "What is your migration approach?", "answer": "Phased."}]},
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["author"] == "chris_edited_ai"
+    assert 0 < body["edit_distance_pct"] < 0.9
+    assert body["fact_candidates"] == 1
+    assert embed.await_count == 2  # letter text + job text
+    assert "Q: What is your migration approach?\nA: Phased." in extract.await_args.args[0]
+    assert extract.await_args.args[1] == "upwork_submission"
+    upsert.assert_awaited_once()
+
+    letter = await _letter(letter_id)
+    assert letter.final_text == edited
+    assert letter.final_answers == [{"question": "What is your migration approach?", "answer": "Phased."}]
+    assert letter.was_submitted is True and letter.is_final is True
+    prop = await _extension_proposal(uid, job_id)
+    assert prop.id == body["proposal_id"]
+    assert prop.author == "chris_edited_ai"
+    assert prop.screening_answers == [{"question": "What is your migration approach?", "answer": "Phased."}]
+    assert prop.facts_ingested_at is not None
+    assert prop.cover_letter_text == edited
+    assert prop.job_text == "Move our SQL Server estate to Azure without downtime."
+    assert prop.job_needs_embedding is not None
+
+
+@pytest.mark.asyncio
+async def test_final_rewrite_is_chris_and_repeat_is_idempotent(client, auth_headers_with_profile):
+    uid = await _user_id(client, auth_headers_with_profile)
+    job_id, letter_id = await _seed_letter(uid)
+    rewritten = ("Your estate sounds like the hospital network we moved last spring. "
+                 "Happy to walk you through my plan on a call this week.\n\nThanks,\nC. Therriault")
+    with patch(f"{JOBS}.generate_embedding", AsyncMock(return_value=[0.2] * 1536)), \
+         patch(f"{JOBS}.extract_facts", AsyncMock(return_value=[])) as extract, \
+         patch(f"{JOBS}.upsert_candidate", AsyncMock()):
+        first = await client.put(f"/api/v1/jobs/cover-letters/{letter_id}/final",
+                                 headers=auth_headers_with_profile, json={"final_text": rewritten})
+        second = await client.put(f"/api/v1/jobs/cover-letters/{letter_id}/final",
+                                  headers=auth_headers_with_profile, json={"final_text": rewritten})
+    assert first.status_code == 200 and second.status_code == 200
+    assert first.json()["author"] == "chris"
+    assert first.json()["edit_distance_pct"] >= 0.9
+    assert extract.await_count == 1
+    assert second.json()["proposal_id"] == first.json()["proposal_id"]
+    async with TestSessionLocal() as s:
+        count = len((await s.execute(select(Proposal).where(Proposal.job_id == job_id))).scalars().all())
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_final_survives_embedding_outage(client, auth_headers_with_profile):
+    uid = await _user_id(client, auth_headers_with_profile)
+    job_id, letter_id = await _seed_letter(uid)
+    with patch(f"{JOBS}.generate_embedding", AsyncMock(side_effect=RuntimeError("quota"))), \
+         patch(f"{JOBS}.extract_facts", AsyncMock(return_value=[])), \
+         patch(f"{JOBS}.upsert_candidate", AsyncMock()):
+        r = await client.put(f"/api/v1/jobs/cover-letters/{letter_id}/final",
+                             headers=auth_headers_with_profile, json={"final_text": ORIGINAL})
+    assert r.status_code == 200, r.text
+    assert r.json()["edit_distance_pct"] == 0.0
+    prop = await _extension_proposal(uid, job_id)
+    assert prop.embedding is None and prop.job_needs_embedding is None
+
+
+@pytest.mark.asyncio
+async def test_final_unknown_letter_404(client, auth_headers_with_profile):
+    r = await client.put("/api/v1/jobs/cover-letters/00000000-0000-0000-0000-000000000000/final",
+                         headers=auth_headers_with_profile, json={"final_text": "x"})
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_final_foreign_letter_is_404_and_writes_nothing(client, auth_headers_with_profile):
+    uid = await _user_id(client, auth_headers_with_profile)
+    job_id, letter_id = await _seed_letter(uid)
+    other = await client.post("/api/v1/auth/register",
+                              json={"email": "other@example.com", "password": "testpass123"})
+    headers = {"Authorization": f"Bearer {other.json()['access_token']}"}
+    with patch(f"{JOBS}.extract_facts", AsyncMock(return_value=[])) as extract:
+        r = await client.put(f"/api/v1/jobs/cover-letters/{letter_id}/final",
+                             headers=headers, json={"final_text": "hijacked"})
+    assert r.status_code == 404
+    extract.assert_not_awaited()
+    assert (await _letter(letter_id)).final_text is None
+    async with TestSessionLocal() as s:
+        assert (await s.execute(select(Proposal).where(Proposal.job_id == job_id))).scalars().first() is None
+
+
+@pytest.mark.asyncio
+async def test_final_ignores_client_sent_author(client, auth_headers_with_profile):
+    uid = await _user_id(client, auth_headers_with_profile)
+    job_id, letter_id = await _seed_letter(uid)
+    with patch(f"{JOBS}.generate_embedding", AsyncMock(return_value=[0.2] * 1536)), \
+         patch(f"{JOBS}.extract_facts", AsyncMock(return_value=[])), \
+         patch(f"{JOBS}.upsert_candidate", AsyncMock()):
+        r = await client.put(f"/api/v1/jobs/cover-letters/{letter_id}/final",
+                             headers=auth_headers_with_profile,
+                             json={"final_text": ORIGINAL, "author": "chris"})
+    assert r.status_code == 200, r.text
+    assert r.json()["author"] == "chris_edited_ai"
+    assert (await _extension_proposal(uid, job_id)).author == "chris_edited_ai"
+
+
+@pytest.mark.asyncio
+async def test_final_rejects_oversized_text_and_answers(client, auth_headers_with_profile):
+    uid = await _user_id(client, auth_headers_with_profile)
+    _, letter_id = await _seed_letter(uid)
+    url = f"/api/v1/jobs/cover-letters/{letter_id}/final"
+    too_long = await client.put(url, headers=auth_headers_with_profile, json={"final_text": "x" * 20001})
+    too_many = await client.put(url, headers=auth_headers_with_profile, json={
+        "final_text": "ok", "final_answers": [{"question": "q", "answer": "a"}] * 21})
+    long_answer = await client.put(url, headers=auth_headers_with_profile, json={
+        "final_text": "ok", "final_answers": [{"question": "q", "answer": "a" * 5001}]})
+    assert too_long.status_code == too_many.status_code == long_answer.status_code == 422
