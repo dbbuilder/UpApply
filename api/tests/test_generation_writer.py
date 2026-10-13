@@ -159,3 +159,24 @@ async def test_writer_passes_prototype_url_and_extra_points_through_without_enti
     assert "R&D budget &not=1" in user
     assert user.count("</extra_points>") == 1
     assert "‹/extra_points›‹x›" in user
+
+
+@pytest.mark.asyncio
+async def test_writer_caps_neutralised_job_fields_at_their_request_limits():
+    """NFKC expansion (U+FDFA -> 18 chars) cannot grow a field past its request limit."""
+    from app.schemas.job import MAX_GEN_DESCRIPTION, MAX_GEN_TITLE, MAX_SCREENING_QUESTION
+    hostile = BRIEF.model_copy(update={
+        "title": "ﷺ" * MAX_GEN_TITLE,
+        "description": "ﷺ" * MAX_GEN_DESCRIPTION,
+        "questions": ["ﷺ" * MAX_SCREENING_QUESTION],
+    })
+    call = AsyncMock(return_value=dict(MODEL_JSON))
+    with patch("app.services.generation.writer.structured_call", call):
+        await write_application(PROFILE, hostile, Evidence(), True, None, None)
+    user = call.call_args.kwargs["user"]
+    title = user.split("<job_title>\n", 1)[1].split("\n</job_title>", 1)[0]
+    post = user.split("<job_post>\n", 1)[1].split("\n</job_post>", 1)[0]
+    question = user.split("<screening_questions>\n1. ", 1)[1].split("\n</screening_questions>", 1)[0]
+    assert len(title) == MAX_GEN_TITLE
+    assert len(post) == MAX_GEN_DESCRIPTION
+    assert len(question) == MAX_SCREENING_QUESTION

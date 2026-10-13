@@ -5,6 +5,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.schemas.job import MAX_GEN_DESCRIPTION, MAX_GEN_TITLE, MAX_SCREENING_QUESTION
 from app.services.cover_letter import BANNED_PHRASES, clean_cover_letter, format_inclusions
 from app.services.generation.brief import JobBrief
 from app.services.generation.evidence import Evidence, format_facts
@@ -142,8 +143,8 @@ def build_writer_user_prompt(
     name = profile.full_name or "the freelancer"
     low, high = length_band(brief)
     parts = [
-        f"JOB TITLE:\n{_block('job_title', neutralise(brief.title))}",
-        f"JOB POST:\n{_block('job_post', neutralise(brief.description))}",
+        f"JOB TITLE:\n{_block('job_title', neutralise(brief.title, MAX_GEN_TITLE))}",
+        f"JOB POST:\n{_block('job_post', neutralise(brief.description, MAX_GEN_DESCRIPTION))}",
         f"NEEDS (what the client must come away believing):\n{_block('client_needs', _bullets(brief.needs))}",
         f"CLIENT SIGNALS:\n{_block('client_signals', _format_signals(brief.client_signals))}",
         f"MIRROR PHRASES:\n{_block('mirror_phrases', _bullets(brief.mirror_phrases))}",
@@ -173,7 +174,9 @@ def build_writer_user_prompt(
             + _block("extra_points", escape_brackets(format_inclusions(extra_points)))
         )
     if brief.questions:
-        numbered = "\n".join(f"{i}. {neutralise(q.strip())}" for i, q in enumerate(brief.questions, 1))
+        numbered = "\n".join(
+            f"{i}. {neutralise(q.strip(), MAX_SCREENING_QUESTION)}" for i, q in enumerate(brief.questions, 1)
+        )
         parts.append(f"SCREENING QUESTIONS (answer each, in order):\n{_block('screening_questions', numbered)}")
     else:
         parts.append("SCREENING QUESTIONS: none; return an empty screening_answers list.")

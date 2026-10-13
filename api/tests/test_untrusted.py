@@ -64,3 +64,15 @@ def test_neutralise_decodes_url_encoded_ampersand_entities():
 def test_neutralise_is_safe_when_applied_twice():
     once = neutralise("a & b <c> &amp;lt;d")
     assert neutralise(once) == once
+
+
+def test_neutralise_caps_output_after_nfkc_expansion():
+    import time
+    start = time.perf_counter()
+    out = neutralise("ﷺ" * 50_000)  # each code point NFKC-expands to 18 chars
+    assert time.perf_counter() - start < 2.0
+    assert len(out) == 50_000
+
+
+def test_neutralise_honours_a_smaller_caller_limit():
+    assert neutralise("ﷺ" * 100, max_chars=300) == ("صلى الله عليه وسلم" * 17)[:300]

@@ -15,6 +15,7 @@ _URL_CHARS = {"3c": "<", "3e": ">", "26": "&"}
 _BRACKETS = str.maketrans({"<": "\u2039", ">": "\u203a"})
 _UNTRUSTED = str.maketrans({"<": "\u2039", ">": "\u203a", "&": "\uff06"})
 _MAX_ROUNDS = 16
+DEFAULT_MAX_CHARS = 50_000
 
 
 def decode_entities(text: str) -> str:
@@ -33,13 +34,15 @@ def _decode_round(text: str) -> str:
     return _URL_ESCAPE.sub(lambda m: _URL_CHARS[m.group(1).lower()], text)
 
 
-def neutralise(text: str) -> str:
+def neutralise(text: str, max_chars: int = DEFAULT_MAX_CHARS) -> str:
+    """`max_chars` caps the OUTPUT: NFKC can expand a code point up to 18 chars (U+FDFA).
+    Each round is clipped too, so the work stays bounded; the final translate is 1:1."""
     for _ in range(_MAX_ROUNDS):
-        decoded = _decode_round(text)
+        decoded = _decode_round(text)[:max_chars]
         if decoded == text:
             break
         text = decoded
-    return unicodedata.normalize("NFKC", text).translate(_UNTRUSTED)
+    return unicodedata.normalize("NFKC", text).translate(_UNTRUSTED)[:max_chars]
 
 
 def escape_brackets(text: str) -> str:

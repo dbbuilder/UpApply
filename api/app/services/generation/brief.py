@@ -2,6 +2,7 @@
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.schemas.job import MAX_GEN_DESCRIPTION, MAX_GEN_SKILL_LENGTH, MAX_GEN_TITLE, MAX_SCREENING_QUESTION
 from app.services.llm import structured_call
 from app.services.untrusted import neutralise
 
@@ -77,12 +78,14 @@ async def build_job_brief(
     questions: list[str],
 ) -> JobBrief:
     """Extract needs, job types, client signals and asks from a job post."""
-    question_lines = "\n".join(f"{i}. {neutralise(q.strip())}" for i, q in enumerate(questions, 1)) or "none"
-    skills_text = ", ".join(neutralise(s) for s in skills) or "none"
+    question_lines = "\n".join(
+        f"{i}. {neutralise(q.strip(), MAX_SCREENING_QUESTION)}" for i, q in enumerate(questions, 1)
+    ) or "none"
+    skills_text = ", ".join(neutralise(s, MAX_GEN_SKILL_LENGTH) for s in skills) or "none"
     user = (
-        f"<job_title>\n{neutralise(title)}\n</job_title>\n\n"
+        f"<job_title>\n{neutralise(title, MAX_GEN_TITLE)}\n</job_title>\n\n"
         f"<skills>\n{skills_text}\n</skills>\n\n"
-        f"<job_post>\n{neutralise(description)}\n</job_post>\n\n"
+        f"<job_post>\n{neutralise(description, MAX_GEN_DESCRIPTION)}\n</job_post>\n\n"
         f"<screening_questions>\n{question_lines}\n</screening_questions>"
     )
     data = await structured_call(
