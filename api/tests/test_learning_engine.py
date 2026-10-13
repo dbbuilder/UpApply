@@ -1,19 +1,26 @@
-"""Regression: winning_proposal_to_memory builds a valid Memory row (phase 0)."""
+"""Regression: winning_proposal_to_memory never writes a corpus memory (phase 0).
+
+Spec §1.1: retrievable stores never hold job postings or unedited AI drafts.
+The queue's draft_cover_letter is an unedited AI draft and the memory text
+would embed the client's job post, so the path stays inert until Phase 3
+retires it in favour of fact crediting.
+"""
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import agent.learning_engine as learning_engine
 from agent.learning_engine import winning_proposal_to_memory
-from app.models.memory import Memory
 
 
 @pytest.mark.asyncio
-async def test_winning_proposal_to_memory_adds_valid_memory():
+async def test_winning_proposal_to_memory_writes_nothing():
     db = MagicMock()
     db.flush = AsyncMock()
+    embed = AsyncMock(return_value=[0.2] * 1536)
 
-    with patch("agent.learning_engine.generate_embedding", AsyncMock(return_value=[0.2] * 1536)):
-        await winning_proposal_to_memory(
+    with patch.object(learning_engine, "generate_embedding", embed, create=True):
+        result = await winning_proposal_to_memory(
             user_id="user-1",
             job_title="Fractional CTO for seed-stage SaaS",
             job_description="Need architecture leadership for a 6-person team.",
@@ -21,31 +28,7 @@ async def test_winning_proposal_to_memory_adds_valid_memory():
             db=db,
         )
 
-    db.add.assert_called_once()
-    memory = db.add.call_args.args[0]
-    assert isinstance(memory, Memory)
-    assert memory.user_id == "user-1"
-    assert memory.title == "Won: Fractional CTO for seed-stage SaaS"
-    assert "WINNING COVER LETTER:\nThat platform was taken from zero to exit." in memory.content
-    assert memory.category == "achievement"
-    assert memory.source == "job_won"
-    assert memory.importance_score == 0.95
-    assert memory.embedding == [0.2] * 1536
-    db.flush.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_winning_proposal_to_memory_truncates_long_title():
-    db = MagicMock()
-    db.flush = AsyncMock()
-
-    with patch("agent.learning_engine.generate_embedding", AsyncMock(return_value=[0.2] * 1536)):
-        await winning_proposal_to_memory(
-            user_id="user-1",
-            job_title="x" * 600,
-            job_description="",
-            cover_letter_text="Body",
-            db=db,
-        )
-
-    assert len(db.add.call_args.args[0].title) == 500
+    assert result is None
+    db.add.assert_not_called()
+    db.flush.assert_not_awaited()
+    embed.assert_not_awaited()

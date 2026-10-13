@@ -15,6 +15,10 @@ if TYPE_CHECKING:
     from app.models.user import User
     from app.models.job import Job
 
+# Upwork statuses whose outcome is still open. A proposal in one of these is a
+# submitted letter awaiting a result, never a declined one (was_hired is None).
+PENDING_PROPOSAL_STATUSES = ("submitted", "active", "viewed", "responded", "interviewed")
+
 
 class Proposal(Base):
     """Store submitted proposals for learning and reuse."""

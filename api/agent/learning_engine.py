@@ -2,10 +2,10 @@
 
 Three learning mechanisms:
 
-1. WINNING PROPOSAL → MEMORY
-   When a user is hired, the cover letter that won is added to their proposal
-   corpus as a high-importance memory (importance=0.95). This improves future
-   cover letter generation for this user.
+1. WINNING PROPOSAL → MEMORY (inert)
+   Writes nothing: the won letter is an unedited AI draft paired with the
+   client's job post, which must never enter retrieval (spec §1.1). Phase 3
+   replaces it with fact crediting.
 
 2. CROSS-USER SIGNAL CONTRIBUTION
    When an outcome is recorded (submitted/viewed/responded/hired/declined),
@@ -31,9 +31,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.global_signal_pool import GlobalSignalPool
-from app.models.memory import Memory
 from app.models.user_autonomy_profile import UserAutonomyProfile
-from app.core.embeddings import generate_embedding
 
 logger = logging.getLogger(__name__)
 
@@ -63,37 +61,14 @@ async def winning_proposal_to_memory(
     cover_letter_text: str,
     db: AsyncSession,
 ) -> None:
-    """Add a winning (hired) cover letter to the user's proposal corpus.
+    """Inert until Phase 3 retires it: writes no memory.
 
-    Stored with importance=0.95 so it always surfaces in the top-N semantic
-    search used during cover letter generation.
+    The queue's draft_cover_letter is an unedited AI draft, and the memory text
+    would embed the client's job post. Spec §1.1: retrievable stores never hold
+    either, so a win no longer becomes a corpus memory.
     """
-    combined = (
-        f"JOB: {job_title}\n\n"
-        f"DESCRIPTION: {job_description[:500]}\n\n"
-        f"WINNING COVER LETTER:\n{cover_letter_text}"
-    )
-
-    try:
-        embedding = await generate_embedding(combined)
-    except Exception as exc:
-        logger.warning("Could not embed winning proposal for user %s: %s", user_id, exc)
-        return
-
-    memory = Memory(
-        id=str(uuid4()),
-        user_id=user_id,
-        title=f"Won: {job_title}"[:500],
-        content=combined,
-        category="achievement",
-        source="job_won",
-        importance_score=0.95,
-        embedding=embedding,
-    )
-    db.add(memory)
-    await db.flush()
     logger.info(
-        "Added winning proposal memory for user %s (job: %s)", user_id, job_title[:50]
+        "Skipping winning proposal memory for user %s (job: %s)", user_id, job_title[:50]
     )
 
 
