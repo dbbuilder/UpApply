@@ -153,3 +153,33 @@ async def test_fence_neutralises_tag_variants(variant):
     tags = re.findall(r"<\s*/?\s*(?:source_text|context)\b[^>]*>", user)
     assert tags == ["<source_text>", "</source_text>", "<context>", "</context>"]
     assert "&lt;" not in user and "&#60;" not in user and "&amp;lt;" not in user
+
+
+@pytest.mark.asyncio
+async def test_extract_facts_validates_kind_and_clips_model_output():
+    raw = {"facts": [
+        {
+            "kind": "metric",
+            "statement": "S" * 3000,
+            "detail": "D" * 6000,
+            "skills": ["k" * 150] + [f"s{i}" for i in range(80)],
+            "industries": ["i" * 150] + [f"n{i}" for i in range(80)],
+            "job_types": [],
+            "strength": 0.5,
+            "evidence_quote": "q" * 400,
+        },
+        {
+            "kind": "Metric ",  # not exactly in KINDS
+            "statement": "dropped", "detail": "", "skills": [], "industries": [],
+            "job_types": [], "strength": 0.5, "evidence_quote": "",
+        },
+    ]}
+    with patch("app.services.fact_extraction.structured_call", AsyncMock(return_value=raw)):
+        cands = await extract_facts("text", source_type="chatgpt_user_turn")
+    assert len(cands) == 1
+    c = cands[0]
+    assert len(c.statement) == 2000
+    assert len(c.detail) == 5000
+    assert len(c.source_snippet) == 200
+    assert len(c.skills) == 50 and all(len(s) <= 100 for s in c.skills)
+    assert len(c.industries) == 50 and all(len(s) <= 100 for s in c.industries)

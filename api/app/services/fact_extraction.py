@@ -7,10 +7,12 @@ from typing import List, Optional
 from pydantic import ValidationError
 
 from app.core.config import settings
-from app.schemas.fact import FactCandidate
+from app.schemas.fact import MAX_DETAIL, MAX_STATEMENT, MAX_TAG, MAX_TAGS, FactCandidate
 from app.services.llm import structured_call
 
 logger = logging.getLogger(__name__)
+
+MAX_EVIDENCE = 200
 
 KINDS = ["project", "metric", "credential", "client_quote", "role", "tech", "outcome"]
 JOB_TYPES = ["cto", "saas", "sql", "cloud", "ai", "fullstack"]
@@ -100,6 +102,12 @@ Hard rules:
 _FENCE_TAG = re.compile(r"<\s*/?\s*(source_text|context)\b[^>]*>", re.IGNORECASE)
 
 
+def _tags(values) -> List[str]:
+    """Model-supplied tag list, bounded: at most MAX_TAGS items of MAX_TAG chars."""
+    out = [s.strip()[:MAX_TAG] for s in (values or []) if isinstance(s, str) and s.strip()]
+    return out[:MAX_TAGS]
+
+
 def _fence(text: str) -> str:
     # Decode HTML entities first (repeatedly, for double-encoding) so &lt;source_text&gt; is caught too.
     for _ in range(5):
@@ -142,21 +150,24 @@ async def extract_facts(
 
     candidates: List[FactCandidate] = []
     for raw in data.get("facts", []):
-        statement = (raw.get("statement") or "").strip()
+        statement = (raw.get("statement") or "").strip()[:MAX_STATEMENT]
         if not statement:
+            continue
+        if raw.get("kind") not in KINDS:
+            logger.warning("Dropping fact candidate with unknown kind")
             continue
         try:
             candidates.append(FactCandidate(
                 kind=raw["kind"],
                 statement=statement,
-                detail=(raw.get("detail") or "").strip() or None,
-                skills=[s.strip() for s in raw.get("skills", []) if s and s.strip()],
-                industries=[s.strip() for s in raw.get("industries", []) if s and s.strip()],
+                detail=(raw.get("detail") or "").strip()[:MAX_DETAIL] or None,
+                skills=_tags(raw.get("skills")),
+                industries=_tags(raw.get("industries")),
                 job_types=[j for j in raw.get("job_types", []) if j in JOB_TYPES],
                 strength=min(1.0, max(0.0, float(raw.get("strength", 0.5)))),
                 source_type=source_type,
                 source_ref=source_ref,
-                source_snippet=(raw.get("evidence_quote") or "").strip()[:300] or None,
+                source_snippet=(raw.get("evidence_quote") or "").strip()[:MAX_EVIDENCE] or None,
             ))
         except (KeyError, TypeError, ValueError, ValidationError) as exc:
             logger.warning("Dropping malformed fact candidate (%s): %.120s", exc, statement)
