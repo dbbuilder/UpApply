@@ -4,12 +4,17 @@ import html
 import re
 import unicodedata
 
-# Untrusted text can never form a tag: after NFKC (folds fullwidth/small-form brackets),
-# entity decoding and zero-width stripping, every angle bracket (literal or URL-encoded) is
-# replaced with a look-alike. Linear time; nothing to bypass with tag-name variants.
-_ZERO_WIDTH = re.compile("[­​-‏⁠﻿]")
-_URL_BRACKET = re.compile("%3([ce])", re.IGNORECASE)
-_BRACKETS = str.maketrans({"<": "‹", ">": "›"})
+# Untrusted text can never form a tag or an entity: NFKC (folds fullwidth/small-form
+# brackets and ampersands), one round of entity decoding, zero-width stripping and URL
+# decoding of "<", ">" and "&" all run inside one bounded fixed-point loop, so no step can
+# re-expose what an earlier step already passed. Then every "<", ">" and "&" left is
+# swapped for a look-alike. Whatever the loop did not finish decoding is inert.
+_ZERO_WIDTH = re.compile("[\u00ad\u200b-\u200f\u2060\ufeff]")
+_URL_ESCAPE = re.compile("%(3c|3e|26)", re.IGNORECASE)
+_URL_CHARS = {"3c": "<", "3e": ">", "26": "&"}
+_BRACKETS = str.maketrans({"<": "\u2039", ">": "\u203a"})
+_UNTRUSTED = str.maketrans({"<": "\u2039", ">": "\u203a", "&": "\uff06"})
+_MAX_ROUNDS = 16
 
 
 def decode_entities(text: str) -> str:
@@ -22,15 +27,19 @@ def decode_entities(text: str) -> str:
         text = decoded
 
 
-def neutralise(text: str) -> str:
-    for _ in range(10):  # NFKC can surface new entities (fullwidth "&") and vice versa
-        normalised = decode_entities(unicodedata.normalize("NFKC", text))
-        if normalised == text:
-            break
-        text = normalised
+def _decode_round(text: str) -> str:
+    text = html.unescape(unicodedata.normalize("NFKC", text))
     text = _ZERO_WIDTH.sub("", text)
-    text = _URL_BRACKET.sub(lambda m: "<" if m.group(1).lower() == "c" else ">", text)
-    return unicodedata.normalize("NFKC", text).translate(_BRACKETS)
+    return _URL_ESCAPE.sub(lambda m: _URL_CHARS[m.group(1).lower()], text)
+
+
+def neutralise(text: str) -> str:
+    for _ in range(_MAX_ROUNDS):
+        decoded = _decode_round(text)
+        if decoded == text:
+            break
+        text = decoded
+    return unicodedata.normalize("NFKC", text).translate(_UNTRUSTED)
 
 
 def escape_brackets(text: str) -> str:
