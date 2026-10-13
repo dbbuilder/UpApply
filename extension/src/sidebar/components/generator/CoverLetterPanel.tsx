@@ -9,13 +9,6 @@ interface CoverLetterPanelProps {
   setIncludeCallOffer: (v: boolean) => void;
   coverLetterError: string | null;
   coverLetterLoading: boolean;
-  showFeedbackInput: boolean;
-  feedbackText: string;
-  setFeedbackText: (v: string) => void;
-  improvementNotes: string[] | null;
-  showImprovementNotes: boolean;
-  setShowImprovementNotes: (v: boolean | ((prev: boolean) => boolean)) => void;
-  improving: boolean;
   submitting: boolean;
   submitted: boolean;
   showAppliedPrompt: boolean;
@@ -29,10 +22,8 @@ interface CoverLetterPanelProps {
   onRetryGenerate: () => void;
   onFill: () => void;
   onCopy: () => void;
-  onRegenerate: () => void;
   onRegenerateFresh: () => void;
   onOpenEditor: () => void;
-  onImprove: () => void;
   onMarkSubmitted: () => void;
   onMarkAsApplied: () => void;
   onDismissAppliedPrompt: () => void;
@@ -49,13 +40,6 @@ export default function CoverLetterPanel({
   setIncludeCallOffer,
   coverLetterError,
   coverLetterLoading,
-  showFeedbackInput,
-  feedbackText,
-  setFeedbackText,
-  improvementNotes,
-  showImprovementNotes,
-  setShowImprovementNotes,
-  improving,
   submitting,
   submitted,
   showAppliedPrompt,
@@ -69,10 +53,8 @@ export default function CoverLetterPanel({
   onRetryGenerate,
   onFill,
   onCopy,
-  onRegenerate,
   onRegenerateFresh,
   onOpenEditor,
-  onImprove,
   onMarkSubmitted,
   onMarkAsApplied,
   onDismissAppliedPrompt,
@@ -165,37 +147,11 @@ export default function CoverLetterPanel({
               <button type="button" onClick={onCopy} className="text-gray-500 hover:text-gray-700 text-sm">
                 Copy
               </button>
-              <button type="button" onClick={onRegenerate} className="text-gray-500 hover:text-gray-700 text-sm">
-                {showFeedbackInput ? 'Submit' : 'Regenerate'}
+              <button type="button" onClick={onRegenerateFresh} className="text-gray-500 hover:text-gray-700 text-sm" title="Generate a brand-new draft">
+                New draft
               </button>
-              {showFeedbackInput && (
-                <button type="button" onClick={onRegenerateFresh} className="text-gray-400 hover:text-gray-600 text-sm">
-                  Fresh
-                </button>
-              )}
             </div>
           </div>
-
-          {showFeedbackInput && (
-            <div className="mb-3">
-              <input
-                type="text"
-                value={feedbackText}
-                onChange={e => setFeedbackText(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && feedbackText.trim() && onRegenerate()}
-                placeholder="What should be different? (e.g., more technical, shorter...)"
-                className="input text-sm"
-                autoFocus
-              />
-              <button
-                type="button"
-                onClick={() => { setFeedbackText(''); onRegenerateFresh(); }}
-                className="text-xs text-gray-400 mt-1"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
 
           {!claimsVerified && (
             <div role="alert" className="mb-2 rounded-lg border border-red-300 bg-red-50 p-2 text-xs font-medium text-red-800">
@@ -233,36 +189,7 @@ export default function CoverLetterPanel({
             Fill in Upwork Form
           </button>
 
-          {improvementNotes && improvementNotes.length > 0 && (
-            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 text-xs">
-              <button
-                type="button"
-                onClick={() => setShowImprovementNotes(v => !v)}
-                className="w-full flex items-center justify-between px-3 py-2 text-amber-800 font-medium"
-              >
-                <span>✨ {improvementNotes.length} improvement{improvementNotes.length !== 1 ? 's' : ''} applied</span>
-                <span>{showImprovementNotes ? '▲' : '▼'}</span>
-              </button>
-              {showImprovementNotes && (
-                <ul className="px-3 pb-2 space-y-1 text-amber-700">
-                  {improvementNotes.map((note, i) => (
-                    <li key={i} className="leading-snug">• {note}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-
           <div className="mt-2 flex gap-2">
-            <button
-              type="button"
-              onClick={onImprove}
-              disabled={improving}
-              title="Compare against your won proposals and improve this letter"
-              className="flex-1 btn-outline text-xs py-1.5 disabled:opacity-50"
-            >
-              {improving ? '✨ Comparing…' : '✨ Improve'}
-            </button>
             <button
               type="button"
               onClick={onMarkSubmitted}

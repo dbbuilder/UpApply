@@ -269,13 +269,6 @@ class ApiClient {
     return this.request<CoverLetter[]>(`/api/v1/jobs/cover-letters${params}`);
   }
 
-  async regenerateCoverLetter(id: string, feedback?: string, includeCallOffer: boolean = true) {
-    return this.request<CoverLetter>(`/api/v1/jobs/cover-letters/${id}/regenerate`, {
-      method: 'POST',
-      body: { feedback, include_call_offer: includeCallOffer },
-    });
-  }
-
   async submitCoverLetter(id: string, submittedText: string) {
     return this.request<CoverLetter>(`/api/v1/jobs/cover-letters/${id}/submit`, {
       method: 'PUT',
@@ -302,15 +295,6 @@ class ApiClient {
       method: 'POST',
       body: { items },
     });
-  }
-
-  async improveCoverLetter(id: string) {
-    return this.request<{
-      cover_letter_id: string;
-      improved_content: string;
-      improvement_notes: string[];
-      hired_examples_used: number;
-    }>(`/api/v1/jobs/cover-letters/${id}/improve`, { method: 'POST' });
   }
 
   // Applications

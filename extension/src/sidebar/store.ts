@@ -58,7 +58,6 @@ interface AppState {
   setJobAnalysis: (analysis: JobAnalysisResponse | null) => void;
   setCoverLetter: (letter: string | null) => void;
   setCoverLetterId: (id: string | null) => void;
-  markDraftUnverified: () => void;
   setCurrentView: (view: AppState['currentView']) => void;
   setSetupStep: (step: number) => void;
 
@@ -70,7 +69,6 @@ interface AppState {
   loadProfile: () => Promise<void>;
   analyzeCurrentJob: () => Promise<void>;
   generateCoverLetter: (inclusions?: string, prototypeUrl?: string, includeCallOffer?: boolean) => Promise<void>;
-  regenerateCoverLetter: (feedback?: string, includeCallOffer?: boolean) => Promise<void>;
   fillCoverLetter: () => Promise<boolean>;
   fillScreeningQuestion: (selector: string, answer: string) => Promise<boolean>;
   saveCurrentJob: () => Promise<string | null>;
@@ -129,14 +127,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   setJobAnalysis: (analysis) => set({ jobAnalysis: analysis }),
   setCoverLetter: (letter) => set({ coverLetter: letter }),
   setCoverLetterId: (id) => set({ coverLetterId: id }),
-  // Improve/regenerate use the legacy rewrite, which is never claim-checked: drop the old
-  // facts and warnings and show the notice instead of an earlier draft's verified state.
-  markDraftUnverified: () =>
-    set((state) => ({
-      draftMeta: state.draftMeta
-        ? { ...state.draftMeta, warnings: [], factsUsed: [], claimsVerified: false }
-        : null,
-    })),
   setCurrentView: (view) => set({ currentView: view }),
   setSetupStep: (step) => set({ setupStep: step }),
 
@@ -333,30 +323,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       const message = error instanceof TypeError
         ? 'Server unavailable. The API may be starting up (Render cold start can take ~30s). Please retry.'
         : error instanceof Error ? error.message : 'Generation failed';
-      set({ coverLetterLoading: false, coverLetterError: message });
-    }
-  },
-
-  // Regenerate cover letter with optional feedback
-  regenerateCoverLetter: async (feedback?: string, includeCallOffer: boolean = true) => {
-    const { coverLetterId } = get();
-    if (!coverLetterId) {
-      // Fall back to fresh generation
-      return get().generateCoverLetter(undefined, undefined, includeCallOffer);
-    }
-
-    set({ coverLetterLoading: true, coverLetterError: null });
-    try {
-      const result = await apiClient.regenerateCoverLetter(coverLetterId, feedback, includeCallOffer);
-      set({
-        coverLetter: result.content,
-        coverLetterId: result.id,
-        coverLetterLoading: false,
-      });
-      get().markDraftUnverified();
-    } catch (error) {
-      console.error('Regeneration error:', error);
-      const message = error instanceof Error ? error.message : 'Regeneration failed';
       set({ coverLetterLoading: false, coverLetterError: message });
     }
   },
