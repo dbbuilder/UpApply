@@ -83,11 +83,12 @@ async def winning_proposal_to_memory(
     memory = Memory(
         id=str(uuid4()),
         user_id=user_id,
+        title=f"Won: {job_title}"[:500],
         content=combined,
-        memory_type="proposal",
-        importance=0.95,
+        category="achievement",
+        source="job_won",
+        importance_score=0.95,
         embedding=embedding,
-        metadata={"source": "agent_won", "job_title": job_title},
     )
     db.add(memory)
     await db.flush()
