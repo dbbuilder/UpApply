@@ -11,6 +11,26 @@ from app.models.user import UserProfile
 from app.schemas.job import SkillMatch
 
 
+# Phrases that signal generic AI writing. Mirrors the BANNED PHRASES block in
+# build_system_prompt (legacy, left untouched); generation v2 enforces this list.
+BANNED_PHRASES = [
+    "I am well-equipped",
+    "unique blend of skills",
+    "align perfectly with your needs",
+    "I am excited to apply",
+    "I look forward to hearing from you",
+    "my skills directly translate",
+    "I am passionate about",
+    "leverage my expertise",
+    "I believe I would be a great fit",
+    "I am confident that",
+    "I would love the opportunity",
+    "I am a perfect fit",
+    "I am writing to",
+    "I am reaching out",
+]
+
+
 def _get_anthropic_client() -> AsyncAnthropic:
     base_url = settings.anthropic_base_url or None
     return AsyncAnthropic(api_key=settings.anthropic_api_key, base_url=base_url)
