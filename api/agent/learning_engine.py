@@ -2,10 +2,9 @@
 
 Three learning mechanisms:
 
-1. WINNING PROPOSAL → MEMORY (inert)
-   Writes nothing: the won letter is an unedited AI draft paired with the
-   client's job post, which must never enter retrieval (spec §1.1). Phase 3
-   replaces it with fact crediting.
+1. (Retired 2026-10) Winning proposals no longer become corpus memories.
+   Wins now credit the facts a letter used via POST /api/v1/proposals/outcomes
+   (app/services/outcomes.py), which feeds the evidence rerank win_signal.
 
 2. CROSS-USER SIGNAL CONTRIBUTION
    When an outcome is recorded (submitted/viewed/responded/hired/declined),
@@ -50,26 +49,6 @@ def compute_skill_hash(skills: list[str]) -> str:
     normalized = sorted(s.strip().lower() for s in skills if s.strip())
     canonical = ",".join(normalized)
     return hashlib.sha256(canonical.encode()).hexdigest()
-
-
-# ── Mechanism 1: Winning proposal → memory ────────────────────────────────────
-
-async def winning_proposal_to_memory(
-    user_id: str,
-    job_title: str,
-    job_description: str,
-    cover_letter_text: str,
-    db: AsyncSession,
-) -> None:
-    """Inert until Phase 3 retires it: writes no memory.
-
-    The queue's draft_cover_letter is an unedited AI draft, and the memory text
-    would embed the client's job post. Spec §1.1: retrievable stores never hold
-    either, so a win no longer becomes a corpus memory.
-    """
-    logger.info(
-        "Skipping winning proposal memory for user %s (job: %s)", user_id, job_title[:50]
-    )
 
 
 # ── Mechanism 2: Cross-user signal contribution ───────────────────────────────
