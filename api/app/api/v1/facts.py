@@ -19,7 +19,7 @@ from app.schemas.fact import (
     FactStatus,
     FactUpdate,
 )
-from app.services.facts import fact_embedding_text, upsert_candidate_outcome
+from app.services.facts import fact_embedding_text, upsert_manual_fact
 
 router = APIRouter()
 
@@ -48,10 +48,10 @@ async def create_fact(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a manual fact. The user typed it, so it is approved (merged if a near-duplicate exists)."""
+    """Create a manual fact. The user typed it, so it is approved; a near-duplicate is
+    corrected to the user's wording rather than kept."""
     cand = FactCandidate(source_type="manual", **data.model_dump())
-    fact, _ = await upsert_candidate_outcome(db, current_user.id, cand, auto_approve=True)
-    fact.status = "approved"
+    fact = await upsert_manual_fact(db, current_user.id, cand)
     await db.commit()
     await db.refresh(fact)
     return fact

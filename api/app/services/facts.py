@@ -91,6 +91,51 @@ async def upsert_candidate_outcome(
     return fact, ("auto_approved" if auto_approve else "created")
 
 
+async def upsert_manual_fact(db: AsyncSession, user_id: str, cand: FactCandidate) -> Fact:
+    """A fact the user typed: always approved, and the user's wording always wins.
+
+    A near-duplicate (>= DEDUPE_THRESHOLD) is corrected in place — statement, detail, kind and
+    embedding are overwritten — so a rejected or extracted candidate's old wording is never
+    promoted to approved. Otherwise a new approved fact is created."""
+    cand = cand.model_copy(update={"source_snippet": cand.source_snippet or cand.statement})
+    embedding = await generate_embedding(fact_embedding_text(cand.statement, cand.detail))
+    nearest = await _nearest(db, user_id, embedding)
+
+    if not (nearest and nearest[1] >= DEDUPE_THRESHOLD):
+        fact = Fact(
+            user_id=user_id,
+            kind=cand.kind,
+            statement=cand.statement,
+            detail=cand.detail,
+            skills=list(cand.skills),
+            industries=list(cand.industries),
+            job_types=list(cand.job_types),
+            strength=cand.strength,
+            status="approved",
+            source_type=cand.source_type,
+            source_ref=cand.source_ref,
+            sources=[_source_entry(cand)],
+            embedding=embedding,
+        )
+        db.add(fact)
+        await db.flush()
+        return fact
+
+    fact = nearest[0]
+    fact.kind = cand.kind
+    fact.statement = cand.statement
+    fact.detail = cand.detail
+    fact.embedding = embedding
+    fact.sources = [*(fact.sources or []), _source_entry(cand)]
+    fact.skills = _union(fact.skills, cand.skills)
+    fact.industries = _union(fact.industries, cand.industries)
+    fact.job_types = _union(fact.job_types, list(cand.job_types))
+    fact.strength = max(fact.strength, cand.strength)
+    fact.status = "approved"
+    await db.flush()
+    return fact
+
+
 async def upsert_candidate(
     db: AsyncSession,
     user_id: str,
