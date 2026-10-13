@@ -256,3 +256,21 @@ async def test_fence_is_linear_time_on_adversarial_input():
     assert time.perf_counter() - start < 1.0
     user = mock.call_args.kwargs["user"]
     assert user.count("<") == 4 and user.count(">") == 4  # only our own four fence tags
+
+
+@pytest.mark.asyncio
+async def test_client_quote_with_ampersand_survives_the_fence():
+    """The model sees the fenced source ('Q＆A'); its exact quote must still match the raw source,
+    and stored statements carry '&', not the look-alike."""
+    source = "Review: Great Q&A sessions & fast delivery. Would hire again."
+    raw = {"facts": [
+        {"kind": "client_quote", "statement": "Great Q＆A sessions ＆ fast delivery", "detail": "",
+         "skills": [], "industries": [], "job_types": [], "strength": 0.8, "evidence_quote": "Q＆A"},
+        {"kind": "metric", "statement": "Ran R＆D for 160 servers.", "detail": "",
+         "skills": [], "industries": [], "job_types": [], "strength": 0.5, "evidence_quote": ""},
+    ]}
+    with patch("app.services.fact_extraction.structured_call", AsyncMock(return_value=raw)) as call:
+        cands = await extract_facts(source, source_type="chatgpt_user_turn")
+    assert "Q＆A" in call.call_args.kwargs["user"]  # the fence is still applied to the prompt
+    assert [c.statement for c in cands] == ["Great Q&A sessions & fast delivery", "Ran R&D for 160 servers."]
+    assert cands[0].source_snippet == "Q&A"

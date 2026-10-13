@@ -1,5 +1,6 @@
 """Extract atomic fact candidates from text the user wrote (cheap model, structured output)."""
 import logging
+import unicodedata
 from typing import List, Optional
 
 from pydantic import ValidationError
@@ -9,6 +10,7 @@ from app.schemas.fact import MAX_DETAIL, MAX_STATEMENT, MAX_TAG, MAX_TAGS, FactC
 from app.services.llm import structured_call
 from app.services.untrusted import decode_entities as _decode_entities
 from app.services.untrusted import neutralise as _fence
+from app.services.untrusted import restore_fenced
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +104,8 @@ _QUOTE_CHARS = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201a": "'", "\u20
 
 
 def _quote_normalised(text: str) -> str:
-    return " ".join(text.translate(_QUOTE_CHARS).split())
+    # NFKC + restore_fenced: the model saw the fenced, NFKC'd source ('Q＆A'), the check uses the raw one.
+    return " ".join(unicodedata.normalize("NFKC", restore_fenced(text)).translate(_QUOTE_CHARS).split())
 
 
 def _is_verbatim(statement: str, source: str) -> bool:
@@ -149,7 +152,7 @@ async def extract_facts(
 
     candidates: List[FactCandidate] = []
     for raw in data.get("facts", []):
-        statement = (raw.get("statement") or "").strip()[:MAX_STATEMENT]
+        statement = restore_fenced((raw.get("statement") or "").strip())[:MAX_STATEMENT]
         if not statement:
             continue
         if raw.get("kind") not in KINDS:
@@ -162,14 +165,14 @@ async def extract_facts(
             candidates.append(FactCandidate(
                 kind=raw["kind"],
                 statement=statement,
-                detail=(raw.get("detail") or "").strip()[:MAX_DETAIL] or None,
+                detail=restore_fenced((raw.get("detail") or "").strip())[:MAX_DETAIL] or None,
                 skills=_tags(raw.get("skills")),
                 industries=_tags(raw.get("industries")),
                 job_types=[j for j in raw.get("job_types", []) if j in JOB_TYPES],
                 strength=min(1.0, max(0.0, float(raw.get("strength", 0.5)))),
                 source_type=source_type,
                 source_ref=source_ref,
-                source_snippet=(raw.get("evidence_quote") or "").strip()[:MAX_EVIDENCE] or None,
+                source_snippet=restore_fenced((raw.get("evidence_quote") or "").strip())[:MAX_EVIDENCE] or None,
             ))
         except (KeyError, TypeError, ValueError, AttributeError, ValidationError) as exc:
             # Type and field names only: the exception text and statement carry source content.

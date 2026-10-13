@@ -290,3 +290,9 @@ def test_clean_keeps_signoff_word_inside_a_sentence_with_punctuation():
 
 def test_clean_keeps_a_lone_first_line():
     assert clean_cover_letter("Thanks for reading") == "Thanks for reading"
+
+
+def test_clean_removes_four_line_signature_block():
+    """Sign-off + name + title + company: the old regex stripped it, the window must too."""
+    raw = "Body text.\n\nBest regards\nChris Therriault\nFounder\nServiceVision LLC"
+    assert clean_cover_letter(raw) == "Body text."

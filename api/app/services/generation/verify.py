@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from typing import TYPE_CHECKING, NamedTuple, Optional
 
 from app.core.config import settings
@@ -10,7 +11,7 @@ from app.services.cover_letter import BANNED_PHRASES
 from app.services.generation.brief import JobBrief
 from app.services.generation.evidence import Evidence, format_facts
 from app.services.llm import structured_call
-from app.services.untrusted import neutralise
+from app.services.untrusted import neutralise, restore_fenced
 
 if TYPE_CHECKING:
     from app.services.generation.writer import Draft
@@ -42,6 +43,10 @@ class Issue(str):
         issue.detail = detail
         return issue
 
+    def __getnewargs__(self) -> tuple[str, str, str]:
+        # copy/pickle rebuild via __new__(cls, *args); str's default passes only the message.
+        return (str(self), self.code, self.detail)
+
 
 class RepairNote(NamedTuple):
     code: str
@@ -70,6 +75,7 @@ _REQUIRES_QUOTE = re.compile(
 # 'Do not use the phrase "I am excited"': the quoted span must be ABSENT.
 _NEGATED = re.compile(r"\b(do not|don't|dont|never|avoid|without|must not|should not|shouldn't|refrain)\b", re.IGNORECASE)
 _CLAUSE_END = re.compile(r"[.;!?]")
+_ASK_WINDOW = 40  # longest keyword ("codeword") plus ':' / ',' and spacing before a quote
 ANSWER_SENTENCES = (2, 5)
 
 CLAIMS_SCHEMA: dict = {
@@ -140,14 +146,40 @@ def check_answer_rules(screening_answers: list[dict]) -> list[Issue]:
     return violations
 
 
+def _fold(text: str) -> str:
+    """Compare model text and job text on the same footing: '＆' and '&' are one character."""
+    return unicodedata.normalize("NFKC", restore_fenced(text)).lower()
+
+
 def _ask_violated(ask: str, haystack: str) -> bool:
+    """One pass over the ask (linear): clause ends and negations are found once, and the
+    required-word test only looks at a short window just before each quoted span."""
+    ask = _fold(ask)
+    haystack = _fold(haystack)
+    clause_ends = [m.start() for m in _CLAUSE_END.finditer(ask)]
+    negations = [(m.start(), m.end()) for m in _NEGATED.finditer(ask)]
+    c = n = 0
+    clause_start = 0
+    negated = False
     for match in _QUOTED.finditer(ask):
-        quoted = match.group(1).strip().lower()
-        prefix = _CLAUSE_END.split(ask[: match.start()])[-1]
-        if _NEGATED.search(prefix):
+        start = match.start()
+        while c < len(clause_ends) and clause_ends[c] < start:
+            clause_start = clause_ends[c] + 1
+            negated = False
+            c += 1
+        while n < len(negations) and negations[n][1] <= start:
+            negated = negated or negations[n][0] >= clause_start
+            n += 1
+        quoted = match.group(1).strip()
+        if negated:
             if quoted in haystack:
                 return True
-        elif _REQUIRES_QUOTE.search(prefix) and quoted not in haystack:
+            continue
+        end = start
+        while end > clause_start and ask[end - 1].isspace():
+            end -= 1
+        window = ask[max(clause_start, end - _ASK_WINDOW): end]
+        if _REQUIRES_QUOTE.search(window) and quoted not in haystack:
             return True
     return False
 

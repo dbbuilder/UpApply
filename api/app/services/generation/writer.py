@@ -10,7 +10,7 @@ from app.services.generation.brief import JobBrief
 from app.services.generation.evidence import Evidence, format_facts
 from app.services.generation.verify import RepairNote, expected_closing, length_band
 from app.services.llm import structured_call
-from app.services.untrusted import escape_brackets, neutralise
+from app.services.untrusted import escape_brackets, neutralise, restore_fenced
 
 
 class Draft(BaseModel):
@@ -52,7 +52,10 @@ def _bare_signoff(rest: str, following: list[str]) -> bool:
 def finalize_letter(raw: str, preferred_closing: Optional[str]) -> str:
     """Strip salutations/placeholders and any model-written sign-off, then append the
     exact closing in code. Shared with the Phase 3 refine thread."""
-    body = strip_trailing_signoff(clean_cover_letter(raw or ""), WRITER_SIGNOFFS, _bare_signoff).strip()
+    # restore_fenced: the writer saw '&' as '＆' in every fenced block and may echo it.
+    body = strip_trailing_signoff(
+        clean_cover_letter(restore_fenced(raw or "")), WRITER_SIGNOFFS, _bare_signoff
+    ).strip()
     return f"{body}\n\n{expected_closing(preferred_closing)}"
 
 
@@ -228,7 +231,7 @@ def _align_answers(questions: list[str], raw: list[dict]) -> list[dict]:
         answer = by_question.get(question.strip().lower())
         if answer is None and i < len(raw):
             answer = str(raw[i].get("answer", "")).strip()
-        aligned.append({"question": question, "answer": answer or ""})
+        aligned.append({"question": question, "answer": restore_fenced(answer or "")})
     return aligned
 
 

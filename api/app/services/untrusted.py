@@ -14,6 +14,7 @@ _URL_ESCAPE = re.compile("%(3c|3e|26)", re.IGNORECASE)
 _URL_CHARS = {"3c": "<", "3e": ">", "26": "&"}
 _BRACKETS = str.maketrans({"<": "\u2039", ">": "\u203a"})
 _UNTRUSTED = str.maketrans({"<": "\u2039", ">": "\u203a", "&": "\uff06"})
+_RESTORE = str.maketrans({"\u2039": "<", "\u203a": ">", "\uff06": "&"})
 _MAX_ROUNDS = 16
 DEFAULT_MAX_CHARS = 50_000
 
@@ -43,6 +44,12 @@ def neutralise(text: str, max_chars: int = DEFAULT_MAX_CHARS) -> str:
             break
         text = decoded
     return unicodedata.normalize("NFKC", text).translate(_UNTRUSTED)[:max_chars]
+
+
+def restore_fenced(text: str) -> str:
+    """Undo the look-alike swap in model OUTPUT (a letter, an answer, a fact statement) and
+    before comparing model text with source text: a model that saw 'R\uff06D' may echo it."""
+    return text.translate(_RESTORE)
 
 
 def escape_brackets(text: str) -> str:

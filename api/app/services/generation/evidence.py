@@ -24,9 +24,14 @@ ANCHOR_MIN_SIMILARITY = 0.75
 VOICE_SAMPLE_LIMIT = 3
 VOICE_AUTHORS = ("chris", "chris_edited_ai")
 OUTCOME_BOOST = {"hired": 0.15, "interviewed": 0.10, "replied": 0.08, "viewed": 0.02}
-# The embedding model takes ~8k tokens per input; clip so an oversized post cannot fail the call.
-EMBED_MAX_CHARS = 24_000
+# The embedding model takes 8,191 tokens per input. Its byte-level BPE never spends more than one
+# token per UTF-8 byte, so clipping to 8,000 bytes keeps any script (CJK, emoji) under the limit.
+EMBED_MAX_BYTES = 8_000
 VOICE_UNAVAILABLE_WARNING = "Voice samples were unavailable, so the draft was written without them."
+
+
+def _clip_for_embedding(text: str) -> str:
+    return text.encode("utf-8")[:EMBED_MAX_BYTES].decode("utf-8", "ignore")
 
 
 class EvidenceUnavailable(Exception):
@@ -144,10 +149,10 @@ async def select_evidence(
     always = [a for a in ((anchors or {}).get("always_include") or []) if isinstance(a, str) and a.strip()]
     # Job<->job: same text shape Phase 1 (Task 1.8) and Phase 3 (Task 3.4) embed into
     # proposals.job_needs_embedding ("title\n\ndescription"); needs are the fallback.
-    voice_query = ("\n\n".join(t for t in (brief.title, brief.description) if t) or "\n".join(needs))[
-        :EMBED_MAX_CHARS
-    ]
-    texts = [t[:EMBED_MAX_CHARS] for t in needs + always]
+    voice_query = _clip_for_embedding(
+        "\n\n".join(t for t in (brief.title, brief.description) if t) or "\n".join(needs)
+    )
+    texts = [_clip_for_embedding(t) for t in needs + always]
     if not texts and not voice_query:
         return Evidence()
 

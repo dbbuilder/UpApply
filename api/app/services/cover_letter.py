@@ -32,7 +32,7 @@ BANNED_PHRASES = [
 
 
 GENERIC_SIGNOFFS = ("sincerely", "best regards", "regards", "best", "thank you", "thanks")
-SIGNOFF_WINDOW = 3  # a sign-off is only looked for among the last 3 non-empty lines
+SIGNOFF_WINDOW = 5  # sign-off + name, title, company, contact; a constant, so still linear
 
 
 def _signoff_rest(line: str, phrases) -> Optional[str]:

@@ -225,3 +225,45 @@ async def test_unsupported_claims_carry_code_and_quoted_detail():
     assert issue == "Unsupported claim: Saved $2M (no fact)"
     assert issue.code == "unsupported_claim"
     assert issue.detail == "Saved $2M (no fact)"
+
+
+def test_explicit_ask_with_fenced_ampersand_matches_plain_ampersand():
+    """The brief model saw 'R＆D' (neutralise fences '&'); a writer that types 'R&D' honoured it."""
+    from app.services.generation.verify import _ask_violated
+    assert not _ask_violated('Start your reply with "R＆D"', "r&d is where the risk sits.")
+    assert not _ask_violated('Start your reply with "R&D"', "r＆d is where the risk sits.")
+    assert _ask_violated('Do not use the phrase "P＆L"', "the p&l moved.")
+
+
+def test_explicit_ask_semantics_after_linear_rewrite():
+    from app.services.generation.verify import _ask_violated
+    assert _ask_violated('Start your reply with "blue".', "red")
+    assert not _ask_violated('Start your reply with "blue".', "blue sky")
+    assert not _ask_violated('In your answer to "Describe your work", be brief', "x")
+    assert not _ask_violated('Do not say "excited". Include the word "pineapple"', "pineapple")
+    assert _ask_violated('Never say "x"; mention "y"', "x y")
+    assert not _ask_violated('Never say "x"; mention "y"', "y")
+    assert _ask_violated('Avoid "a" and "b"', "b")
+
+
+@pytest.mark.parametrize(
+    "ask",
+    ['"a"' * 3000, '"a" ' * 4000, 'include ' + '"a" ' * 4000, 'never ' + '"a"' * 5000],
+    ids=["dense", "spaced", "required", "negated"],
+)
+def test_explicit_ask_check_is_linear(ask):
+    import time
+    from app.services.generation.verify import _ask_violated
+    start = time.perf_counter()
+    _ask_violated(ask, "zzz")
+    assert time.perf_counter() - start < 0.1
+
+
+def test_issue_survives_copy_and_pickle():
+    import copy
+    import pickle
+    from app.services.generation.verify import Issue
+    issue = Issue("Letter must end with closing.", "closing", "detail")
+    for clone in (copy.copy(issue), copy.deepcopy([issue])[0], pickle.loads(pickle.dumps(issue))):
+        assert isinstance(clone, Issue)
+        assert (str(clone), clone.code, clone.detail) == ("Letter must end with closing.", "closing", "detail")

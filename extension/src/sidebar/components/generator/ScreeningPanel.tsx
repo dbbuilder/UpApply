@@ -4,6 +4,7 @@ import type { ScreeningAnswerSearchResult } from '../../../lib/api-client';
 interface ScreeningPanelProps {
   questions: ScreeningQuestion[];
   questionAnswers: Record<string, string>;
+  unverifiedAnswers: Record<string, boolean>;
   suggestedAnswers: Record<string, ScreeningAnswerSearchResult[]>;
   loadingSuggestions: Record<string, boolean>;
   generatingAnswers: Record<string, boolean>;
@@ -18,6 +19,7 @@ interface ScreeningPanelProps {
 export default function ScreeningPanel({
   questions,
   questionAnswers,
+  unverifiedAnswers,
   suggestedAnswers,
   loadingSuggestions,
   generatingAnswers,
@@ -44,6 +46,11 @@ export default function ScreeningPanel({
         {questions.map((q, index) => (
           <div key={index} className="border-b border-gray-100 pb-3 last:border-0">
             <p className="text-sm text-gray-700 mb-2">{q.question}</p>
+            {unverifiedAnswers[`q${index}`] && questionAnswers[`q${index}`] && (
+              <div role="alert" className="mb-2 rounded-lg border border-red-300 bg-red-50 p-2 text-xs font-medium text-red-800">
+                Claims not verified — review specifics before sending
+              </div>
+            )}
             <textarea
               className="w-full border border-gray-200 rounded-lg p-2 text-sm resize-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
               rows={3}

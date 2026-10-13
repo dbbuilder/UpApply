@@ -155,8 +155,26 @@ async def test_select_evidence_clips_every_embedding_input():
         await select_evidence(None, "u1", brief, {"always_include": ["a" * 100_000]})
     sent = [t for call in embed.call_args_list for t in call.args[0]]
     assert len(sent) == 3
-    assert all(len(t) <= ev.EMBED_MAX_CHARS for t in sent)
-    assert ev.EMBED_MAX_CHARS <= 24_000
+    assert all(len(t.encode("utf-8")) <= ev.EMBED_MAX_BYTES for t in sent)
+    assert ev.EMBED_MAX_BYTES <= 8_191
+
+
+@pytest.mark.asyncio
+async def test_select_evidence_clips_non_latin_post_under_token_limit():
+    """A 12,000-char CJK/emoji post (more than 8,191 tokens) must still be clipped under the
+    embedding limit: at most one token per UTF-8 byte, so bytes bound tokens."""
+    brief = JobBrief(
+        needs=["need"], job_types=[], client_signals={}, mirror_phrases=[],
+        explicit_asks=[], questions=[], title="T", description="漢😀" * 6_000,
+    )
+    embed = AsyncMock(side_effect=lambda texts: [[1.0] for _ in texts])
+    with patch.object(ev, "generate_embeddings_batch", embed), \
+         patch.object(ev, "search_facts", AsyncMock(return_value=[])), \
+         patch.object(ev, "_find_voice_samples", AsyncMock(return_value=[])):
+        await select_evidence(None, "u1", brief, None)
+    sent = [t for call in embed.call_args_list for t in call.args[0]]
+    assert sent and all(len(t.encode("utf-8")) <= 8_000 for t in sent)
+    assert all("\ufffd" not in t for t in sent)  # never splits a code point
 
 
 def _vec(x, y=0.0):
@@ -193,7 +211,7 @@ async def test_find_voice_samples_filters_ai_and_weights_outcome(setup_database)
 
 @pytest.mark.asyncio
 async def test_voice_query_embedding_failure_only_loses_voice_samples():
-    """An oversized job post must not take the needs/anchors embedding batch down with it."""
+    """A failing job-text embedding must not take the needs/anchors embedding batch down with it."""
     a = _fact("a")
     brief = JobBrief(
         needs=["need one"], job_types=[], client_signals={}, mirror_phrases=[],
@@ -201,8 +219,8 @@ async def test_voice_query_embedding_failure_only_loses_voice_samples():
     )
 
     async def embed(texts):
-        if any(len(t) > 10_000 for t in texts):
-            raise RuntimeError("input too long")
+        if any(t.startswith("T\n\n") for t in texts):
+            raise RuntimeError("embedding failed")
         return [[1.0] for _ in texts]
 
     find_voice = AsyncMock(return_value=[SimpleNamespace(id="p1")])
