@@ -192,3 +192,104 @@ async def test_cover_letter_generate_rejects_oversized_or_bad_input(
     assert resp.status_code == 422, resp.text
     engine.assert_not_called()
     legacy.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_screening_generate_routes_to_v2_when_flag_on(client: AsyncClient, auth_headers_with_profile):
+    await _enable_v2()
+    question = "How would you handle the cutover?"
+    engine = AsyncMock(return_value=_result([question]))
+    with patch("app.api.v1.screening_answers.generate_application", engine):
+        resp = await client.post(
+            "/api/v1/screening-answers/generate",
+            headers=auth_headers_with_profile,
+            json={
+                "question": question,
+                "job_title": JOB_DATA["title"],
+                "job_description": JOB_DATA["description"],
+                "job_skills": JOB_DATA["skills_required"],
+            },
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"answer": f"Answer to {question}", "verify_warnings": [WARNING]}
+    kwargs = engine.call_args.kwargs
+    assert kwargs["questions"] == [question]
+    assert kwargs["title"] == JOB_DATA["title"]
+    assert kwargs["description"] == JOB_DATA["description"]
+    assert kwargs["skills"] == JOB_DATA["skills_required"]
+    assert kwargs["brief"] is None
+    assert kwargs["credit_usage"] is False
+
+
+@pytest.mark.asyncio
+async def test_screening_generate_reuses_stored_brief_of_the_users_letter(client: AsyncClient, auth_headers_with_profile):
+    await _enable_v2()
+    letter_engine = AsyncMock(return_value=_result(["Describe a similar migration."]))
+    with patch("app.api.v1.jobs.run_full_analysis", AsyncMock(return_value=_analysis())), \
+         patch("app.api.v1.jobs.generate_embedding", AsyncMock(side_effect=RuntimeError("no quota"))), \
+         patch("app.api.v1.jobs.generate_application", letter_engine):
+        letter = await client.post(
+            "/api/v1/jobs/cover-letters/generate",
+            headers=auth_headers_with_profile,
+            json={"job_data": JOB_DATA, "screening_questions": ["Describe a similar migration."]},
+        )
+    assert letter.status_code == 200, letter.text
+
+    question = "How would you handle the cutover?"
+    engine = AsyncMock(return_value=_result([question]))
+    with patch("app.api.v1.screening_answers.generate_application", engine):
+        resp = await client.post(
+            "/api/v1/screening-answers/generate",
+            headers=auth_headers_with_profile,
+            json={"question": question, "cover_letter_id": letter.json()["id"]},
+        )
+    assert resp.status_code == 200, resp.text
+    kwargs = engine.call_args.kwargs
+    assert kwargs["credit_usage"] is False
+    assert kwargs["brief"].needs == ["Has migrated SQL Server to Azure"]
+    assert kwargs["brief"].questions == [question]
+    assert kwargs["title"] == JOB_DATA["title"]
+
+
+@pytest.mark.asyncio
+async def test_screening_generate_keeps_legacy_path_when_flag_off(client: AsyncClient, auth_headers_with_profile):
+    from unittest.mock import MagicMock
+
+    openai_client = MagicMock()
+    openai_client.chat.completions.create = AsyncMock(return_value=SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="Legacy answer"))]
+    ))
+    engine = AsyncMock()
+    with patch("app.api.v1.screening_answers.generate_application", engine), \
+         patch("app.api.v1.screening_answers.generate_embedding", AsyncMock(side_effect=RuntimeError("no quota"))), \
+         patch("app.api.v1.screening_answers.get_openai_client", return_value=openai_client):
+        resp = await client.post(
+            "/api/v1/screening-answers/generate",
+            headers=auth_headers_with_profile,
+            json={"question": "Why you?"},
+        )
+    assert resp.status_code == 200, resp.text
+    engine.assert_not_called()
+    assert resp.json() == {"answer": "Legacy answer", "verify_warnings": None}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("override", [
+    {"question": "q" * 2001},
+    {"job_title": "t" * 301},
+    {"job_description": "d" * 20001},
+    {"job_skills": ["s"] * 51},
+    {"job_skills": ["s" * 201]},
+    {"cover_letter_id": "c" * 37},
+])
+async def test_screening_generate_rejects_oversized_input(client: AsyncClient, auth_headers_with_profile, override):
+    await _enable_v2()
+    engine = AsyncMock()
+    with patch("app.api.v1.screening_answers.generate_application", engine):
+        resp = await client.post(
+            "/api/v1/screening-answers/generate",
+            headers=auth_headers_with_profile,
+            json={"question": "Why you?", **override},
+        )
+    assert resp.status_code == 422, resp.text
+    engine.assert_not_called()

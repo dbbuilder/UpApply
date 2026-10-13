@@ -301,6 +301,7 @@ export default function GeneratorPage() {
         currentJob?.title ?? undefined,
         currentJob?.description ?? undefined,
         currentJob?.skills ?? undefined,
+        useAppStore.getState().coverLetterId ?? undefined,
       );
       setQuestionAnswers(prev => ({ ...prev, [key]: result.answer }));
     } catch {
