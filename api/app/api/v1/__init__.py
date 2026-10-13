@@ -18,6 +18,7 @@ from app.api.v1.job_queue import router as job_queue_router
 from app.api.v1.guardrails import router as guardrails_router
 from app.api.v1.agent import router as agent_router
 from app.api.v1.admin import router as admin_router
+from app.api.v1.facts import router as facts_router
 
 router = APIRouter()
 
@@ -38,3 +39,4 @@ router.include_router(job_queue_router, prefix="/job-queue", tags=["Job Queue"])
 router.include_router(guardrails_router, prefix="/guardrails", tags=["Guardrails"])
 router.include_router(agent_router, prefix="/agent", tags=["Agent"])
 router.include_router(admin_router, prefix="/admin", tags=["Admin"])
+router.include_router(facts_router, prefix="/facts", tags=["Facts"])
