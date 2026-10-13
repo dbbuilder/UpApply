@@ -125,3 +125,44 @@ def test_score_fails_when_claim_check_was_skipped():
     assert result["unsupported_claims"] == 0
     assert result["claim_check_skipped"] == ["j3"]
     assert result["passed"] is False
+
+
+def _row(i, **kw):
+    base = {"id": f"p{i}", "upwork_proposal_id": f"u{i}", "job_title": f"Job {i}",
+            "job_text": "Need help. " * 30, "cover_letter_text": "Real letter. " * 40,
+            "author": "chris", "outcome": None, "screening_answers": None, "created_at": i}
+    base.update(kw)
+    return base
+
+
+def test_select_golden_keeps_only_chris_written_complete_rows():
+    rows = [
+        _row(1),
+        _row(2, author="ai"),                 # ChatGPT/AI letter: not a reference
+        _row(3, job_text=None),               # no job post to generate from
+        _row(4, cover_letter_text="short"),   # truncated scrape
+        _row(5, author="chris_edited_ai"),
+    ]
+    assert [g["id"] for g in eval_generation.select_golden(rows, n=20)] == ["p5", "p1"]
+
+
+def test_select_golden_weights_toward_responses_then_newest_and_dedupes_titles():
+    rows = [
+        _row(1, outcome="declined"), _row(2, outcome="viewed"), _row(3, outcome="replied"),
+        _row(4, outcome="hired"), _row(5), _row(6, outcome="interviewed", job_title="Job 3"),
+    ]
+    got = [g["id"] for g in eval_generation.select_golden(rows, n=4)]
+    # Tiers: hired/interviewed/replied, then viewed, then unknown/no_response, then declined;
+    # newest first within a tier. p3 shares p6's title and ranks lower, so it is dropped.
+    assert got == ["p6", "p4", "p2", "p5"]
+
+
+def test_select_golden_emits_harness_format_with_exclusion_ids_and_questions():
+    row = _row(7, outcome="replied", screening_answers=[{"question": "Q1?", "answer": "A"}])
+    [g] = eval_generation.select_golden([row], n=20)
+    assert g == {
+        "id": "p7", "proposal_id": "p7", "upwork_proposal_id": "u7", "title": "Job 7",
+        "description": row["job_text"].strip(), "skills": [], "questions": ["Q1?"],
+        "chris_letter": row["cover_letter_text"].strip(), "outcome": "replied",
+    }
+    assert eval_generation.golden_exclusions(g)  # harness will exclude its own letter

@@ -8,6 +8,12 @@ Golden JSON (list of jobs where Chris's real submitted letter is known):
 "id", "proposal_id" and "upwork_proposal_id" are all excluded from voice-sample retrieval so
 the v2 side is never conditioned on the job's own submitted letter (the answer key).
 
+Build the golden file from scraped proposals (read-only; letters Chris wrote/edited,
+responses first, one per job title):
+    cd api && doppler run --project upapply --config prd -- \\
+        ./venv/bin/python ../scripts/eval_generation.py build-golden \\
+        --email chris@servicevision.net --out ../docs/evals/golden.json
+
 Generate the blind packet (needs DATABASE_URL, OPENAI_API_KEY, ANTHROPIC_API_KEY):
     cd api && doppler run --project upapply --config prd -- \\
         ./venv/bin/python ../scripts/eval_generation.py generate \\
@@ -135,6 +141,68 @@ def score(rows: list[dict], key: dict) -> dict:
     }
 
 
+GOLDEN_AUTHORS = ("chris", "chris_edited_ai")
+_OUTCOME_TIER = {"hired": 0, "interviewed": 0, "replied": 0, "viewed": 1, "declined": 3}
+MIN_GOLDEN_JOB_CHARS = 200
+MIN_GOLDEN_LETTER_CHARS = 300
+
+
+def select_golden(rows: list[dict], n: int = 20) -> list[dict]:
+    """Pick golden jobs from proposal rows: only letters Chris wrote or edited, with the job
+    post and a full letter present; responses first, then newest; one per job title."""
+    eligible = [
+        r for r in rows
+        if r.get("author") in GOLDEN_AUTHORS
+        and len((r.get("job_text") or "").strip()) >= MIN_GOLDEN_JOB_CHARS
+        and len((r.get("cover_letter_text") or "").strip()) >= MIN_GOLDEN_LETTER_CHARS
+        and (r.get("job_title") or "").strip()
+    ]
+    eligible.sort(key=lambda r: (_OUTCOME_TIER.get(r.get("outcome"), 2), -_order(r.get("created_at"))))
+    golden, titles = [], set()
+    for r in eligible:
+        title_key = r["job_title"].strip().lower()
+        if title_key in titles:
+            continue
+        titles.add(title_key)
+        golden.append({
+            "id": r["id"], "proposal_id": r["id"], "upwork_proposal_id": r.get("upwork_proposal_id"),
+            "title": r["job_title"].strip(), "description": r["job_text"].strip(), "skills": [],
+            "questions": [a["question"] for a in (r.get("screening_answers") or [])
+                          if isinstance(a, dict) and (a.get("question") or "").strip()],
+            "chris_letter": r["cover_letter_text"].strip(), "outcome": r.get("outcome"),
+        })
+        if len(golden) == n:
+            break
+    return golden
+
+
+def _order(value) -> float:
+    return value.timestamp() if hasattr(value, "timestamp") else float(value or 0)
+
+
+async def build_golden(email: str, out: Path, n: int) -> None:
+    from sqlalchemy import select
+
+    from app.core.database import async_session_maker
+    from app.models.proposal import Proposal
+    from app.models.user import User
+
+    async with async_session_maker() as db:  # read-only
+        user = (await db.execute(select(User).where(User.email == email.lower()))).scalar_one()
+        props = (await db.execute(select(Proposal).where(
+            Proposal.user_id == user.id, Proposal.author.in_(GOLDEN_AUTHORS)))).scalars().all()
+        rows = [{c: getattr(p, c) for c in ("id", "upwork_proposal_id", "job_title", "job_text",
+                 "cover_letter_text", "author", "outcome", "screening_answers", "created_at")}
+                for p in props]
+    golden = select_golden(rows, n)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(golden, indent=2))
+    positives = sum(1 for g in golden if _OUTCOME_TIER.get(g["outcome"]) == 0)
+    print(f"wrote {len(golden)} golden jobs ({positives} with a reply or better) to {out}")
+    if len(golden) < 15:
+        print("WARNING: fewer than 15 eligible jobs — scrape more proposal details first (spec §4.2)")
+
+
 async def _generate_one(email: str, job: dict) -> tuple[str, object]:
     from sqlalchemy import select
 
@@ -210,11 +278,17 @@ def main() -> None:
     gen.add_argument("--golden", required=True, type=Path)
     gen.add_argument("--out-dir", type=Path, default=ROOT / "docs" / "evals" / date.today().isoformat())
     gen.add_argument("--seed", type=int, default=20261012)
+    bg = sub.add_parser("build-golden", help="Select golden jobs from scraped proposals (read-only)")
+    bg.add_argument("--email", required=True)
+    bg.add_argument("--out", type=Path, default=ROOT / "docs" / "evals" / "golden.json")
+    bg.add_argument("--n", type=int, default=20)
     sc = sub.add_parser("score")
     sc.add_argument("--run-dir", required=True, type=Path)
     args = parser.parse_args()
 
-    if args.command == "generate":
+    if args.command == "build-golden":
+        asyncio.run(build_golden(args.email, args.out, args.n))
+    elif args.command == "generate":
         asyncio.run(generate(args.email, args.golden, args.out_dir, args.seed))
     else:
         rows = list(csv.DictReader((args.run_dir / "scores.csv").open()))
