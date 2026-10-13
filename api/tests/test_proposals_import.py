@@ -54,6 +54,7 @@ async def test_outcome_derivation_and_author_validation(client: AsyncClient, aut
         {"proposalId": "202", "jobTitle": "B", "coverLetter": "x", "status": "responded", "author": "chris_edited_ai"},
         {"proposalId": "203", "jobTitle": "C", "coverLetter": "x", "status": "submitted", "author": "robot"},
         {"proposalId": "204", "jobTitle": "D", "coverLetter": "x", "status": "submitted", "outcome": "declined"},
+        {"proposalId": "205", "jobTitle": "E", "coverLetter": "x", "status": "viewed"},
     ]})
     by_id = {p["upwork_proposal_id"]: p for p in r.json()}
     assert by_id["201"]["outcome"] == "interviewed"
@@ -62,6 +63,7 @@ async def test_outcome_derivation_and_author_validation(client: AsyncClient, aut
     assert by_id["203"]["author"] == "chris"
     assert by_id["203"]["outcome"] is None
     assert by_id["204"]["outcome"] == "declined"
+    assert by_id["205"]["outcome"] == "viewed"  # matches migration 022 backfill
     # Phase 0: open statuses keep was_hired unknown, not declined
     assert by_id["201"]["was_hired"] is None
     assert by_id["203"]["was_hired"] is None
@@ -88,17 +90,39 @@ async def test_reimport_backfills_existing_row(client: AsyncClient, auth_headers
 
 
 @pytest.mark.asyncio
+async def test_reimport_never_regresses_outcome(client: AsyncClient, auth_headers: dict, fake_embed):
+    await client.post(URL, headers=auth_headers, json={"proposals": [
+        {"proposalId": "501", "jobTitle": "Won", "coverLetter": "x", "status": "archived", "wasHired": True},
+        {"proposalId": "502", "jobTitle": "Talked", "coverLetter": "x", "status": "interviewed"},
+    ]})
+    await client.post(URL, headers=auth_headers, json={"proposals": [
+        {"proposalId": "501", "jobTitle": "Won", "coverLetter": "x", "status": "responded"},
+        {"proposalId": "502", "jobTitle": "Talked", "coverLetter": "x", "status": "declined"},
+    ]})
+    assert (await _row("501")).outcome == "hired"
+    assert (await _row("502")).outcome == "interviewed"
+
+    await client.post(URL, headers=auth_headers, json={"proposals": [
+        {"proposalId": "502", "jobTitle": "Talked", "coverLetter": "x", "outcome": "replied"},
+    ]})
+    assert (await _row("502")).outcome == "interviewed"
+
+
+@pytest.mark.asyncio
 async def test_import_caps_free_text_sizes(client: AsyncClient, auth_headers: dict, fake_embed):
     r = await client.post(URL, headers=auth_headers, json={"proposals": [{"jobTitle": "x"}] * 1001})
     assert r.status_code == 422
 
     r = await client.post(URL, headers=auth_headers, json={"proposals": [{
-        "proposalId": "401", "jobTitle": "Big", "coverLetter": "x",
+        "proposalId": "401", "jobTitle": "B" * 2_000, "coverLetter": "c" * 50_000,
         "jobDescription": "j" * 50_000,
         "screeningAnswers": [{"question": "q" * 9000, "answer": "a" * 9000}] * 60,
     }]})
     body = r.json()[0]
     assert len(body["job_text"]) == 20_000
+    assert len(body["cover_letter_text"]) == 20_000
+    assert len(body["job_title"]) == 500
+    assert all(len(c.args[0]) <= 20_000 + 600 for c in fake_embed.await_args_list)
     assert len(body["screening_answers"]) == 50
     assert len(body["screening_answers"][0]["question"]) == 5_000
     assert len(body["screening_answers"][0]["answer"]) == 5_000

@@ -481,6 +481,10 @@ async def bulk_create_proposals(
 VOICE_AUTHORS = {"chris", "chris_edited_ai", "ai"}
 VOICE_OUTCOMES = {"no_response", "viewed", "replied", "interviewed", "hired", "declined"}
 MAX_JOB_TEXT_CHARS = 20_000
+MAX_COVER_LETTER_CHARS = 20_000
+MAX_JOB_TITLE_CHARS = 500
+# Outcomes only move forward (mirrors Phase 3 outcomes.should_replace).
+_OUTCOME_RANK = {None: 0, "no_response": 1, "viewed": 2, "declined": 3, "replied": 4, "interviewed": 5, "hired": 6}
 MAX_SCREENING_ANSWERS = 50
 MAX_ANSWER_CHARS = 5_000
 
@@ -498,6 +502,8 @@ def _derive_outcome(raw_outcome: Optional[str], status_str: Optional[str], was_h
         return "replied"
     if "declin" in s:
         return "declined"
+    if s == "viewed":
+        return "viewed"
     return None
 
 
@@ -541,8 +547,8 @@ async def import_proposals_from_upwork(
 
     for raw_data in request.proposals:
         upwork_proposal_id = raw_data.get("proposalId")
-        cover_letter_text = (raw_data.get("coverLetter") or "").strip()
-        job_title = raw_data.get("jobTitle")
+        cover_letter_text = (raw_data.get("coverLetter") or "").strip()[:MAX_COVER_LETTER_CHARS]
+        job_title = str(raw_data.get("jobTitle") or "").strip()[:MAX_JOB_TITLE_CHARS] or None
         job_url = raw_data.get("jobUrl")
         bid_amount = raw_data.get("bidAmount")
         bid_type = raw_data.get("bidType")
@@ -588,7 +594,7 @@ async def import_proposals_from_upwork(
                     existing.job_text = job_text
                 if existing.job_needs_embedding is None:
                     existing.job_needs_embedding = await _job_needs_embedding(job_title, existing.job_text)
-                if outcome:
+                if outcome and _OUTCOME_RANK[outcome] > _OUTCOME_RANK.get(existing.outcome, 0):
                     existing.outcome = outcome
                 continue
 
