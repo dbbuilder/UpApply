@@ -251,7 +251,7 @@ async def test_credit_facts_ignores_other_users_facts(db_session, test_user):
 @pytest.mark.asyncio
 async def test_auto_approve_into_untrusted_candidate_takes_trusted_wording(db_session, test_user):
     """A bio-memory match must never approve an unreviewed candidate's own (untrusted) wording."""
-    existing = await _seed(db_session, test_user.id, "Led a 120-server Azure migration saving $4M.", unit(0), strength=1.0)
+    existing = await _seed(db_session, test_user.id, "Led the biggest-ever 160-server Azure migration.", unit(0), strength=1.0)
     trusted_vec = blend(0, 1, 0.95)
     with patch("app.services.facts.generate_embedding", AsyncMock(return_value=trusted_vec)):
         fact, outcome = await upsert_candidate_outcome(
@@ -381,3 +381,28 @@ async def test_trusted_promotion_drops_untrusted_or_client_ranking_fields(db_ses
     assert fact.skills == ["Azure"] and fact.industries == [] and fact.job_types == []
     assert (fact.source_type, fact.source_ref) == ("bio_memory", "m9")
     assert [s["source_type"] for s in fact.sources] == [first_source, "bio_memory"]
+
+
+@pytest.mark.asyncio
+async def test_changed_number_is_not_merged_into_approved_fact(db_session, test_user):
+    """'160 servers' must not vanish into an approved '120 servers' fact: it goes to review."""
+    existing = await _seed(db_session, test_user.id, "Migrated 120 servers to Azure.", unit(0),
+                           status="approved")
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=blend(0, 1, 0.97))):
+        fact, outcome = await upsert_candidate_outcome(
+            db_session, test_user.id, _cand("Migrated 160 servers to Azure."))
+    assert outcome == "created"
+    assert fact.id != existing.id and fact.status == "candidate"
+    assert fact.statement == "Migrated 160 servers to Azure."
+    assert existing.statement == "Migrated 120 servers to Azure."
+    assert await _count(db_session) == 2
+
+
+@pytest.mark.asyncio
+async def test_same_numbers_still_merge(db_session, test_user):
+    existing = await _seed(db_session, test_user.id, "Migrated 160 servers to Azure in 2019.", unit(0),
+                           status="approved")
+    with patch("app.services.facts.generate_embedding", AsyncMock(return_value=blend(0, 1, 0.97))):
+        fact, _ = await upsert_candidate_outcome(
+            db_session, test_user.id, _cand("Moved 160 servers into Azure (2019)."))
+    assert fact.id == existing.id
