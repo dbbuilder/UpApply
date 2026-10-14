@@ -95,7 +95,7 @@ pgvector + `text-embedding-3-small`, auth, extension shell, existing `memories` 
 
 ### 1.7 Ongoing fact intake (decided 2026-10-12)
 
-After the initial load, new candidates (from each submitted letter, contract, or refine-thread correction) that match an existing **approved** fact at similarity ≥0.92 are **auto-approved and merged** (source appended, `strength` kept at max). Non-matching candidates go to the Facts review queue.
+After the initial load, new candidates (from each submitted letter, contract, or refine-thread correction) that match an existing **approved** fact at similarity ≥0.92 are **auto-approved and merged** (source appended; the approved wording and ranking fields are untouched). Non-matching candidates go to the Facts review queue. A candidate whose **figures differ** from its near-duplicate ("160 servers" vs an approved "120 servers") is never merged: it is kept as a separate candidate so the review queue surfaces the conflict. Client-sourced facts (client quotes, contract feedback) are never auto-approved.
 
 ---
 
@@ -191,7 +191,7 @@ The first draft is the product (§2). This loop exists to (a) handle the occasio
 ### 3.3 Outcome sync
 
 - Proposals scraper runs when Chris opens Upwork's Proposals page (no background polling) and maps statuses → `voice_samples.outcome` (`viewed` · `replied` · `interviewed` · `hired` · `declined` · `no_response` after 14 days).
-- On `replied`/`interviewed`/`hired`: increment `times_in_won` on each fact in `fact_ids_used` and boost the voice sample's weight. This is what makes retrieval improve over time (§2.1 rerank `win_signal`).
+- On the **first** positive outcome (`replied`/`interviewed`/`hired`) of a proposal: increment `times_in_won` once on each approved fact in `fact_ids_used` and boost the voice sample's weight. Crediting is one-time per proposal (`facts_credited_at`), so a proposal advancing replied → interviewed → hired, or a re-sync, never credits twice. This is what makes retrieval improve over time (§2.1 rerank `win_signal`).
 - Replaces the broken `learning_engine.winning_proposal_to_memory` path.
 
 ### 3.4 Explicitly deferred (YAGNI)
