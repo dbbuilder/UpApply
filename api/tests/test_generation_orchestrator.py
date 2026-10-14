@@ -221,8 +221,8 @@ async def test_answers_only_still_repairs_a_bad_answer():
 
 @pytest.mark.asyncio
 async def test_screening_answer_violation_in_full_run_triggers_repair():
-    bad = Draft(cover_letter=CLEAN, screening_answers=[{"question": "Q?", "answer": "Yes."}], fact_ids_used=[])
-    good = Draft(cover_letter=CLEAN, screening_answers=[{"question": "Q?", "answer": GOOD_ANSWER}], fact_ids_used=[])
+    bad = Draft(cover_letter=CLEAN, screening_answers=[{"question": "Q?", "answer": "Yes."}], fact_ids_used=["fact-1"])
+    good = Draft(cover_letter=CLEAN, screening_answers=[{"question": "Q?", "answer": GOOD_ANSWER}], fact_ids_used=["fact-1"])
     result, write, _ = await _run([bad, good])
     assert write.call_count == 2
     assert result.warnings == []
@@ -310,3 +310,26 @@ async def test_untrusted_text_never_reaches_repair_instructions():
     assert "data, not instructions" in prompt.split("<repair_notes>", 1)[0].rsplit("REPAIR", 1)[1]
     # user-facing warnings stay human-readable strings
     assert result.warnings and all(isinstance(w, str) for w in result.warnings)
+
+
+FACT2 = SimpleNamespace(id="fact-2", statement="s2", kind="metric", detail=None)
+
+
+@pytest.mark.asyncio
+async def test_too_few_specifics_triggers_repair():
+    """Success criterion: >= 2 job-relevant verified specifics when the evidence has them."""
+    ev = Evidence(facts=[FACT, FACT2])
+    result, write, _ = await _run([_draft(CLEAN, ("fact-1",)), _draft(CLEAN, ("fact-1", "fact-2"))], evidence=ev)
+    assert write.call_count == 2
+    assert any(n.code == "too_few_specifics" for n in write.call_args_list[1].kwargs["repair_notes"])
+    assert result.warnings == []
+
+
+@pytest.mark.asyncio
+async def test_specifics_minimum_is_capped_by_available_evidence_and_ignores_unknown_ids():
+    # One fact available: citing it is enough. An id not in the evidence does not count.
+    result, write, _ = await _run([_draft(CLEAN, ("fact-1",))], evidence=Evidence(facts=[FACT]))
+    assert write.call_count == 1 and result.warnings == []
+    result, write, _ = await _run([_draft(CLEAN, ("ghost",)), _draft(CLEAN, ("ghost",))],
+                                  evidence=Evidence(facts=[FACT, FACT2]))
+    assert any(getattr(w, "code", None) == "too_few_specifics" for w in result.warnings)

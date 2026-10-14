@@ -150,6 +150,7 @@ REPAIR_INSTRUCTIONS = {
     "unsupported_claim": "Remove every specific that the <evidence> block does not support.",
     "missing_prototype_url": "Include the URL from the <prototype_url> block, written exactly.",
     "answer_rules": "Keep each screening answer to 2-5 sentences, with no salutation and no banned phrase.",
+    "too_few_specifics": "Use at least two evidence facts that answer the client's needs, stated exactly, and list their ids in fact_ids_used.",
 }
 
 
