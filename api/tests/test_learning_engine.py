@@ -30,5 +30,5 @@ async def test_winning_proposal_to_memory_writes_nothing():
 
     assert result is None
     db.add.assert_not_called()
-    db.flush.assert_not_awaited()
-    embed.assert_not_awaited()
+    db.flush.assert_not_called()
+    embed.assert_not_called()
