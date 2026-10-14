@@ -5,6 +5,7 @@ Nothing here commits — callers own the transaction (routers commit; get_db com
 import asyncio
 import hashlib
 import logging
+import re
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import select, update
@@ -18,6 +19,15 @@ from app.services.fact_extraction import extract_facts
 logger = logging.getLogger(__name__)
 
 DEDUPE_THRESHOLD = 0.92
+# Linear (separators required between digit runs, so no overlapping quantifiers).
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def _numbers_conflict(a: str, b: str) -> bool:
+    """True when both texts state numbers and the sets differ ("160 servers" vs "120 servers"):
+    embeddings rank such pairs as near-duplicates, but merging would silently drop one value."""
+    na, nb = set(_NUMBER.findall(a or "")), set(_NUMBER.findall(b or ""))
+    return bool(na and nb and na != nb)
 # Records written by clients / Upwork about the user (contracts, feedback). Never auto-approved,
 # not even by matching an approved fact (§1.7): they only ever add provenance.
 CLIENT_SOURCE_TYPES = frozenset({"client_feedback", "upwork_contract"})
@@ -90,6 +100,8 @@ async def upsert_candidate_outcome(
         auto_approve = False
     embedding = await generate_embedding(fact_embedding_text(cand.statement, cand.detail))
     nearest = await _nearest(db, user_id, embedding)
+    if nearest and _numbers_conflict(cand.statement, nearest[0].statement):
+        nearest = None  # conflicting figures: keep both, the new one goes to review
 
     if nearest and nearest[1] >= DEDUPE_THRESHOLD:
         fact = nearest[0]

@@ -274,3 +274,15 @@ async def test_reimport_with_job_post_as_letter_still_updates_outcome_and_job_te
     assert row.cover_letter_text == "Short real letter."
     assert row.outcome == "hired"
     assert row.job_text == JOB
+
+
+@pytest.mark.asyncio
+async def test_capitalised_statuses_are_normalised(client: AsyncClient, auth_headers: dict, fake_embed):
+    r = await client.post(URL, headers=auth_headers, json={"proposals": [
+        {"proposalId": "cap1", "jobTitle": "Job cap one", "coverLetter": "Letter one", "status": "Hired"},
+        {"proposalId": "cap2", "jobTitle": "Job cap two", "coverLetter": "Letter two", "status": "Interviewed"},
+    ]})
+    assert r.status_code == 200
+    hired, interviewed = await _row("cap1"), await _row("cap2")
+    assert hired.was_hired is True and hired.client_responded is True
+    assert interviewed.was_hired is None and interviewed.client_responded is True
