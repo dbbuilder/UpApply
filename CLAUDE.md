@@ -257,6 +257,18 @@ exec(open('scripts/import_chatgpt_corpus.py').read())
 | 010 | Add job_reviews table |
 | 011 | Add work_logs table |
 | 012 | Add proposal_anchors JSONB to user_profiles |
+| 013 | Add submission tracking fields to cover_letters |
+| 014 | Add profile optimization cache columns to user_profiles |
+| 015 | Add preferred_client_locations to user_profiles |
+| 016 | Add job_queue and user_autonomy_profiles tables |
+| 017 | Add outcome_events table |
+| 018 | Add draft_cover_letter and draft_status columns to job_queue |
+| 019 | Add submission tracking columns to job_queue |
+| 020 | Add user_guardrail_configs table |
+| 021 | Add global_signal_pool table |
+| 022 | Knowledge layer: facts table, voice-sample columns on proposals, memory retrieval flag |
+| 023 | Generation v2: cover letter traceability columns + per-user generation_v2 flag |
+| 024 | Refine-thread and submitted-final columns on cover_letters, proposals.facts_credited_at |
 
 ## Environment Variables
 
