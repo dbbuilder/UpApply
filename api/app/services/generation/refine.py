@@ -23,7 +23,7 @@ from app.schemas.job import MAX_GEN_DESCRIPTION, MAX_GEN_TITLE
 from app.services.facts import search_facts
 from app.services.generation.brief import JobBrief
 from app.services.generation.evidence import Evidence, format_facts
-from app.services.generation.verify import CLAIM_CHECK_SKIPPED, Issue, check_claims, check_rules
+from app.services.generation.verify import CLAIM_CHECK_SKIPPED, Issue, check_claims, check_rules, check_specifics
 from app.services.generation.writer import (
     Draft,
     _align_answers,
@@ -296,6 +296,7 @@ async def refine_application(
         if not item.get("answer"):
             question = str(item.get("question", ""))
             warnings.append(Issue(f'No answer for screening question: "{question}"', "missing_answer", question))
+    warnings += check_specifics(draft.fact_ids_used, all_evidence.facts)
     warnings += await check_claims(draft, all_evidence)
     # Every fact search_facts brought in this turn (never evidence facts) is shown to Chris
     # before the letter goes to this client. fact_ids_used is model output, so a steered model

@@ -184,6 +184,23 @@ def _ask_violated(ask: str, haystack: str) -> bool:
     return False
 
 
+# Spec success criterion: every draft cites >= 2 job-relevant verified specifics (capped by
+# what the evidence actually holds).
+MIN_SPECIFICS = 2
+
+
+def check_specifics(fact_ids_used: list[str], facts: list) -> list[str]:
+    """Too few evidence facts cited; ids that are not in the evidence do not count."""
+    required = min(MIN_SPECIFICS, len(facts))
+    cited = {str(f.id) for f in facts} & set(fact_ids_used)
+    if len(cited) >= required:
+        return []
+    return [Issue(
+        f"The letter cites {len(cited)} verified specific(s); use at least {required} "
+        "job-relevant facts from the evidence.", "too_few_specifics",
+    )]
+
+
 def check_rules(
     text: str,
     brief: JobBrief,

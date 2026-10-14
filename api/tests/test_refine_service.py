@@ -467,3 +467,15 @@ async def test_tool_call_cap_spans_rounds():
     assert search.await_count == 6
     second_round = client.messages.create.await_args_list[2].kwargs["messages"][4]["content"]
     assert [bool(r.get("is_error")) for r in second_round] == [False, False, True, True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cited, flagged", [([], True), ([EVIDENCE_FACT_ID], False)])
+async def test_refined_draft_dropping_specifics_is_warned(cited, flagged):
+    """Same >=2-specifics criterion as first drafts (capped by evidence), as a warning: refine has no repair pass."""
+    client = _client([_final(dict(REVISED, fact_ids_used=cited))])
+    with patch(f"{MOD}.get_anthropic_client", return_value=client), \
+         patch(f"{MOD}.check_rules", return_value=[]), \
+         patch(f"{MOD}.check_claims", AsyncMock(return_value=[])):
+        result = await refine_application(None, "u1", _profile(), _brief(), _evidence(), _current(), [], "shorter")
+    assert any(getattr(w, "code", None) == "too_few_specifics" for w in result.warnings) is flagged
