@@ -149,12 +149,29 @@ The job analysis service (`api/app/services/job_analysis.py`) scores jobs agains
 
 ### Cover Letter Generation
 
-The generation pipeline in `api/app/services/cover_letter.py` is corpus-trained and user-specific. See `docs/corpus-guided-cover-letters.md` for full architecture detail.
+Two pipelines, selected per user by `user_profiles.generation_v2` (default `false`), checked in `api/v1/jobs.py` and `api/v1/screening_answers.py`.
+
+#### Memory-driven generation (v2, flag on)
+
+Package `api/app/services/generation/`: brief → evidence → write → verify → at most one repair.
+- `brief.py` — structured job brief (needs, explicit asks) via `extraction_model` (`claude-haiku-4-5`)
+- `evidence.py` — approved **facts** (verified claims, `/api/v1/facts`) ranked per need (0.55·similarity + 0.25·strength + 0.20·win signal), plus **voice samples** (past proposals written or edited by the user, never AI-only) for tone
+- `writer.py` — `cover_letter_model` (`claude-opus-5-5`, `writer_effort="high"`; no temperature, thinking or prefill), structured output with `fact_ids_used`
+- `verify.py` — rule checks, claim check against evidence, and ≥2 verified specifics (`MIN_SPECIFICS`); failures map to `REPAIR_CODES` for the single repair pass
+- `refine.py` — `POST /api/v1/jobs/cover-letters/{letter_id}/refine` chat with a `search_facts` tool (caps: `MAX_TOOL_ROUNDS=4`, `MAX_TOOL_CALLS=6`, `MAX_FOUND_FACTS=8`)
+- Facts: `api/app/services/facts.py` (dedupe at 0.92 cosine; matches of an approved fact auto-approve unless figures conflict or the source is the client) and `fact_extraction.py`; outcome sync credits facts once via `proposals.facts_credited_at`
+- **Untrusted text** (job posts, client messages, scraped pages) must pass through `app/services/untrusted.neutralise()` before it reaches any prompt
+
+Design: `docs/superpowers/specs/2026-10-12-memory-driven-generation-design.md`. Plan: `docs/superpowers/plans/2026-10-12-memory-driven-generation.md`. Rollout (ingest, golden set, blind A/B ≥75% before flipping the flag): `docs/superpowers/runbook-memory-driven-generation.md`, using `scripts/ingest_chatgpt_facts.py` and `scripts/eval_generation.py`.
+
+#### Legacy pipeline (flag off)
+
+The legacy pipeline in `api/app/services/cover_letter.py` is corpus-trained and user-specific. See `docs/corpus-guided-cover-letters.md` for full architecture detail.
 
 **Pipeline:**
 1. `build_system_prompt(profile, include_call_offer)` — user identity, voice rules, job priority hierarchy, banned phrases, per-user credential requirements from `profile.proposal_anchors["always_include"]`
 2. `build_user_prompt(...)` — job context, top-N relevant memories (pgvector), past proposals for voice calibration, per-user job-type credential routing from `profile.proposal_anchors[job_type]`, optional call offer
-3. Claude claude-sonnet-4-6 generation (model: `cover_letter_model` setting)
+3. Claude claude-sonnet-4-6 generation (model: `legacy_cover_letter_model` setting)
 4. `clean_cover_letter()` — strips salutations, generic sign-offs (preserves "Warm regards,"), placeholders
 5. `append_prototype_url()` — appends demo URL sentence if provided
 6. `append_closing()` — appends user's `preferred_closing`
