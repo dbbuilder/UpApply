@@ -701,6 +701,7 @@ async def import_proposals_from_upwork(
         bid_amount = raw_data.get("bidAmount")
         bid_type = raw_data.get("bidType")
         status_str = raw_data.get("status", "submitted")
+        status_key = (status_str or "").strip().lower()  # scraped statuses arrive capitalised
         submitted_at_str = raw_data.get("submittedAt")
         screening_answers = _clean_answers(raw_data.get("screeningAnswers"))
         job_text = (raw_data.get("jobDescription") or "").strip()[:MAX_JOB_TEXT_CHARS] or None
@@ -714,9 +715,9 @@ async def import_proposals_from_upwork(
         was_hired_override = raw_data.get("wasHired")
         if was_hired_override is not None:
             was_hired = bool(was_hired_override)
-        elif status_str == "hired":
+        elif status_key == "hired":
             was_hired = True
-        elif (status_str or "").lower() in PENDING_PROPOSAL_STATUSES:
+        elif status_key in PENDING_PROPOSAL_STATUSES:
             was_hired = None  # outcome still open, not declined
         else:
             was_hired = False
@@ -786,7 +787,7 @@ async def import_proposals_from_upwork(
             bid_amount=bid_amount,
             bid_type=bid_type,
             status=status_str,
-            client_responded=status_str in ("responded", "interviewed", "hired"),
+            client_responded=status_key in ("responded", "interviewed", "hired"),
             was_hired=was_hired,
             submitted_at=submitted_at,
             source="scraped",

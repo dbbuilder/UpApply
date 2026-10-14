@@ -18,6 +18,9 @@ from app.services.generation.verify import (
 )
 from app.services.generation.writer import Draft, write_application
 
+# Spec success criterion: every draft cites >= 2 job-relevant verified specifics (capped by
+# what the evidence actually holds).
+MIN_SPECIFICS = 2
 NO_FACTS_WARNING = "No approved facts matched this job, so the draft has no verified specifics."
 # Stored jobs (job_id path) and stored briefs never passed request validation, so the engine
 # enforces the free-text limits (app.schemas.job) itself before untrusted text reaches a prompt.
@@ -51,6 +54,13 @@ async def _verify(
                 f"Prototype URL {prototype_url.strip()} is missing from the letter.", "missing_prototype_url"
             ))
         audited = draft
+        required = min(MIN_SPECIFICS, len(evidence.facts))
+        cited = {str(f.id) for f in evidence.facts} & set(draft.fact_ids_used)
+        if len(cited) < required:
+            warnings.append(Issue(
+                f"The letter cites {len(cited)} verified specific(s); use at least {required} "
+                "job-relevant facts from the evidence.", "too_few_specifics",
+            ))
     for item in draft.screening_answers:
         if not item.get("answer"):
             question = str(item.get("question", ""))

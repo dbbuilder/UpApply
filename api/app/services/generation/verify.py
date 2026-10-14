@@ -25,7 +25,7 @@ CLAIM_CHECK_SKIPPED = "Claim check skipped (verifier unavailable) - review speci
 
 REPAIR_CODES = (
     "missing_answer", "banned_phrase", "starts_with_i", "salutation", "closing", "length",
-    "explicit_ask", "unsupported_claim", "missing_prototype_url", "answer_rules",
+    "explicit_ask", "unsupported_claim", "missing_prototype_url", "answer_rules", "too_few_specifics",
 )
 
 
