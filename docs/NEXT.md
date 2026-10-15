@@ -35,7 +35,7 @@ Phases 0–3 of the memory-driven generation rebuild (facts + voice samples, Opu
 - [2026-10-13] Rotate the UpApply password leaked in pushed commit 3b7affc and revoke old OpenAI keys (user action)
 - [2026-10-13] Review and merge PRs #8 → #9 → #10 → #11 in order, retargeting each to main so CI runs (user action)
 - [2026-10-13] Prod rollout per docs/superpowers/runbook-memory-driven-generation.md: deploy (migrations 022–024 via start.sh), bio relabel SQL, place ChatGPT export in working/chatgpt-export/ and run scripts/ingest_chatgpt_facts.py, scrape proposals, review facts, build-golden + blind A/B (≥75%) before flipping `generation_v2` (user action)
-- [2026-10-13] CodeRabbit re-review of #8 was pending at last check — triage any new comments
+- [2026-10-15] CodeRabbit skipped #9–#11 (auto-review only runs on PRs into main). Either comment `@coderabbitai review` on each now (A), or let it review as each is retargeted to main during merge (B, recommended: no extra noise, same coverage)
 
 ## Log
 
@@ -45,3 +45,4 @@ Phases 0–3 of the memory-driven generation rebuild (facts + voice samples, Opu
 - [2026-10-13] build-golden, prod runbook, gitignore working/ + docs/evals/ — 493fe32, 8f1a1ea, 25bf4cd
 - [2026-10-14] step 1 done — 2ffc21d — migrations 013–024 added to CLAUDE.md; 614 API tests pass
 - [2026-10-14] step 2 done — 33fad1f — v2 pipeline section in CLAUDE.md; legacy model setting corrected; 614 API tests pass
+- [2026-10-15] CodeRabbit re-review of #8 checked — no new findings (check green, only the summary was refreshed); #8 all 4 checks pass
