@@ -233,3 +233,18 @@ async def test_backfill_hired_credits_facts(client: AsyncClient, auth_headers: d
     [p] = await _proposals(uid)
     assert p.outcome == "hired" and p.facts_credited_at is not None
     assert await _times_in_won(fact_id) == 1
+
+
+@pytest.mark.asyncio
+async def test_backfill_job_embeddings_limits_in_sql_and_counts_remaining(client: AsyncClient, auth_headers: dict, fake_embed):
+    uid = await _uid(client, auth_headers)
+    async with TestSessionLocal() as s:
+        s.add_all([Proposal(user_id=uid, cover_letter_text=f"L{n}", job_title=f"Job {n}", source="scraped")
+                   for n in range(5)])
+        await s.commit()
+
+    r = await client.post("/api/v1/proposals/backfill-job-embeddings?limit=2", headers=auth_headers)
+    assert r.json() == {"embedded": 2, "remaining": 3}
+    assert fake_embed.await_count == 2
+    r = await client.post("/api/v1/proposals/backfill-job-embeddings?limit=2", headers=auth_headers)
+    assert r.json() == {"embedded": 2, "remaining": 1}
