@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.embeddings import generate_embedding
 from app.models.user import UserProfile
 from app.models.memory import Memory
+from app.models.proposal import PENDING_PROPOSAL_STATUSES
 from app.schemas.job import SkillMatch
 
 
@@ -743,6 +744,10 @@ async def run_full_analysis(
     )
 
 
+# Legacy Upwork imports stored open proposals as was_hired=False; keep them.
+_PENDING_SQL = ", ".join(f"'{s}'" for s in PENDING_PROPOSAL_STATUSES)
+
+
 async def find_relevant_proposals(
     db: AsyncSession,
     user_id: str,
@@ -778,6 +783,7 @@ async def find_relevant_proposals(
         FROM proposals
         WHERE user_id = :user_id
         AND embedding IS NOT NULL
+        AND (was_hired IS DISTINCT FROM false OR lower(status) IN (""" + _PENDING_SQL + """))
         """ + ("AND was_hired = true" if successful_only else "") + """
         ORDER BY
             CASE WHEN was_hired = true THEN 0 ELSE 1 END,

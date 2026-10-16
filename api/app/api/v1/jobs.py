@@ -856,7 +856,7 @@ async def generate_cover_letter_endpoint(
         user_id=current_user.id,
         job_id=job_id,
         content=content,
-        model_used=settings.default_model,
+        model_used=settings.cover_letter_model,
         memories_used=[m["id"] for m in relevant_memories],
         version=1,
     )
@@ -976,7 +976,7 @@ async def regenerate_cover_letter_endpoint(
         user_id=current_user.id,
         job_id=job.id,
         content=content,
-        model_used=settings.default_model,
+        model_used=settings.cover_letter_model,
         memories_used=existing.memories_used,
         version=existing.version + 1,
     )

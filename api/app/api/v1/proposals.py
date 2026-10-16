@@ -12,7 +12,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.embeddings import generate_embedding, get_openai_client
 from app.models.user import User
-from app.models.proposal import Proposal
+from app.models.proposal import PENDING_PROPOSAL_STATUSES, Proposal
 from app.models.user import UserProfile
 from app.schemas.proposal import (
     ProposalCreate,
@@ -537,8 +537,12 @@ async def import_proposals_from_upwork(
         was_hired_override = raw_data.get("wasHired")
         if was_hired_override is not None:
             was_hired = bool(was_hired_override)
+        elif status_str == "hired":
+            was_hired = True
+        elif (status_str or "").lower() in PENDING_PROPOSAL_STATUSES:
+            was_hired = None  # outcome still open, not declined
         else:
-            was_hired = status_str == "hired"
+            was_hired = False
 
         proposal = Proposal(
             user_id=current_user.id,

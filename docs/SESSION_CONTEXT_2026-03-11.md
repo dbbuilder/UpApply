@@ -119,7 +119,7 @@ import sys
 sys.argv = ['import_chatgpt_corpus.py',
   '--data-dir', '/Users/admin/dev2/OpenAIData',
   '--bio-file', 'scripts/chris_bio_memories.json',
-  '--email', 'chris@servicevision.net', '--password', 'Gv51076!',
+  '--email', 'chris@servicevision.net', '--password', '<password>',
   '--dry-run']   # remove --dry-run to import
 exec(open('scripts/import_chatgpt_corpus.py').read())
 "

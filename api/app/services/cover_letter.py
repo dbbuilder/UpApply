@@ -6,6 +6,7 @@ from anthropic import AsyncAnthropic
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import settings
+from app.models.proposal import PENDING_PROPOSAL_STATUSES
 from app.models.user import UserProfile
 from app.schemas.job import SkillMatch
 
@@ -197,15 +198,20 @@ def format_past_proposals(proposals: List[Dict]) -> str:
     if not proposals:
         return ""
 
+    # Declined/lost letters (was_hired is False) are never voice examples, except
+    # legacy Upwork imports that stored still-open proposals as was_hired=False.
+    voice_proposals = [
+        p for p in proposals
+        if p.get("was_hired") is not False
+        or (p.get("status") or "").lower() in PENDING_PROPOSAL_STATUSES
+    ]
+
     formatted = []
-    for i, prop in enumerate(proposals, 1):
-        was_hired = prop.get("was_hired")
-        if was_hired is True:
+    for i, prop in enumerate(voice_proposals, 1):
+        if prop.get("was_hired") is True:
             tier = "[WON — This letter got hired ✓]"
-        elif was_hired is False:
-            tier = "[SUBMITTED — outcome unknown]"
         else:
-            tier = "[PAST PROPOSAL]"
+            tier = "[SUBMITTED — outcome pending]"
         entry = f"Example {i} {tier}"
         if prop.get("job_title"):
             entry += f" - For: {prop['job_title']}"
@@ -269,7 +275,7 @@ def build_user_prompt(
         if past_proposals_text:
             parts.append(
                 f"\n\nPAST PROPOSALS — ordered by outcome, most successful first:\n"
-                f"WON letters are ground truth. SUBMITTED letters show voice. Learn from both:\n"
+                f"WON letters are ground truth. SUBMITTED letters show voice only:\n"
                 f"{past_proposals_text}"
             )
 

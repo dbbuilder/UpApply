@@ -379,13 +379,14 @@ async def _generate_draft_background(item_id: str, user_id: str) -> None:
 
             # Run lightweight analysis to get skill matches + memories
             ar = await run_full_analysis(
-                title=item.title,
-                description=item.description or "",
-                skills=item.skills or [],
-                budget=item.budget_amount,
-                client_info=item.client_info,
-                profile=profile,
                 db=db,
+                user_id=user_id,
+                profile=profile,
+                job_description=item.description or "",
+                job_skills=item.skills or [],
+                job_title=item.title,
+                budget_amount=item.budget_amount,
+                client_info=item.client_info,
             )
 
             past_proposals = await find_relevant_proposals(
@@ -663,13 +664,14 @@ async def _score_pre_filtered_background(item_id: str, user_id: str) -> None:
                 return
 
             ar = await run_full_analysis(
-                title=item.title,
-                description=item.description or "",
-                skills=item.skills or [],
-                budget=item.budget_amount,
-                client_info=item.client_info,
-                profile=profile,
                 db=db,
+                user_id=user_id,
+                profile=profile,
+                job_description=item.description or "",
+                job_skills=item.skills or [],
+                job_title=item.title,
+                budget_amount=item.budget_amount,
+                client_info=item.client_info,
             )
 
             item.ai_score = ar.match_score
