@@ -18,7 +18,10 @@ Verify: `SELECT version_num FROM alembic_version;` → `024_refine_loop`.
 ## 3. Relabel the curated bio memories (one-time)
 They were seeded tagged `chatgpt_corpus`, which `/facts/from-memories` (correctly) does not
 trust. The import script now tags them `bio_import`; existing rows need this one-time fix.
-Matched by exact title and owner — nothing else is touched. Run in one transaction:
+Matched by exact title and owner — nothing else is touched.
+
+**Done automatically by migration `025_relabel_bio_memories` on deploy** (the prod DB is not
+reachable from outside Render). The SQL below is the same change, kept for reference:
 
 ```sql
 BEGIN;
