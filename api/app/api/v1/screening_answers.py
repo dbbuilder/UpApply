@@ -1,9 +1,9 @@
 """Screening answer endpoints with pgvector semantic search."""
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from app.core.rate_limit import limiter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,8 +11,15 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.embeddings import generate_embedding, get_openai_client
+from app.core.errors import generation_unavailable
 from app.models.user import User, UserProfile
 from app.models.screening_answer import ScreeningAnswer
+from app.models.cover_letter import CoverLetter
+from app.schemas.job import MAX_GEN_DESCRIPTION, MAX_GEN_TITLE, MAX_SCREENING_QUESTION
+from app.services.generation import generate_application
+from app.services.generation.evidence import EvidenceUnavailable
+from app.services.generation.brief import JobBrief
+from app.services.llm import LLMError
 from app.schemas.screening_answer import (
     ScreeningAnswerCreate,
     ScreeningAnswerUpdate,
@@ -24,14 +31,17 @@ from app.schemas.screening_answer import (
 
 
 class ScreeningAnswerGenerateRequest(BaseModel):
-    question: str
-    job_title: Optional[str] = None
-    job_description: Optional[str] = None
-    job_skills: Optional[List[str]] = None
+    question: str = Field(..., max_length=MAX_SCREENING_QUESTION)
+    job_title: Optional[str] = Field(None, max_length=MAX_GEN_TITLE)
+    job_description: Optional[str] = Field(None, max_length=MAX_GEN_DESCRIPTION)
+    job_skills: Optional[List[Annotated[str, Field(max_length=200)]]] = Field(None, max_length=50)
+    cover_letter_id: Optional[str] = Field(None, max_length=36)  # v2: reuse this letter's stored brief (spec §2.3)
 
 
 class ScreeningAnswerGenerateResponse(BaseModel):
     answer: str
+    verify_warnings: Optional[List[str]] = None
+    claims_verified: Optional[bool] = None  # v2 only; False when the claim check was skipped
 
 router = APIRouter()
 
@@ -253,6 +263,51 @@ async def generate_screening_answer(
         select(UserProfile).where(UserProfile.user_id == current_user.id)
     )
     profile = profile_result.scalar_one_or_none()
+
+    if profile and profile.generation_v2:
+        cached_brief = None
+        title = body.job_title or ""
+        description = body.job_description or ""
+        if body.cover_letter_id:
+            letter = (await db.execute(
+                select(CoverLetter).where(
+                    CoverLetter.id == body.cover_letter_id,
+                    CoverLetter.user_id == current_user.id,
+                )
+            )).scalar_one_or_none()
+            if letter is not None and letter.brief:
+                cached_brief = JobBrief.model_validate({**letter.brief, "questions": [body.question]})
+                title = title or cached_brief.title
+                description = description or cached_brief.description
+        try:
+            result = await generate_application(
+                db=db,
+                user=current_user,
+                profile=profile,
+                title=title,
+                description=description,
+                skills=body.job_skills or [],
+                questions=[body.question],
+                brief=cached_brief,
+                credit_usage=False,  # the letter written alongside this answer is discarded
+                answers_only=True,  # so it is neither verified, repaired for, nor warned about
+            )
+        except EvidenceUnavailable as exc:
+            return generation_unavailable(
+                exc, status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Your experience facts could not be retrieved right now. Please try again shortly.",
+            )
+        except LLMError as exc:
+            return generation_unavailable(
+                exc, status.HTTP_502_BAD_GATEWAY,
+                "Answer generation is temporarily unavailable. Please try again shortly.",
+            )
+        answers = result.draft.screening_answers
+        return ScreeningAnswerGenerateResponse(
+            answer=answers[0]["answer"] if answers else "",
+            verify_warnings=result.warnings,
+            claims_verified=result.claims_verified,
+        )
 
     # Fetch past answers to similar questions via semantic search
     past_answers_text = ""

@@ -67,8 +67,10 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
     anthropic_api_key: str = ""
     anthropic_base_url: str = ""
-    cover_letter_model: str = "claude-sonnet-4-6"
-    extraction_model: str = "claude-haiku-4-5"   # fact extraction, job brief, claim check
+    cover_letter_model: str = "claude-opus-5-5"            # generation v2 writer (no temperature/thinking params)
+    legacy_cover_letter_model: str = "claude-sonnet-4-6"   # flag-off path; legacy calls still pass temperature
+    extraction_model: str = "claude-haiku-4-5"             # job brief, claim check, fact extraction
+    writer_effort: str = "high"                            # Opus 5.5 defaults to medium; set explicitly
 
     # Security
     secret_key: str = "dev-secret-key-change-in-production"

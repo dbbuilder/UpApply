@@ -11,6 +11,13 @@ interface User {
   has_profile: boolean;
 }
 
+export interface DraftMeta {
+  warnings: string[];
+  factsUsed: { id: string; statement: string }[];
+  screeningAnswers: { question: string; answer: string }[];
+  claimsVerified: boolean;
+}
+
 interface AppState {
   // Auth
   isAuthenticated: boolean;
@@ -32,6 +39,8 @@ interface AppState {
   coverLetterId: string | null;
   coverLetterLoading: boolean;
   coverLetterError: string | null;
+  // Generation v2 extras for the current draft (null on the legacy path)
+  draftMeta: DraftMeta | null;
 
   // Job tracking
   savedJobId: string | null;
@@ -49,6 +58,7 @@ interface AppState {
   setJobAnalysis: (analysis: JobAnalysisResponse | null) => void;
   setCoverLetter: (letter: string | null) => void;
   setCoverLetterId: (id: string | null) => void;
+  markDraftUnverified: () => void;
   setCurrentView: (view: AppState['currentView']) => void;
   setSetupStep: (step: number) => void;
 
@@ -86,6 +96,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   coverLetterId: null,
   coverLetterLoading: false,
   coverLetterError: null,
+  draftMeta: null,
   savedJobId: null,
   applicationId: null,
   currentView: 'auth',
@@ -108,6 +119,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         applicationId: null,
         analysisError: null,
         coverLetterError: null,
+        draftMeta: null,
       });
     } else {
       // Same job, just update the data without resetting generated content
@@ -117,6 +129,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   setJobAnalysis: (analysis) => set({ jobAnalysis: analysis }),
   setCoverLetter: (letter) => set({ coverLetter: letter }),
   setCoverLetterId: (id) => set({ coverLetterId: id }),
+  // Improve/regenerate use the legacy rewrite, which is never claim-checked: drop the old
+  // facts and warnings and show the notice instead of an earlier draft's verified state.
+  markDraftUnverified: () =>
+    set((state) => ({
+      draftMeta: state.draftMeta
+        ? { ...state.draftMeta, warnings: [], factsUsed: [], claimsVerified: false }
+        : null,
+    })),
   setCurrentView: (view) => set({ currentView: view }),
   setSetupStep: (step) => set({ setupStep: step }),
 
@@ -195,6 +215,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       applicationId: null,
       analysisError: null,
       coverLetterError: null,
+      draftMeta: null,
       currentView: 'auth',
     });
   },
@@ -290,12 +311,22 @@ export const useAppStore = create<AppState>((set, get) => ({
         custom_instructions: inclusions || undefined,
         prototype_url: prototypeUrl || undefined,
         include_call_offer: includeCallOffer,
+        screening_questions: currentJob.screeningQuestions?.map((q) => q.question),
       });
       set({
         coverLetter: result.content,
         coverLetterId: result.id,
         savedJobId: result.job_id,
         coverLetterLoading: false,
+        draftMeta:
+          result.verify_warnings || result.facts_used || result.screening_answers || result.claims_verified != null
+            ? {
+                warnings: result.verify_warnings ?? [],
+                factsUsed: result.facts_used ?? [],
+                screeningAnswers: result.screening_answers ?? [],
+                claimsVerified: result.claims_verified !== false,
+              }
+            : null,
       });
     } catch (error) {
       console.error('Generation error:', error);
@@ -322,6 +353,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         coverLetterId: result.id,
         coverLetterLoading: false,
       });
+      get().markDraftUnverified();
     } catch (error) {
       console.error('Regeneration error:', error);
       const message = error instanceof Error ? error.message : 'Regeneration failed';

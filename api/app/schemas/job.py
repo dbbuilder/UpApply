@@ -1,7 +1,20 @@
 """Job schemas."""
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel
+from typing import Annotated, Optional, List
+from urllib.parse import urlparse
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Free-text limits on generation requests (untrusted client text reaches LLM prompts)
+MAX_GEN_TITLE = 300
+MAX_GEN_DESCRIPTION = 20000
+MAX_SCREENING_QUESTION = 2000
+MAX_SCREENING_QUESTIONS = 20
+MAX_EXTRA_POINTS = 2000
+MAX_PROTOTYPE_URL = 500
+MAX_GEN_SKILLS = 50
+MAX_GEN_SKILL_LENGTH = 200
+
+ScreeningQuestion = Annotated[str, Field(max_length=MAX_SCREENING_QUESTION)]
 
 
 class ClientInfo(BaseModel):
@@ -126,9 +139,37 @@ class CoverLetterGenerateRequest(BaseModel):
     tone: Optional[str] = None  # Override user's default tone
     max_length: int = 300  # Max words
     focus_skills: Optional[List[str]] = None  # Skills to emphasize
-    custom_instructions: Optional[str] = None  # Additional instructions
-    prototype_url: Optional[str] = None  # URL to a prototype built for this job
+    custom_instructions: Optional[str] = Field(None, max_length=MAX_EXTRA_POINTS)  # Additional instructions
+    prototype_url: Optional[str] = Field(None, max_length=MAX_PROTOTYPE_URL)  # URL to a prototype built for this job
     include_call_offer: bool = True  # Append no-cost/no-commitment call offer before close
+    screening_questions: Optional[List[ScreeningQuestion]] = Field(
+        None, max_length=MAX_SCREENING_QUESTIONS
+    )  # v2: answered jointly with the letter
+
+    @field_validator("prototype_url")
+    @classmethod
+    def _http_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return None
+        v = v.strip()
+        parsed = urlparse(v)
+        if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc or any(c.isspace() for c in v):
+            raise ValueError("prototype_url must be an http(s) URL")
+        return v
+
+    @model_validator(mode="after")
+    def _job_data_limits(self):
+        if self.job_data:
+            if len(self.job_data.title) > MAX_GEN_TITLE:
+                raise ValueError(f"job_data.title exceeds {MAX_GEN_TITLE} characters")
+            if len(self.job_data.description) > MAX_GEN_DESCRIPTION:
+                raise ValueError(f"job_data.description exceeds {MAX_GEN_DESCRIPTION} characters")
+            skills = self.job_data.skills_required or []
+            if len(skills) > MAX_GEN_SKILLS or any(len(s) > MAX_GEN_SKILL_LENGTH for s in skills):
+                raise ValueError(
+                    f"job_data.skills_required allows {MAX_GEN_SKILLS} skills of {MAX_GEN_SKILL_LENGTH} characters"
+                )
+        return self
 
 
 class CoverLetterResponse(BaseModel):
@@ -151,6 +192,12 @@ class CoverLetterResponse(BaseModel):
     # Include match analysis
     match_score: Optional[float] = None
     highlighted_skills: Optional[List[str]] = None
+
+    # Generation v2 (None on the legacy path)
+    screening_answers: Optional[List[dict]] = None
+    verify_warnings: Optional[List[str]] = None
+    facts_used: Optional[List[dict]] = None  # [{id, statement}] of facts the draft cites
+    claims_verified: Optional[bool] = None  # False when the claim check was skipped
 
     model_config = {"from_attributes": True}
 

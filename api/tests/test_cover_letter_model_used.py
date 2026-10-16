@@ -33,7 +33,7 @@ JOB_DATA = {
 async def test_generate_and_regenerate_record_cover_letter_model(
     client: AsyncClient, auth_headers_with_profile: dict
 ):
-    assert settings.cover_letter_model != settings.default_model
+    assert settings.legacy_cover_letter_model != settings.default_model
 
     with patch("app.api.v1.jobs.generate_embedding", AsyncMock(return_value=[0.1] * 1536)), \
          patch("app.api.v1.jobs.run_full_analysis", AsyncMock(return_value=_analysis())), \
@@ -46,7 +46,7 @@ async def test_generate_and_regenerate_record_cover_letter_model(
             json={"job_data": JOB_DATA},
         )
         assert r.status_code == 200, r.text
-        assert r.json()["model_used"] == settings.cover_letter_model
+        assert r.json()["model_used"] == settings.legacy_cover_letter_model
 
         r2 = await client.post(
             f"/api/v1/jobs/cover-letters/{r.json()['id']}/regenerate",
@@ -54,4 +54,4 @@ async def test_generate_and_regenerate_record_cover_letter_model(
             json={"feedback": "Shorter, lead with the Postgres work."},
         )
         assert r2.status_code == 200, r2.text
-        assert r2.json()["model_used"] == settings.cover_letter_model
+        assert r2.json()["model_used"] == settings.legacy_cover_letter_model

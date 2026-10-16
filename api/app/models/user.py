@@ -3,7 +3,7 @@ from datetime import datetime, date
 from typing import Optional, List
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, String, Text, Integer, Numeric, Date, func, ForeignKey
+from sqlalchemy import Boolean, DateTime, String, Text, Integer, Numeric, Date, func, ForeignKey, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -128,6 +128,11 @@ class UserProfile(Base):
 
     # Per-user cover letter credential routing — job-type → anchor guidance + always_include list
     proposal_anchors: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
+    # Route cover letter + screening generation to the v2 engine (migration 023)
+    generation_v2: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     # Unique Value Propositions
     unique_strengths: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)

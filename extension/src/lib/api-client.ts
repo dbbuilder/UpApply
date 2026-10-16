@@ -342,10 +342,10 @@ class ApiClient {
     });
   }
 
-  async generateScreeningAnswer(question: string, jobTitle?: string, jobDescription?: string, jobSkills?: string[]) {
-    return this.request<{ answer: string }>('/api/v1/screening-answers/generate', {
+  async generateScreeningAnswer(question: string, jobTitle?: string, jobDescription?: string, jobSkills?: string[], coverLetterId?: string) {
+    return this.request<{ answer: string; verify_warnings?: string[] | null; claims_verified?: boolean | null }>('/api/v1/screening-answers/generate', {
       method: 'POST',
-      body: { question, job_title: jobTitle, job_description: jobDescription, job_skills: jobSkills },
+      body: { question, job_title: jobTitle, job_description: jobDescription, job_skills: jobSkills, cover_letter_id: coverLetterId },
     });
   }
 
@@ -926,6 +926,7 @@ export interface CoverLetterGenerateRequest {
   custom_instructions?: string;
   prototype_url?: string;
   include_call_offer?: boolean;
+  screening_questions?: string[];
 }
 
 export interface CoverLetter {
@@ -940,6 +941,11 @@ export interface CoverLetter {
   match_score?: number;
   highlighted_skills?: string[];
   created_at: string;
+  // Generation v2 (null on the legacy path)
+  screening_answers?: { question: string; answer: string }[] | null;
+  verify_warnings?: string[] | null;
+  facts_used?: { id: string; statement: string }[] | null;
+  claims_verified?: boolean | null; // false when the claim check was skipped
 }
 
 export interface ApplicationCreate {

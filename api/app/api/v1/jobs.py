@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.embeddings import generate_embedding
 from app.core.config import settings
+from app.core.errors import generation_unavailable
 from app.models.user import User, UserProfile
 from app.models.job import Job
 from app.models.cover_letter import CoverLetter
@@ -47,6 +48,9 @@ from app.services.cover_letter import (
     regenerate_cover_letter,
     improve_cover_letter,
 )
+from app.services.generation import generate_application
+from app.services.generation.evidence import EvidenceUnavailable
+from app.services.llm import LLMError
 
 router = APIRouter()
 
@@ -831,41 +835,89 @@ async def generate_cover_letter_endpoint(
     missing_skills = ar.missing_skills
     relevant_memories = ar.relevant_memories
 
-    # Find relevant past proposals to use as writing examples
-    past_proposals = await find_relevant_proposals(
-        db=db,
-        user_id=current_user.id,
-        job_description=job_description,
-        job_skills=job_skills,
-        limit=3,  # Top 3 most similar past proposals
-        successful_only=False,  # Include all, but successful ones are prioritized
-    )
+    v2_result = None
+    if profile.generation_v2:
+        try:
+            v2_result = await generate_application(
+                db=db,
+                user=current_user,
+                profile=profile,
+                title=job_title,
+                description=job_description,
+                skills=job_skills,
+                questions=body.screening_questions or [],
+                include_call_offer=body.include_call_offer,
+                prototype_url=body.prototype_url,
+                extra_points=body.custom_instructions,
+            )
+        except EvidenceUnavailable as exc:
+            await db.rollback()
+            return generation_unavailable(
+                exc, status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Your experience facts could not be retrieved right now. Please try again shortly.",
+            )
+        except LLMError as exc:
+            await db.rollback()
+            return generation_unavailable(
+                exc, status.HTTP_502_BAD_GATEWAY,
+                "Draft generation is temporarily unavailable. Please try again shortly.",
+            )
+        content = v2_result.draft.cover_letter
+    else:
+        # Find relevant past proposals to use as writing examples
+        past_proposals = await find_relevant_proposals(
+            db=db,
+            user_id=current_user.id,
+            job_description=job_description,
+            job_skills=job_skills,
+            limit=3,  # Top 3 most similar past proposals
+            successful_only=False,  # Include all, but successful ones are prioritized
+        )
 
-    # Generate cover letter
-    content = await generate_cover_letter(
-        job_title=job_title,
-        job_description=job_description,
-        job_skills=job_skills,
-        budget=budget,
-        skill_matches=skill_matches,
-        missing_skills=missing_skills,
-        relevant_memories=relevant_memories,
-        profile=profile,
-        past_proposals=past_proposals,
-        inclusions=body.custom_instructions,
-        prototype_url=body.prototype_url,
-        include_call_offer=body.include_call_offer,
-    )
+        # Generate cover letter
+        content = await generate_cover_letter(
+            job_title=job_title,
+            job_description=job_description,
+            job_skills=job_skills,
+            budget=budget,
+            skill_matches=skill_matches,
+            missing_skills=missing_skills,
+            relevant_memories=relevant_memories,
+            profile=profile,
+            past_proposals=past_proposals,
+            inclusions=body.custom_instructions,
+            prototype_url=body.prototype_url,
+            include_call_offer=body.include_call_offer,
+        )
 
     # Save cover letter
     cover_letter = CoverLetter(
         user_id=current_user.id,
         job_id=job_id,
         content=content,
-        model_used=settings.cover_letter_model,
-        memories_used=[m["id"] for m in relevant_memories],
+        model_used=settings.cover_letter_model if v2_result else settings.legacy_cover_letter_model,
+        memories_used=None if v2_result else [m["id"] for m in relevant_memories],
         version=1,
     )
+    v2_fields: dict = {}
+    if v2_result:
+        cover_letter.prompt_version = "v2"
+        cover_letter.word_count = len(content.split())
+        cover_letter.brief = v2_result.brief.model_dump()
+        cover_letter.fact_ids_used = v2_result.draft.fact_ids_used
+        cover_letter.voice_sample_ids = [str(p.id) for p in v2_result.evidence.voice_samples]
+        cover_letter.verify_warnings = v2_result.warnings
+        cited = set(v2_result.draft.fact_ids_used)
+        v2_fields = {
+            "screening_answers": v2_result.draft.screening_answers,
+            "verify_warnings": v2_result.warnings,
+            "claims_verified": v2_result.claims_verified,
+            "facts_used": [
+                {"id": str(f.id), "statement": f.statement}
+                for f in v2_result.evidence.facts
+                if str(f.id) in cited
+            ],
+        }
     db.add(cover_letter)
     await db.commit()
     await db.refresh(cover_letter)
@@ -893,6 +945,7 @@ async def generate_cover_letter_endpoint(
         created_at=cover_letter.created_at,
         match_score=match_score,
         highlighted_skills=[m.skill for m in skill_matches if m.match_type == "exact"],
+        **v2_fields,
     )
 
 
@@ -982,7 +1035,7 @@ async def regenerate_cover_letter_endpoint(
         user_id=current_user.id,
         job_id=job.id,
         content=content,
-        model_used=settings.cover_letter_model,
+        model_used=settings.legacy_cover_letter_model,
         memories_used=existing.memories_used,
         version=existing.version + 1,
     )
@@ -1161,7 +1214,7 @@ async def improve_cover_letter_endpoint(
         user_id=current_user.id,
         job_id=letter.job_id,
         content=improved_content,
-        model_used=settings.cover_letter_model,
+        model_used=settings.legacy_cover_letter_model,
         version=letter.version + 1,
         is_final=True,
         memories_used=letter.memories_used,

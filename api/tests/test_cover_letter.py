@@ -236,3 +236,63 @@ def test_system_prompt_includes_always_include_items():
     prompt = build_system_prompt(profile)
     assert "SchoolVision 20yr SaaS" in prompt
     assert "MBA" in prompt
+
+
+@pytest.mark.asyncio
+async def test_legacy_generate_is_pinned_to_legacy_model():
+    """Flag-off path must keep its model (Opus 5.5 rejects the legacy temperature param)."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from app.core.config import settings
+    from app.services.cover_letter import generate_cover_letter
+
+    profile = SimpleNamespace(
+        full_name=None, professional_title=None, bio=None, career_goals=None,
+        communication_style=None, unique_strengths=None, proposal_anchors=None,
+        skills_to_highlight=None, preferred_closing=None,
+    )
+    message = MagicMock()
+    message.content = [MagicMock(text="Body text.")]
+    client = MagicMock()
+    client.messages.create = AsyncMock(return_value=message)
+    with patch("app.services.cover_letter._get_anthropic_client", return_value=client):
+        await generate_cover_letter(
+            job_title="T", job_description="D", job_skills=[], budget=None,
+            skill_matches=[], missing_skills=[], relevant_memories=[], profile=profile,
+        )
+    assert client.messages.create.call_args.kwargs["model"] == settings.legacy_cover_letter_model
+
+
+# ── ReDoS: sign-off stripping is linear ───────────────────────────────────────
+
+@pytest.mark.parametrize("evil", [
+    "\n" + " \n" * 30000 + "x",
+    "Regards" + " " * 60000 + "!",
+    "Body.\nThanks" + " \n" * 30000 + "!",
+    "Body.\n" + "[" + "a " * 30000,
+])
+def test_clean_cover_letter_is_linear_on_adversarial_input(evil):
+    import time
+    start = time.perf_counter()
+    clean_cover_letter(evil)
+    assert time.perf_counter() - start < 0.5
+
+
+def test_clean_strips_trailing_word_only_signoff_line():
+    assert clean_cover_letter("Body text.\n\nThanks for reading") == "Body text."
+
+
+def test_clean_keeps_signoff_word_inside_a_sentence_with_punctuation():
+    text = "Body text.\n\nBest practice is to test the rollback first."
+    assert clean_cover_letter(text) == text
+
+
+def test_clean_keeps_a_lone_first_line():
+    assert clean_cover_letter("Thanks for reading") == "Thanks for reading"
+
+
+def test_clean_removes_four_line_signature_block():
+    """Sign-off + name + title + company: the old regex stripped it, the window must too."""
+    raw = "Body text.\n\nBest regards\nChris Therriault\nFounder\nServiceVision LLC"
+    assert clean_cover_letter(raw) == "Body text."

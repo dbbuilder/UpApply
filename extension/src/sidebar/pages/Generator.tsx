@@ -16,6 +16,7 @@ export default function GeneratorPage() {
     coverLetter,
     coverLetterLoading,
     coverLetterError,
+    draftMeta,
     savedJobId,
     applicationId,
     analyzeCurrentJob,
@@ -30,6 +31,8 @@ export default function GeneratorPage() {
 
   // Screening question state
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
+  // Keys of AI answers whose claim check was skipped (claims_verified === false).
+  const [unverifiedAnswers, setUnverifiedAnswers] = useState<Record<string, boolean>>({});
   const [suggestedAnswers, setSuggestedAnswers] = useState<Record<string, ScreeningAnswerSearchResult[]>>({});
   const [loadingSuggestions, setLoadingSuggestions] = useState<Record<string, boolean>>({});
   const [generatingAnswers, setGeneratingAnswers] = useState<Record<string, boolean>>({});
@@ -187,6 +190,7 @@ export default function GeneratorPage() {
       const result = await apiClient.improveCoverLetter(coverLetterId);
       useAppStore.getState().setCoverLetter(result.improved_content);
       useAppStore.getState().setCoverLetterId(result.cover_letter_id);
+      useAppStore.getState().markDraftUnverified();
       setImprovementNotes(result.improvement_notes);
       setShowImprovementNotes(true);
       setSubmitted(false);
@@ -290,6 +294,7 @@ export default function GeneratorPage() {
 
   const handleUseSuggestedAnswer = (index: number, answer: string) => {
     setQuestionAnswers(prev => ({ ...prev, [`q${index}`]: answer }));
+    setUnverifiedAnswers(prev => ({ ...prev, [`q${index}`]: false }));
   };
 
   const handleGenerateAnswer = async (question: string, index: number) => {
@@ -301,8 +306,10 @@ export default function GeneratorPage() {
         currentJob?.title ?? undefined,
         currentJob?.description ?? undefined,
         currentJob?.skills ?? undefined,
+        useAppStore.getState().coverLetterId ?? undefined,
       );
       setQuestionAnswers(prev => ({ ...prev, [key]: result.answer }));
+      setUnverifiedAnswers(prev => ({ ...prev, [key]: result.claims_verified === false }));
     } catch {
       // silent
     } finally {
@@ -323,6 +330,23 @@ export default function GeneratorPage() {
 
   const handleGenerateAll = async () => {
     await generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
+    // v2 answers come back with the letter (same evidence, one call) — use them instead of per-question calls
+    const meta = useAppStore.getState().draftMeta;
+    const v2Answers = meta?.screeningAnswers ?? [];
+    if (v2Answers.length > 0 && currentJob?.screeningQuestions) {
+      const fromDraft: Record<string, string> = {};
+      const unverified: Record<string, boolean> = {};
+      currentJob.screeningQuestions.forEach((q, i) => {
+        const match = v2Answers.find(a => a.question === q.question) ?? v2Answers[i];
+        if (match?.answer) {
+          fromDraft[`q${i}`] = match.answer;
+          unverified[`q${i}`] = meta?.claimsVerified === false;
+        }
+      });
+      setQuestionAnswers(prev => ({ ...prev, ...fromDraft }));
+      setUnverifiedAnswers(prev => ({ ...prev, ...unverified }));
+      return;
+    }
     if (currentJob?.screeningQuestions && currentJob.screeningQuestions.length > 0) {
       const results = await Promise.allSettled(
         currentJob.screeningQuestions.map((q, i) =>
@@ -331,14 +355,19 @@ export default function GeneratorPage() {
             currentJob.title ?? undefined,
             currentJob.description ?? undefined,
             currentJob.skills ?? undefined,
-          ).then(r => ({ index: i, answer: r.answer }))
+          ).then(r => ({ index: i, answer: r.answer, unverified: r.claims_verified === false }))
         )
       );
       const newAnswers: Record<string, string> = {};
+      const unverified: Record<string, boolean> = {};
       results.forEach(r => {
-        if (r.status === 'fulfilled') newAnswers[`q${r.value.index}`] = r.value.answer;
+        if (r.status === 'fulfilled') {
+          newAnswers[`q${r.value.index}`] = r.value.answer;
+          unverified[`q${r.value.index}`] = r.value.unverified;
+        }
       });
       setQuestionAnswers(prev => ({ ...prev, ...newAnswers }));
+      setUnverifiedAnswers(prev => ({ ...prev, ...unverified }));
     }
   };
 
@@ -517,6 +546,9 @@ export default function GeneratorPage() {
               showAppliedPrompt={showAppliedPrompt}
               markingApplied={markingApplied}
               applicationId={applicationId}
+              verifyWarnings={draftMeta?.warnings ?? []}
+              factsUsed={draftMeta?.factsUsed ?? []}
+              claimsVerified={draftMeta?.claimsVerified ?? true}
               onGenerate={handleGenerate}
               onGenerateAll={handleGenerateAll}
               onRetryGenerate={handleGenerate}
@@ -535,6 +567,7 @@ export default function GeneratorPage() {
               <ScreeningPanel
                 questions={currentJob.screeningQuestions}
                 questionAnswers={questionAnswers}
+                unverifiedAnswers={unverifiedAnswers}
                 suggestedAnswers={suggestedAnswers}
                 loadingSuggestions={loadingSuggestions}
                 generatingAnswers={generatingAnswers}

@@ -1,6 +1,6 @@
 """Cover letter generation service using Claude (Anthropic)."""
 import re
-from typing import Dict, Any, List, Optional
+from typing import Callable, Dict, Any, List, Optional
 
 from anthropic import AsyncAnthropic
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -9,6 +9,62 @@ from app.core.config import settings
 from app.models.proposal import PENDING_PROPOSAL_STATUSES
 from app.models.user import UserProfile
 from app.schemas.job import SkillMatch
+
+
+# Phrases that signal generic AI writing. Mirrors the BANNED PHRASES block in
+# build_system_prompt (legacy, left untouched); generation v2 enforces this list.
+BANNED_PHRASES = [
+    "I am well-equipped",
+    "unique blend of skills",
+    "align perfectly with your needs",
+    "I am excited to apply",
+    "I look forward to hearing from you",
+    "my skills directly translate",
+    "I am passionate about",
+    "leverage my expertise",
+    "I believe I would be a great fit",
+    "I am confident that",
+    "I would love the opportunity",
+    "I am a perfect fit",
+    "I am writing to",
+    "I am reaching out",
+]
+
+
+GENERIC_SIGNOFFS = ("sincerely", "best regards", "regards", "best", "thank you", "thanks")
+SIGNOFF_WINDOW = 5  # sign-off + name, title, company, contact; a constant, so still linear
+
+
+def _signoff_rest(line: str, phrases) -> Optional[str]:
+    """Lower-cased text after the sign-off phrase that opens `line` (on a word boundary), else None."""
+    lowered = line.strip().lower()
+    for phrase in phrases:
+        if lowered.startswith(phrase) and not lowered[len(phrase):len(phrase) + 1].isalnum():
+            return lowered[len(phrase):]
+    return None
+
+
+def strip_trailing_signoff(
+    text: str, phrases, accept: Callable[[str, List[str]], bool]
+) -> str:
+    """Linear, line-based sign-off removal: drop trailing blank lines; if one of the last
+    SIGNOFF_WINDOW non-empty lines (never the first line) opens with a sign-off phrase and
+    `accept(rest_of_line, following_lines)` agrees, truncate from that line."""
+    lines = text.rstrip().split("\n")
+    tail = [i for i, line in enumerate(lines) if line.strip()][-SIGNOFF_WINDOW:]
+    for i in tail:
+        if i == 0:
+            continue
+        rest = _signoff_rest(lines[i], phrases)
+        if rest is not None and accept(rest, lines[i + 1:]):
+            return "\n".join(lines[:i]).rstrip()
+    return "\n".join(lines)
+
+
+def _word_chars_only(rest: str, following: List[str]) -> bool:
+    """Sign-off, optional comma, then only word characters and whitespace to the end."""
+    tail = (rest[1:] if rest.startswith(",") else rest) + "".join(following)
+    return all(c.isalnum() or c == "_" or c.isspace() for c in tail)
 
 
 def _get_anthropic_client() -> AsyncAnthropic:
@@ -54,7 +110,7 @@ def clean_cover_letter(content: str) -> str:
     result = re.sub(r'\n{3,}', '\n\n', result)
 
     # Remove trailing generic sign-offs (but preserve "Warm regards,")
-    result = re.sub(r'\n+(Sincerely|Best regards|Regards|Best|Thank you|Thanks),?\s*\n*[\w\s]*$', '', result, flags=re.IGNORECASE)
+    result = strip_trailing_signoff(result, GENERIC_SIGNOFFS, _word_chars_only)
 
     return result.strip()
 
@@ -423,7 +479,7 @@ async def generate_cover_letter(
     )
 
     response = await client.messages.create(
-        model=model or settings.cover_letter_model,
+        model=model or settings.legacy_cover_letter_model,
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
         max_tokens=1200,
@@ -464,7 +520,7 @@ Job: {job_title}
 Please revise the cover letter based on this feedback while maintaining personalization for the job. Remember: NO salutation line, NO signature, NO placeholders."""
 
     response = await client.messages.create(
-        model=model or settings.cover_letter_model,
+        model=model or settings.legacy_cover_letter_model,
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
         max_tokens=1000,
@@ -534,7 +590,7 @@ Respond with JSON only, no markdown:
 {{"improvement_notes": ["note 1", "note 2", ...], "improved_content": "the full rewritten letter"}}"""
 
     response = await client.messages.create(
-        model=model or settings.cover_letter_model,
+        model=model or settings.legacy_cover_letter_model,
         system=system,
         messages=[{"role": "user", "content": user}],
         max_tokens=1500,
