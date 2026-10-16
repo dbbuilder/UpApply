@@ -5,7 +5,7 @@
 
 import { logger } from '../lib/logger';
 import { detectNotifChips } from '../lib/notif-chips';
-import { scrapeProposalPageText } from './scrapers/proposals';
+import { scrapeProposalDetail } from './scrapers/proposals';
 
 // ---------------------------------------------------------------------------
 // Notification page job scorer
@@ -1667,7 +1667,7 @@ function _handleMutations(): void {
   const isProposalDetailPage = /\/nx\/proposals\/\d+/.test(currentPath)
     || /\/ab\/proposals\/\d+/.test(currentPath);
   if (isProposalDetailPage && !_workroomProposalBtnInjected) {
-    const proposalText = scrapeProposalPageText();
+    const proposalText = scrapeProposalDetail().coverLetter;
     if (proposalText) {
       _injectProposalSaveButton(proposalText);
     }

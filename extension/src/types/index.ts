@@ -36,6 +36,8 @@ export interface ScrapedProposal {
   status: string | null;
   submittedAt: string | null;
   wasHired?: boolean | null;
+  screeningAnswers?: { question: string; answer: string }[];
+  jobDescription?: string | null;
 }
 
 export interface AttachmentInfo {

@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 from uuid import uuid4
 
-from sqlalchemy import DateTime, String, Text, Numeric, Boolean, func, ForeignKey, Index
+from sqlalchemy import DateTime, String, Text, Numeric, Boolean, func, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -40,9 +40,9 @@ class Proposal(Base):
         nullable=True,
     )
 
-    # Upwork identifiers for deduplication
+    # Upwork identifiers for deduplication (unique per user, not globally: see __table_args__)
     upwork_proposal_id: Mapped[Optional[str]] = mapped_column(
-        String(100), nullable=True, unique=True
+        String(100), nullable=True
     )
     upwork_job_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
@@ -78,6 +78,27 @@ class Proposal(Base):
         String(50), default="manual"
     )  # manual, scraped, extension
 
+    # Voice-sample metadata (migration 022). Only author != 'ai' rows are voice examples.
+    author: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="chris", server_default="chris"
+    )  # chris, chris_edited_ai, ai
+    outcome: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True
+    )  # no_response, viewed, replied, interviewed, hired, declined
+    job_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    screening_answers: Mapped[Optional[list]] = mapped_column(
+        JSONB, nullable=True
+    )  # [{"question": str, "answer": str}]
+    # Embedding of the JOB (title + description) so voice retrieval is job<->job
+    job_needs_embedding: Mapped[Optional[List[float]]] = mapped_column(
+        Vector(settings.embedding_dimensions), nullable=True
+    )
+    # Set once /facts/from-proposals (or PUT /final) has run extraction on this letter,
+    # including runs that yielded zero facts, so the queue always advances.
+    facts_ingested_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Timestamps
     submitted_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -94,10 +115,17 @@ class Proposal(Base):
     job: Mapped[Optional["Job"]] = relationship("Job", back_populates="proposals")
 
     __table_args__ = (
+        UniqueConstraint("user_id", "upwork_proposal_id", name="uq_proposals_user_upwork_proposal_id"),
         Index(
             "ix_proposals_embedding_hnsw",
             "embedding",
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+        Index(
+            "ix_proposals_job_needs_embedding_hnsw",
+            "job_needs_embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"job_needs_embedding": "vector_cosine_ops"},
         ),
     )

@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_base_url: str = ""
     cover_letter_model: str = "claude-sonnet-4-6"
+    extraction_model: str = "claude-haiku-4-5"   # fact extraction, job brief, claim check
 
     # Security
     secret_key: str = "dev-secret-key-change-in-production"

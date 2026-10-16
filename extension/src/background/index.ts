@@ -727,15 +727,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               await new Promise(r => setTimeout(r, 1500));
 
               // Read window.__NUXT__ from the page's main world
+              type QA = { question: string; answer: string };
               let nuxtCoverLetter: string | null = null;
               let nuxtStatus: string | null = null;
               let nuxtBidAmount: string | null = null;
               let nuxtJobTitle: string | null = null;
+              let nuxtAnswers: QA[] = [];
+              let nuxtJobDescription: string | null = null;
               try {
                 const [nuxtResult] = await chrome.scripting.executeScript({
                   target: { tabId: propTab.id },
                   world: 'MAIN',
                   func: () => {
+                    const empty = { coverLetter: null, status: null, bidAmount: null, jobTitle: null, answers: [], jobDescription: null };
                     try {
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       const n = (window as any).__NUXT__;
@@ -749,13 +753,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                       // status may be a number (Upwork internal enum) — convert to string
                       const rawStatus = app?.status;
                       const statusStr = rawStatus != null ? String(rawStatus) : null;
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      const qa = Array.isArray(app?.questionsAnswers) ? (app!.questionsAnswers as any[]) : [];
                       return {
                         coverLetter: (app?.coverLetter as string) || null,
                         status: statusStr,
                         bidAmount: String(app?.terms?.chargeRate?.amount || '') || null,
                         jobTitle: (v3?.jobDetails?.opening?.job?.info?.title as string) || null,
+                        answers: qa
+                          .map(x => ({ question: String(x?.question ?? ''), answer: String(x?.answer ?? '') }))
+                          .filter(x => x.answer.trim().length > 0),
+                        jobDescription: (v3?.jobDetails?.opening?.job?.description as string) || null,
                       };
-                    } catch { return { coverLetter: null, status: null, bidAmount: null, jobTitle: null }; }
+                    } catch { return empty; }
                   },
                 });
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -764,21 +774,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 nuxtStatus = r?.status || null;
                 nuxtBidAmount = r?.bidAmount || null;
                 nuxtJobTitle = r?.jobTitle || null;
+                nuxtAnswers = (r?.answers as QA[]) || [];
+                nuxtJobDescription = r?.jobDescription || null;
               } catch (e) {
                 logger.log('UpApply: NUXT read failed for proposal', proposal.proposalId, String(e));
               }
 
               // DOM fallback via content script (already injected by manifest — no re-inject)
               let domCoverLetter: string | null = null;
-              if (!nuxtCoverLetter) {
+              let domAnswers: QA[] = [];
+              if (!nuxtCoverLetter || nuxtAnswers.length === 0) {
                 await waitForContentScript(propTab.id, 5_000);
-                const domResult = await new Promise<{ coverLetter?: string | null }>((resolve) => {
+                const domResult = await new Promise<{ coverLetter?: string | null; answers?: QA[] }>((resolve) => {
                   chrome.tabs.sendMessage(propTab.id!, { type: 'SCRAPE_PROPOSAL_DETAIL' }, (resp) => {
                     if (chrome.runtime.lastError || !resp?.success) resolve({});
                     else resolve(resp);
                   });
                 });
                 domCoverLetter = domResult.coverLetter || null;
+                domAnswers = domResult.answers || [];
               }
 
               const coverLetter = nuxtCoverLetter || domCoverLetter || null;
@@ -810,6 +824,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 status: nuxtStatus || (proposal._isArchived ? 'archived' : (proposal.status || 'submitted')),
                 submittedAt: proposal.submittedAt,
                 wasHired,
+                screeningAnswers: nuxtAnswers.length ? nuxtAnswers : domAnswers,
+                jobDescription: nuxtJobDescription,
               });
             }
 

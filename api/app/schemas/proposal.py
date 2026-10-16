@@ -1,7 +1,7 @@
 """Schemas for proposals."""
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ProposalCreate(BaseModel):
@@ -55,6 +55,10 @@ class ProposalResponse(BaseModel):
     client_responded: Optional[bool] = None
     earnings: Optional[float] = None
     source: str
+    author: str = "chris"
+    outcome: Optional[str] = None
+    job_text: Optional[str] = None
+    screening_answers: Optional[List[dict]] = None
     submitted_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
@@ -86,4 +90,4 @@ class ProposalBulkCreate(BaseModel):
 class ProposalImportFromUpwork(BaseModel):
     """Schema for importing proposals scraped from Upwork."""
 
-    proposals: List[dict]  # Raw scraped data
+    proposals: List[dict] = Field(..., max_length=1000)  # Raw scraped data

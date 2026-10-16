@@ -78,7 +78,7 @@ async def client(setup_database):
         await conn.execute(text(
             "TRUNCATE TABLE beta_feedback, feedback, screening_answers, proposals, "
             "applications, cover_letters, jobs, search_queries, memories, "
-            "job_reviews, work_logs, "
+            "job_reviews, work_logs, facts, "
             "outcome_events, job_queue, user_autonomy_profiles, "
             "user_guardrail_configs, global_signal_pool, "
             "user_profiles, users RESTART IDENTITY CASCADE"
@@ -118,3 +118,26 @@ async def auth_headers_with_profile(client: AsyncClient, auth_headers: dict):
     )
     await client.post("/api/v1/profile/complete-setup", headers=auth_headers)
     return auth_headers
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def db_session(setup_database):
+    """Plain AsyncSession for service-level DB tests; tables are truncated afterwards."""
+    async with TestSessionLocal() as session:
+        yield session
+    async with test_engine.begin() as conn:
+        await conn.execute(text(
+            "TRUNCATE TABLE facts, proposals, memories, user_profiles, users "
+            "RESTART IDENTITY CASCADE"
+        ))
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def test_user(db_session):
+    """A committed User row for service-level tests."""
+    from app.models.user import User
+
+    user = User(email="facts-owner@example.com", hashed_password="not-a-real-hash")
+    db_session.add(user)
+    await db_session.commit()
+    return user

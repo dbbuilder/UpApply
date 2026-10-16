@@ -12,7 +12,7 @@ import {
 import type { ScreeningQuestion, JobData, AttachmentInfo, JobPostingData } from '../types';
 import { initDraftSaver } from './draft-saver';
 import { logger } from '../lib/logger';
-import { extractAllProposals, scrapeProposalPageText } from './scrapers/proposals';
+import { extractAllProposals, scrapeProposalDetail } from './scrapers/proposals';
 import { scrapeAllContracts } from './scrapers/contracts';
 import './scoring';
 
@@ -710,13 +710,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     case 'SCRAPE_PROPOSAL_DETAIL': {
-      // Extract cover letter and metadata from a single /nx/proposals/{id} detail page.
-      // Called by the background IMPORT_PROPOSALS deep-scraper for each detail URL.
-      const coverLetter = scrapeProposalPageText();
+      // Extract cover letter, screening answers and title from a single /nx/proposals/{id} page.
+      // Called by the background IMPORT_PROPOSALS deep-scraper when window.__NUXT__ is unavailable.
+      const { coverLetter, answers } = scrapeProposalDetail();
       // Use a specific selector; avoid generic h3 which can match section headers like "Hiring activity"
       const titleEl = document.querySelector<HTMLElement>('[data-test="job-title"], h2.job-title, .job-title');
       const jobTitle = titleEl?.textContent?.trim() || null;
-      sendResponse({ success: true, coverLetter, jobTitle });
+      sendResponse({ success: true, coverLetter, answers, jobTitle });
       break;
     }
 

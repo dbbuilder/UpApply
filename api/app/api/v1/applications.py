@@ -13,6 +13,7 @@ from app.models.user import User
 from app.models.job import Job
 from app.models.cover_letter import CoverLetter
 from app.models.proposal import Proposal
+from app.api.v1.proposals import _job_needs_embedding
 from app.models.application import Application, ApplicationStatus
 from app.schemas.application import (
     ApplicationCreate,
@@ -337,9 +338,12 @@ async def _promote_winning_letter(
         if existing:
             # Update existing proposal to mark as hired
             existing.was_hired = True
+            existing.outcome = "hired"
             existing.cover_letter_text = letter_text
             if existing.embedding is None:
                 existing.embedding = await generate_embedding(letter_text)
+            if existing.job_needs_embedding is None and job:
+                existing.job_needs_embedding = await _job_needs_embedding(job.title, job.description)
         else:
             # Create new promoted proposal
             embedding = await generate_embedding(letter_text)
@@ -350,7 +354,11 @@ async def _promote_winning_letter(
                 job_title=job_title,
                 job_skills=job_skills,
                 was_hired=True,
+                outcome="hired",
                 source="extension",
+                author="chris_edited_ai",  # began as an UpApply draft (matches migration 022)
+                job_text=job.description if job else None,
+                job_needs_embedding=await _job_needs_embedding(job_title, job.description if job else None),
                 submitted_at=application.submitted_at or application.outcome_recorded_at,
                 embedding=embedding,
             )
@@ -417,12 +425,14 @@ async def backfill_proposals_corpus(
             # Only upgrade was_hired, never downgrade
             if existing.was_hired is not True and was_hired is True:
                 existing.was_hired = True
+                existing.outcome = "hired"
                 updated += 1
             else:
                 skipped += 1
             continue
 
         snippet = (job.description or "")[:500]
+        status_value = getattr(app.status, "value", app.status)
         proposal = Proposal(
             user_id=current_user.id,
             job_id=job.id,
@@ -432,8 +442,12 @@ async def backfill_proposals_corpus(
             job_skills=job.skills_required,
             upwork_job_url=job.upwork_url,
             was_hired=was_hired,
-            status=app.status.value,
+            status=status_value,
+            outcome="hired" if was_hired else ("declined" if status_value == ApplicationStatus.DECLINED.value else None),
             source="extension",
+            author="chris_edited_ai",  # began as an UpApply draft (matches migration 022)
+            job_text=job.description,
+            job_needs_embedding=await _job_needs_embedding(job.title, job.description),
             submitted_at=app.submitted_at or app.created_at,
         )
         db.add(proposal)

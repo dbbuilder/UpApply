@@ -1,16 +1,21 @@
 """Proposal endpoints with pgvector semantic search."""
 import json
+import logging
+import re
 from typing import List, Optional
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, text
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.embeddings import generate_embedding, get_openai_client
+from app.core.rate_limit import limiter
+from app.models.cover_letter import CoverLetter
+from app.models.job import Job
 from app.models.user import User
 from app.models.proposal import PENDING_PROPOSAL_STATUSES, Proposal
 from app.models.user import UserProfile
@@ -25,6 +30,7 @@ from app.schemas.proposal import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=ProposalResponse, status_code=status.HTTP_201_CREATED)
@@ -478,40 +484,183 @@ async def bulk_create_proposals(
     return created_proposals
 
 
+VOICE_OUTCOMES = {"no_response", "viewed", "replied", "interviewed", "hired", "declined"}
+MAX_JOB_TEXT_CHARS = 20_000
+MAX_COVER_LETTER_CHARS = 20_000
+MAX_JOB_TITLE_CHARS = 500
+# Outcomes only move forward (mirrors Phase 3 outcomes.should_replace).
+_OUTCOME_RANK = {None: 0, "no_response": 1, "viewed": 2, "declined": 3, "replied": 4, "interviewed": 5, "hired": 6}
+MAX_SCREENING_ANSWERS = 50
+MAX_ANSWER_CHARS = 5_000
+
+
+def _derive_outcome(raw_outcome: Optional[str], status_str: Optional[str], was_hired: Optional[bool]) -> Optional[str]:
+    """Map scraper status onto the voice-sample outcome enum (None = unknown yet)."""
+    if raw_outcome in VOICE_OUTCOMES:
+        return raw_outcome
+    if was_hired:
+        return "hired"
+    s = (status_str or "").lower()
+    if "interview" in s:
+        return "interviewed"
+    if s in ("responded", "active"):
+        return "replied"
+    if "declin" in s:
+        return "declined"
+    if s == "viewed":
+        return "viewed"
+    return None
+
+
+_UPWORK_JOB_SLUG = re.compile(r"~(0[0-9a-zA-Z]+)")
+_WORD = re.compile(r"[a-z0-9]+")
+LETTER_IS_JOB_JACCARD = 0.8
+MIN_CONTAINED_CHARS = 50
+
+
+def _normalized(text_: str) -> str:
+    return " ".join(_WORD.findall(text_.lower()))
+
+
+def _letter_is_job_description(letter: str, job_text: Optional[str]) -> bool:
+    """A scraped 'cover letter' that is really the job post (scraper picked the wrong node)."""
+    if not letter or not job_text:
+        return False
+    a, b = _normalized(letter), _normalized(job_text)
+    if not a or not b:
+        return False
+    shorter, longer = sorted((a, b), key=len)
+    if len(shorter) >= MIN_CONTAINED_CHARS and shorter in longer:
+        return True
+    ta, tb = set(a.split()), set(b.split())
+    return len(ta & tb) / len(ta | tb) > LETTER_IS_JOB_JACCARD
+
+
+async def _server_author(db: AsyncSession, user_id: str, job_url: Optional[str], job_title: str) -> str:
+    """'chris_edited_ai' when UpApply generated a letter for this user's matching job, else 'chris'.
+    Never taken from the client."""
+    conds = [func.lower(func.trim(Job.title)) == job_title.strip().lower()]
+    if job_url:
+        conds.append(Job.upwork_url == job_url)
+        slug = _UPWORK_JOB_SLUG.search(job_url)
+        if slug:
+            conds.append(Job.upwork_job_id.in_([slug.group(1), f"~{slug.group(1)}"]))
+            conds.append(Job.upwork_url.contains(f"~{slug.group(1)}"))
+    hit = (await db.execute(
+        select(CoverLetter.id)
+        .join(Job, CoverLetter.job_id == Job.id)
+        .where(CoverLetter.user_id == user_id, Job.user_id == user_id, or_(*conds))
+        .limit(1)
+    )).first()
+    return "chris_edited_ai" if hit else "chris"
+
+
+def _clean_answers(raw) -> Optional[list]:
+    if not isinstance(raw, list):
+        return None
+    answers = [
+        {
+            "question": str(a.get("question") or "").strip()[:MAX_ANSWER_CHARS],
+            "answer": str(a.get("answer") or "").strip()[:MAX_ANSWER_CHARS],
+        }
+        for a in raw
+        if isinstance(a, dict) and str(a.get("answer") or "").strip()
+    ]
+    return answers[:MAX_SCREENING_ANSWERS] or None
+
+
+async def _job_needs_embedding(job_title: Optional[str], job_text: Optional[str]) -> Optional[List[float]]:
+    """Embedding of the JOB (not the letter) so voice-sample retrieval is job<->job."""
+    text_for_embedding = "\n\n".join(t for t in (job_title, job_text) if t)
+    if not text_for_embedding:
+        return None
+    try:
+        return await generate_embedding(text_for_embedding)
+    except Exception:
+        return None
+
+
 @router.post("/import-from-upwork", response_model=List[ProposalResponse])
 async def import_proposals_from_upwork(
     request: ProposalImportFromUpwork,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Import proposals scraped from Upwork's 'My Proposals' page."""
+    """Import proposals scraped from Upwork (list + detail pages) as voice samples.
+
+    New rows are created; existing rows (same proposalId) are backfilled with the full
+    letter, screening answers, job text and the latest outcome. Returns created rows only.
+    """
     created_proposals = []
+    skipped = 0
 
     for raw_data in request.proposals:
-        # Extract data from scraped format
         upwork_proposal_id = raw_data.get("proposalId")
-        cover_letter_text = raw_data.get("coverLetter", "")
-        job_title = raw_data.get("jobTitle")
+        cover_letter_text = (raw_data.get("coverLetter") or "").strip()[:MAX_COVER_LETTER_CHARS]
+        job_title = str(raw_data.get("jobTitle") or "").strip()[:MAX_JOB_TITLE_CHARS] or None
         job_url = raw_data.get("jobUrl")
         bid_amount = raw_data.get("bidAmount")
         bid_type = raw_data.get("bidType")
         status_str = raw_data.get("status", "submitted")
+        status_key = (status_str or "").strip().lower()  # scraped statuses arrive capitalised
         submitted_at_str = raw_data.get("submittedAt")
-
+        screening_answers = _clean_answers(raw_data.get("screeningAnswers"))
+        job_text = (raw_data.get("jobDescription") or "").strip()[:MAX_JOB_TEXT_CHARS] or None
         # Require at least a job title to import
         if not job_title:
             continue
+        letter_is_job = _letter_is_job_description(cover_letter_text, job_text)
 
-        # Check for duplicate
+        # Allow explicit wasHired override from the scraper (e.g. archived proposals
+        # whose status string doesn't say "hired" but the scraper detected a contract)
+        was_hired_override = raw_data.get("wasHired")
+        if was_hired_override is not None:
+            was_hired = bool(was_hired_override)
+        elif status_key == "hired":
+            was_hired = True
+        elif status_key in PENDING_PROPOSAL_STATUSES:
+            was_hired = None  # outcome still open, not declined
+        else:
+            was_hired = False
+        outcome = _derive_outcome(raw_data.get("outcome"), status_str, was_hired)
+
         if upwork_proposal_id:
-            existing = await db.execute(
+            existing = (await db.execute(
                 select(Proposal).where(
                     Proposal.upwork_proposal_id == upwork_proposal_id,
                     Proposal.user_id == current_user.id,
                 )
-            )
-            if existing.scalar_one_or_none():
+            )).scalar_one_or_none()
+            if existing:
+                if letter_is_job or _letter_is_job_description(cover_letter_text, existing.job_text):
+                    # The scraped "letter" is the job post: never store it as the user's letter,
+                    # but still apply the outcome / job text / screening-answer updates below.
+                    skipped += 1
+                    cover_letter_text = ""
+                if cover_letter_text and len(cover_letter_text) > len(existing.cover_letter_text or ""):
+                    existing.cover_letter_text = cover_letter_text
+                    try:
+                        existing.embedding = await generate_embedding(f"Job: {job_title}\n\n{cover_letter_text}")
+                    except Exception:
+                        # Keep the previous embedding; one embedding failure must not roll back the batch.
+                        logger.warning("Letter re-embed failed for proposal %s", existing.id, exc_info=True)
+                    existing.facts_ingested_at = None  # new text -> eligible for /facts/from-proposals again
+                if screening_answers and screening_answers != existing.screening_answers:
+                    existing.screening_answers = screening_answers
+                    existing.facts_ingested_at = None
+                if job_text and not existing.job_text:
+                    existing.job_text = job_text
+                    # Replace a title-only job embedding now that the job text is known.
+                    existing.job_needs_embedding = await _job_needs_embedding(job_title, job_text)
+                elif existing.job_needs_embedding is None:
+                    existing.job_needs_embedding = await _job_needs_embedding(job_title, existing.job_text)
+                if outcome and _OUTCOME_RANK[outcome] > _OUTCOME_RANK.get(existing.outcome, 0):
+                    existing.outcome = outcome
                 continue
+
+        if letter_is_job:
+            skipped += 1
+            continue
 
         # Parse submitted_at — try ISO first, then "Mar 3, 2026" format
         submitted_at = None
@@ -524,48 +673,73 @@ async def import_proposals_from_upwork(
                 except Exception:
                     pass
 
-        # Generate embedding from whatever text is available
-        text_for_embedding = cover_letter_text or ""
-        if job_title:
-            text_for_embedding = f"Job: {job_title}\n\n{text_for_embedding}".strip()
-
-        embedding = await generate_embedding(text_for_embedding) if text_for_embedding else None
-
-        client_responded = status_str in ("responded", "interviewed", "hired")
-        # Allow explicit wasHired override from the scraper (e.g. archived proposals
-        # whose status string doesn't say "hired" but the scraper detected a contract)
-        was_hired_override = raw_data.get("wasHired")
-        if was_hired_override is not None:
-            was_hired = bool(was_hired_override)
-        elif status_str == "hired":
-            was_hired = True
-        elif (status_str or "").lower() in PENDING_PROPOSAL_STATUSES:
-            was_hired = None  # outcome still open, not declined
-        else:
-            was_hired = False
+        # Letter embedding (legacy search) + job embedding (voice-sample retrieval)
+        text_for_embedding = f"Job: {job_title}\n\n{cover_letter_text}".strip()
+        embedding = await generate_embedding(text_for_embedding)
 
         proposal = Proposal(
             user_id=current_user.id,
             upwork_proposal_id=upwork_proposal_id,
             upwork_job_url=job_url,
-            cover_letter_text=cover_letter_text or "",
+            cover_letter_text=cover_letter_text,
             job_title=job_title,
             bid_amount=bid_amount,
             bid_type=bid_type,
             status=status_str,
-            client_responded=client_responded,
+            client_responded=status_key in ("responded", "interviewed", "hired"),
             was_hired=was_hired,
             submitted_at=submitted_at,
             source="scraped",
             embedding=embedding,
+            author=await _server_author(db, current_user.id, job_url, job_title),
+            outcome=outcome,
+            job_text=job_text,
+            screening_answers=screening_answers,
+            job_needs_embedding=await _job_needs_embedding(job_title, job_text),
         )
 
         db.add(proposal)
         created_proposals.append(proposal)
 
     await db.commit()
+    if skipped:
+        logger.info("import-from-upwork skipped %d letter(s) matching their job description", skipped)
 
     for proposal in created_proposals:
         await db.refresh(proposal)
 
     return created_proposals
+
+
+@router.post("/backfill-job-embeddings")
+@limiter.limit("10/hour")
+async def backfill_job_embeddings(
+    request: Request,
+    limit: int = Query(100, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fill job_needs_embedding on the caller's voice-sample rows (author != 'ai') that lack it,
+    from job_text, the linked job's description, or the stored snippet. Call again while
+    remaining > 0."""
+    missing = (
+        select(Proposal, Job)
+        .outerjoin(Job, (Job.id == Proposal.job_id) & (Job.user_id == current_user.id))
+        .where(
+            Proposal.user_id == current_user.id,
+            Proposal.author != "ai",
+            Proposal.job_needs_embedding.is_(None),
+        )
+    )
+    total = (await db.execute(select(func.count()).select_from(missing.subquery()))).scalar_one()
+    rows = (await db.execute(missing.order_by(Proposal.created_at.desc()).limit(limit))).all()
+    embedded = 0
+    for proposal, job in rows:
+        title = proposal.job_title or (job.title if job else None)
+        text_ = proposal.job_text or (job.description if job else None) or proposal.job_description_snippet
+        vector = await _job_needs_embedding(title, text_)
+        if vector is not None:
+            proposal.job_needs_embedding = vector
+            embedded += 1
+    await db.commit()
+    return {"embedded": embedded, "remaining": max(total - len(rows), 0)}

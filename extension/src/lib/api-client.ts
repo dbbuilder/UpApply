@@ -674,6 +674,46 @@ class ApiClient {
   async getAgentRoi(): Promise<Pick<AgentDigest, 'autonomy' | 'learning' | 'roi_30d' | 'pipeline'> & { autonomy_level: number; autonomy_label: string }> {
     return this.request('/api/v1/agent/roi');
   }
+
+  // ── Facts (knowledge layer) ─────────────────────────────────────────────────
+
+  async getFacts(status?: FactStatus): Promise<Fact[]> {
+    const qs = status ? `?status=${status}` : '';
+    return this.request<Fact[]>(`/api/v1/facts${qs}`);
+  }
+
+  async updateFact(id: string, patch: FactUpdate): Promise<Fact> {
+    return this.request<Fact>(`/api/v1/facts/${id}`, { method: 'PATCH', body: patch });
+  }
+
+  async bulkApproveFacts(ids: string[]): Promise<{ approved: number }> {
+    return this.request<{ approved: number }>('/api/v1/facts/bulk-approve', {
+      method: 'POST',
+      body: { ids },
+    });
+  }
+
+  async factsFromMemories(): Promise<FactIngestResult> {
+    return this.request<FactIngestResult>('/api/v1/facts/from-memories', { method: 'POST' });
+  }
+
+  async factsFromProposals(limit = 10): Promise<FactIngestResult> {
+    return this.request<FactIngestResult>(`/api/v1/facts/from-proposals?limit=${limit}`, { method: 'POST' });
+  }
+
+  async factsFromContracts(): Promise<FactIngestResult> {
+    return this.request<FactIngestResult>('/api/v1/facts/from-contracts', { method: 'POST' });
+  }
+
+  async ingestFacts(
+    sourceType: string,
+    items: { text: string; source_ref?: string; context?: string }[],
+  ): Promise<FactIngestResult> {
+    return this.request<FactIngestResult>('/api/v1/facts/ingest', {
+      method: 'POST',
+      body: { source_type: sourceType, items },
+    });
+  }
 }
 
 export class ApiError extends Error {
@@ -1445,3 +1485,52 @@ export interface AgentDigest {
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);
+
+// ── Facts (knowledge layer) ───────────────────────────────────────────────────
+
+export type FactKind = 'project' | 'metric' | 'credential' | 'client_quote' | 'role' | 'tech' | 'outcome';
+export type FactStatus = 'candidate' | 'approved' | 'rejected';
+
+export interface FactSource {
+  source_type: string;
+  source_ref: string | null;
+  snippet: string | null;
+}
+
+export interface Fact {
+  id: string;
+  kind: FactKind;
+  statement: string;
+  detail: string | null;
+  skills: string[];
+  industries: string[];
+  job_types: string[];
+  strength: number;
+  status: FactStatus;
+  source_type: string;
+  source_ref: string | null;
+  sources: FactSource[];
+  times_used: number;
+  times_in_won: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FactUpdate {
+  statement?: string;
+  detail?: string | null;
+  status?: FactStatus;
+  kind?: FactKind;
+  skills?: string[];
+  job_types?: string[];
+  strength?: number;
+}
+
+export interface FactIngestResult {
+  created: number;
+  merged: number;
+  auto_approved: number;
+  skipped: number;
+  failed: number;
+  remaining: number;
+}

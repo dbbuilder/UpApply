@@ -261,39 +261,53 @@ export async function extractAllProposals(): Promise<ScrapedProposal[]> {
   }
 }
 
+export interface ProposalDetail {
+  coverLetter: string | null;
+  answers: { question: string; answer: string }[];
+}
+
 /**
- * Extract cover letter text from an Upwork proposal detail page.
+ * Extract the submitted cover letter and screening answers from an Upwork proposal
+ * detail page. DOM fallback only — the background prefers window.__NUXT__, whose
+ * answers are never truncated.
  *
  * DOM structure (confirmed from proposaldetails.html):
- *   div[data-cy="cover-letter-section"]        ← container card
- *     section.air3-card-section
- *       p.break.text-pre-line                  ← the proposal text
- *       [data-test="questions-answers"]         ← Q&A responses (append if present)
+ *   div[data-cy="cover-letter-section"]
+ *     p.break.text-pre-line                       ← cover letter
+ *     [data-test="questions-answers"] li
+ *       strong                                    ← question
+ *       span.air3-truncation span[id]             ← answer (may end in "…" + "more")
  */
-export function scrapeProposalPageText(): string | null {
-  // Primary: confirmed selector from DOM analysis
+export function scrapeProposalDetail(): ProposalDetail {
+  let coverLetter: string | null = null;
+  const answers: { question: string; answer: string }[] = [];
+
   const section = document.querySelector('[data-cy="cover-letter-section"]');
   if (section) {
-    // Collect the cover letter paragraph(s)
     const parts: string[] = [];
     section.querySelectorAll('p.break.text-pre-line').forEach(p => {
       const t = p.textContent?.trim();
       if (t) parts.push(t);
     });
-    // Also grab Q&A answers if present — they add context for scoring calibration
-    section.querySelectorAll('[data-test="questions-answers"] span.air3-truncation').forEach(span => {
-      const t = span.textContent?.trim();
-      if (t) parts.push(t);
+    const joined = parts.join('\n\n');
+    if (joined.length > 50) coverLetter = joined;
+
+    section.querySelectorAll('[data-test="questions-answers"] li').forEach(li => {
+      const question = li.querySelector('strong')?.textContent?.trim() || '';
+      const answer =
+        li.querySelector('span.air3-truncation span[id]')?.textContent?.trim() ||
+        li.querySelector('span.air3-truncation')?.textContent?.trim() ||
+        '';
+      if (answer) answers.push({ question, answer });
     });
-    if (parts.length && parts.join('').length > 50) return parts.join('\n\n');
   }
 
-  // Fallback: .cover-letter-section (older Upwork markup)
-  const fallback = document.querySelector('.cover-letter-section p.break, .cover-letter p');
-  if (fallback) {
-    const t = fallback.textContent?.trim();
-    if (t && t.length > 50) return t;
+  if (!coverLetter) {
+    // Fallback: .cover-letter-section (older Upwork markup)
+    const fallback = document.querySelector('.cover-letter-section p.break, .cover-letter p');
+    const t = fallback?.textContent?.trim();
+    if (t && t.length > 50) coverLetter = t;
   }
 
-  return null;
+  return { coverLetter, answers };
 }
