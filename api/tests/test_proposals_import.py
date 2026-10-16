@@ -91,6 +91,24 @@ async def test_reimport_backfills_existing_row(client: AsyncClient, auth_headers
 
 
 @pytest.mark.asyncio
+async def test_reimport_keeps_old_embedding_when_letter_reembed_fails(client: AsyncClient, auth_headers: dict, fake_embed):
+    await client.post(URL, headers=auth_headers, json={"proposals": [
+        {"proposalId": "302", "jobTitle": "Old", "coverLetter": "short", "status": "submitted"},
+    ]})
+    before = (await _row("302")).embedding
+    fake_embed.side_effect = RuntimeError("embedding provider down")
+    r = await client.post(URL, headers=auth_headers, json={"proposals": [
+        {"proposalId": "302", "jobTitle": "Old", "coverLetter": "short letter, now complete", "status": "interviewed"},
+    ]})
+    assert r.status_code == 200, r.text
+
+    row = await _row("302")
+    assert row.cover_letter_text == "short letter, now complete"
+    assert row.outcome == "interviewed"
+    assert list(row.embedding) == list(before)
+
+
+@pytest.mark.asyncio
 async def test_reimport_never_regresses_outcome(client: AsyncClient, auth_headers: dict, fake_embed):
     await client.post(URL, headers=auth_headers, json={"proposals": [
         {"proposalId": "501", "jobTitle": "Won", "coverLetter": "x", "status": "archived", "wasHired": True},

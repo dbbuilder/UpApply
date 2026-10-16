@@ -639,7 +639,11 @@ async def import_proposals_from_upwork(
                     cover_letter_text = ""
                 if cover_letter_text and len(cover_letter_text) > len(existing.cover_letter_text or ""):
                     existing.cover_letter_text = cover_letter_text
-                    existing.embedding = await generate_embedding(f"Job: {job_title}\n\n{cover_letter_text}")
+                    try:
+                        existing.embedding = await generate_embedding(f"Job: {job_title}\n\n{cover_letter_text}")
+                    except Exception:
+                        # Keep the previous embedding; one embedding failure must not roll back the batch.
+                        logger.warning("Letter re-embed failed for proposal %s", existing.id, exc_info=True)
                     existing.facts_ingested_at = None  # new text -> eligible for /facts/from-proposals again
                 if screening_answers and screening_answers != existing.screening_answers:
                     existing.screening_answers = screening_answers
@@ -726,11 +730,11 @@ async def backfill_job_embeddings(
             Proposal.author != "ai",
             Proposal.job_needs_embedding.is_(None),
         )
-        .order_by(Proposal.created_at.desc())
     )
-    rows = (await db.execute(missing)).all()
+    total = (await db.execute(select(func.count()).select_from(missing.subquery()))).scalar_one()
+    rows = (await db.execute(missing.order_by(Proposal.created_at.desc()).limit(limit))).all()
     embedded = 0
-    for proposal, job in rows[:limit]:
+    for proposal, job in rows:
         title = proposal.job_title or (job.title if job else None)
         text_ = proposal.job_text or (job.description if job else None) or proposal.job_description_snippet
         vector = await _job_needs_embedding(title, text_)
@@ -738,4 +742,4 @@ async def backfill_job_embeddings(
             proposal.job_needs_embedding = vector
             embedded += 1
     await db.commit()
-    return {"embedded": embedded, "remaining": max(len(rows) - limit, 0)}
+    return {"embedded": embedded, "remaining": max(total - len(rows), 0)}
