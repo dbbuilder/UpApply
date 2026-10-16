@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 from uuid import uuid4
 
-from sqlalchemy import DateTime, String, Text, Integer, Boolean, Numeric, func, ForeignKey
+from sqlalchemy import DateTime, String, Text, Integer, Boolean, Numeric, Float, func, ForeignKey
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -64,6 +64,12 @@ class CoverLetter(Base):
     fact_ids_used: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String(36)), nullable=True)
     voice_sample_ids: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String(36)), nullable=True)
     verify_warnings: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
+
+    # Refine + learn loop (migration 024)
+    refine_messages: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    final_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    final_answers: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    edit_distance_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

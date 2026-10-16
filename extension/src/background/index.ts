@@ -5,6 +5,10 @@
 import type { JobData } from '../types';
 import { extractBudgetFromPageText, detectNotifChips, topOfRange as _topOfRange } from '../lib/notif-chips';
 import { logger } from '../lib/logger';
+import { apiClient } from '../lib/api-client';
+
+// A generated draft stays linked to its job's apply page for a day (Submit-click capture).
+const ACTIVE_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 
 // Store current job data for sidebar access
 let currentJobData: JobData | null = null;
@@ -452,6 +456,48 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ success: false, error: String(e) });
         }
       });
+      return true; // async
+    }
+
+    case 'CAPTURE_SUBMISSION': {
+      // From the content script on Upwork's Submit click: { coverLetter, answers, pageUrl }.
+      // Linked to the UpApply draft generated for the same job (~slug match).
+      const { coverLetter, answers, pageUrl } = message.data ?? {};
+      chrome.storage.local.get('activeDraft').then(async (stored) => {
+        const draft = stored.activeDraft as
+          | { coverLetterId: string; jobUrl: string; timestamp: number }
+          | undefined;
+        const pageSlug = String(pageUrl ?? '').match(/(~[a-zA-Z0-9]+)/)?.[1];
+        const draftSlug = draft?.jobUrl?.match(/(~[a-zA-Z0-9]+)/)?.[1];
+        if (
+          !draft || !coverLetter || !pageSlug || pageSlug !== draftSlug ||
+          Date.now() - draft.timestamp > ACTIVE_DRAFT_TTL_MS
+        ) {
+          // No UpApply draft for this job — the proposal-detail scraper backfills it later.
+          try { sendResponse({ success: false, error: 'No matching UpApply draft' }); } catch { /* channel closed */ }
+          return;
+        }
+        try {
+          const result = await apiClient.submitFinal(draft.coverLetterId, coverLetter, answers ?? []);
+          logger.log('UpApply: captured submission', result.author, 'edit distance', result.edit_distance_pct);
+          try { sendResponse({ success: true, ...result }); } catch { /* channel closed */ }
+        } catch (e) {
+          try { sendResponse({ success: false, error: String(e) }); } catch { /* channel closed */ }
+        }
+      }).catch(() => { /* storage unavailable */ });
+      return true; // async
+    }
+
+    case 'SYNC_PROPOSAL_OUTCOMES': {
+      // From the content script when Chris opens Upwork's Proposals page.
+      apiClient.syncProposalOutcomes(message.items ?? [])
+        .then((result) => {
+          logger.log('UpApply: outcome sync', result);
+          try { sendResponse({ success: true, ...result }); } catch { /* channel closed */ }
+        })
+        .catch((e) => {
+          try { sendResponse({ success: false, error: String(e) }); } catch { /* channel closed */ }
+        });
       return true; // async
     }
 

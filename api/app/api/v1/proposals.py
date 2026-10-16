@@ -3,7 +3,8 @@ import json
 import logging
 import re
 from typing import List, Optional
-from datetime import datetime
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select, text
@@ -27,7 +28,11 @@ from app.schemas.proposal import (
     ProposalSearchResult,
     ProposalBulkCreate,
     ProposalImportFromUpwork,
+    ProposalOutcomeItem,
+    ProposalOutcomeSyncRequest,
+    ProposalOutcomeSyncResponse,
 )
+from app.services.outcomes import apply_outcome, parse_submitted_at, resolve_outcome
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -259,6 +264,97 @@ Job titles that went SILENT ({len(silent_titles)} sample):
     return {"insights": insights, "proposal_count": len(proposals), "response_rate": round(len(active_titles) / len(proposals) * 100)}
 
 
+TITLE_MATCH_WINDOW = timedelta(days=1)  # Upwork shows a local date; allow for the timezone skew
+
+
+def _title_day_key(job_title: Optional[str], submitted_at: Optional[str]) -> Optional[tuple]:
+    """(title, submit day) used by the title fallback; None when either is missing."""
+    day = parse_submitted_at(submitted_at)
+    if not job_title or day is None:
+        return None
+    return (job_title, day.date())
+
+
+def _ambiguous_title_days(keys) -> set:
+    """Title+day keys seen more than once in one batch: those rows cannot be told apart."""
+    counts = Counter(k for k in keys if k is not None)
+    return {k for k, n in counts.items() if n > 1}
+
+
+async def _find_proposal_for_outcome(
+    db: AsyncSession, user_id: str, item: ProposalOutcomeItem, ambiguous: frozenset | set = frozenset()
+) -> Optional[Proposal]:
+    """Match by internal id, then Upwork id, then a click-captured proposal lacking an Upwork id.
+
+    The title fallback only binds when the title AND the submit day (±1 day) match exactly one
+    click-captured row, and no other item in the batch shares that title and day. Generic
+    titles are common, and a wrong bind would credit the wrong letter's facts permanently."""
+    if item.proposal_id:
+        return (await db.execute(
+            select(Proposal).where(Proposal.id == item.proposal_id, Proposal.user_id == user_id)
+        )).scalar_one_or_none()
+    if not item.upwork_proposal_id:
+        return None
+    prop = (await db.execute(
+        select(Proposal).where(
+            Proposal.upwork_proposal_id == item.upwork_proposal_id,
+            Proposal.user_id == user_id,
+        )
+    )).scalar_one_or_none()
+    key = _title_day_key(item.job_title, item.submitted_at)
+    if prop or key is None or key in ambiguous:
+        return prop
+    day_start = datetime(key[1].year, key[1].month, key[1].day, tzinfo=timezone.utc)
+    candidates = (await db.execute(
+        select(Proposal)
+        .where(
+            Proposal.user_id == user_id,
+            Proposal.upwork_proposal_id.is_(None),
+            Proposal.source == "extension",  # only click-captured rows (Task 3.4), never chatgpt_import
+            Proposal.job_title == item.job_title,
+            Proposal.submitted_at >= day_start - TITLE_MATCH_WINDOW,
+            Proposal.submitted_at < day_start + timedelta(days=1) + TITLE_MATCH_WINDOW,
+        )
+        .limit(2)
+        # Lock the row until commit: a concurrent sync (another Proposals tab) that read it
+        # unbound would otherwise overwrite this bind. A waiter re-checks the IS NULL filter
+        # after the lock is released, so it finds nothing instead of rebinding.
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalars().all()
+    return candidates[0] if len(candidates) == 1 else None
+
+
+@router.post("/outcomes", response_model=ProposalOutcomeSyncResponse)
+@limiter.limit("60/hour")
+async def sync_proposal_outcomes(
+    request: Request,
+    body: ProposalOutcomeSyncRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk status sync from the Proposals page → proposals.outcome; credit facts on wins."""
+    updated = credited = not_found = 0
+    ambiguous = _ambiguous_title_days(_title_day_key(i.job_title, i.submitted_at) for i in body.items)
+    for item in body.items:
+        prop = await _find_proposal_for_outcome(db, current_user.id, item, ambiguous)
+        if prop is None:
+            not_found += 1
+            continue
+        if item.upwork_proposal_id and not prop.upwork_proposal_id:
+            prop.upwork_proposal_id = item.upwork_proposal_id
+        if prop.submitted_at is None:
+            prop.submitted_at = parse_submitted_at(item.submitted_at)
+        before = prop.outcome
+        outcome = resolve_outcome(item.status, prop.submitted_at or prop.created_at)
+        if await apply_outcome(db, prop, outcome):
+            credited += 1
+        if prop.outcome != before:
+            updated += 1
+    await db.commit()
+    return ProposalOutcomeSyncResponse(updated=updated, credited=credited, not_found=not_found)
+
+
 @router.get("/{proposal_id}", response_model=ProposalResponse)
 async def get_proposal(
     proposal_id: str,
@@ -488,8 +584,6 @@ VOICE_OUTCOMES = {"no_response", "viewed", "replied", "interviewed", "hired", "d
 MAX_JOB_TEXT_CHARS = 20_000
 MAX_COVER_LETTER_CHARS = 20_000
 MAX_JOB_TITLE_CHARS = 500
-# Outcomes only move forward (mirrors Phase 3 outcomes.should_replace).
-_OUTCOME_RANK = {None: 0, "no_response": 1, "viewed": 2, "declined": 3, "replied": 4, "interviewed": 5, "hired": 6}
 MAX_SCREENING_ANSWERS = 50
 MAX_ANSWER_CHARS = 5_000
 
@@ -593,6 +687,11 @@ async def import_proposals_from_upwork(
     """
     created_proposals = []
     skipped = 0
+    ambiguous = _ambiguous_title_days(
+        _title_day_key(str(r.get("jobTitle") or "").strip()[:MAX_JOB_TITLE_CHARS] or None,
+                       str(r.get("submittedAt") or "")[:50] or None)
+        for r in request.proposals if isinstance(r, dict)
+    )
 
     for raw_data in request.proposals:
         upwork_proposal_id = raw_data.get("proposalId")
@@ -625,13 +724,19 @@ async def import_proposals_from_upwork(
         outcome = _derive_outcome(raw_data.get("outcome"), status_str, was_hired)
 
         if upwork_proposal_id:
-            existing = (await db.execute(
-                select(Proposal).where(
-                    Proposal.upwork_proposal_id == upwork_proposal_id,
-                    Proposal.user_id == current_user.id,
-                )
-            )).scalar_one_or_none()
+            # Upwork id first, then the newest click-captured row (Task 3.4) with the same title
+            existing = await _find_proposal_for_outcome(
+                db, current_user.id,
+                ProposalOutcomeItem(
+                    upwork_proposal_id=str(upwork_proposal_id)[:100], job_title=job_title,
+                    status=str(status_str or "submitted")[:50],
+                    submitted_at=str(submitted_at_str or "")[:50] or None,
+                ),
+                ambiguous,
+            )
             if existing:
+                if not existing.upwork_proposal_id:
+                    existing.upwork_proposal_id = upwork_proposal_id
                 if letter_is_job or _letter_is_job_description(cover_letter_text, existing.job_text):
                     # The scraped "letter" is the job post: never store it as the user's letter,
                     # but still apply the outcome / job text / screening-answer updates below.
@@ -654,8 +759,8 @@ async def import_proposals_from_upwork(
                     existing.job_needs_embedding = await _job_needs_embedding(job_title, job_text)
                 elif existing.job_needs_embedding is None:
                     existing.job_needs_embedding = await _job_needs_embedding(job_title, existing.job_text)
-                if outcome and _OUTCOME_RANK[outcome] > _OUTCOME_RANK.get(existing.outcome, 0):
-                    existing.outcome = outcome
+                if outcome:
+                    await apply_outcome(db, existing, outcome)  # forward-only; credits facts once
                 continue
 
         if letter_is_job:

@@ -1,4 +1,5 @@
 """Job and cover letter endpoints."""
+import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -28,6 +29,10 @@ from app.schemas.job import (
     CoverLetterRegenerateRequest,
     CoverLetterSubmitRequest,
     CoverLetterImproveResponse,
+    CoverLetterRefineRequest,
+    CoverLetterRefineResponse,
+    CoverLetterFinalRequest,
+    CoverLetterFinalResponse,
     ExtractAttachmentsRequest,
     ExtractAttachmentsResponse,
     AttachmentMetadata,
@@ -37,6 +42,7 @@ from app.schemas.job import (
     SuggestMilestonesRequest,
     SuggestMilestonesResponse,
     MilestoneSuggestion,
+    MAX_FINAL_ANSWER,
 )
 from app.models.proposal import Proposal
 from app.services.job_analysis import (
@@ -51,7 +57,17 @@ from app.services.cover_letter import (
 from app.services.generation import generate_application
 from app.services.generation.evidence import EvidenceUnavailable
 from app.services.llm import LLMError
+from app.models.fact import Fact
+from app.services.facts import credit_facts, upsert_candidate
+from app.services.outcomes import apply_outcome
+from app.services.fact_extraction import extract_facts
+from app.services.generation.brief import JobBrief
+from app.services.generation.evidence import Evidence
+from app.services.generation.writer import Draft
+from app.services.generation.refine import MAX_HISTORY, RefineError, refine_application
+from app.services.edit_distance import word_edit_distance_pct
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -620,9 +636,9 @@ async def import_contracts(
             prop = existing_prop.scalar_one_or_none()
             if prop:
                 prop.cover_letter_text = contract.cover_letter_text.strip()
-                prop.was_hired = True
-                prop.outcome = "hired"
                 prop.job_id = job.id
+                await apply_outcome(db, prop, "hired")  # sets was_hired; credits facts once
+                prop.was_hired = True
                 if prop.job_needs_embedding is None:
                     prop.job_needs_embedding = await _job_needs_embedding(job.title, job.description)
             else:
@@ -639,12 +655,13 @@ async def import_contracts(
                     cover_letter_text=contract.cover_letter_text.strip(),
                     was_hired=True,
                     status="hired",
-                    outcome="hired",
                     source="contract_import",
                     embedding=prop_embedding,
                     job_needs_embedding=await _job_needs_embedding(job.title, job.description),
                 )
                 db.add(prop)
+                await db.flush()
+                await apply_outcome(db, prop, "hired")  # credits the job's letter facts once
 
     await db.commit()
     return ContractImportResponse(imported=imported, updated=updated, total=len(request.contracts))
@@ -1228,6 +1245,265 @@ async def improve_cover_letter_endpoint(
         improved_content=improved_content,
         improvement_notes=improvement_notes,
         hired_examples_used=len(hired_proposals),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Refine + learn loop (spec §3)
+# ---------------------------------------------------------------------------
+
+async def _capture_fact_candidates(
+    db: AsyncSession,
+    user_id: str,
+    text: str,
+    source_type: str,
+    source_ref: Optional[str],
+    context: Optional[str] = None,
+) -> int:
+    """Turn the user's own words into fact candidates. Never fails the request.
+
+    Candidates are never auto-approved here: upsert_candidate applies the spec §1.7 match rule
+    (a match to an approved fact stays approved; anything else goes to review)."""
+    try:
+        candidates = await extract_facts(text, source_type, source_ref=source_ref, context=context)
+        async with db.begin_nested():
+            for cand in candidates:
+                await upsert_candidate(db, user_id, cand)
+        return len(candidates)
+    except Exception as exc:
+        # Content-free: exception messages can carry user or model text.
+        logger.warning("Fact capture failed (%s): %s", source_type, type(exc).__name__)
+        return 0
+
+
+@router.post("/cover-letters/{letter_id}/refine", response_model=CoverLetterRefineResponse)
+@limiter.limit("30/hour")
+async def refine_cover_letter_endpoint(
+    request: Request,
+    letter_id: str,
+    body: CoverLetterRefineRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revise a v2 draft from one refine-thread message (search_facts tool, verify every turn)."""
+    message = body.message.strip()
+    if not message:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Message is empty")
+
+    result = await db.execute(
+        select(CoverLetter).where(
+            CoverLetter.id == letter_id,
+            CoverLetter.user_id == current_user.id,
+        )
+    )
+    letter = result.scalar_one_or_none()
+    if not letter:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover letter not found")
+    if not letter.brief:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Refine needs a letter generated by the v2 engine. Generate a new draft first.",
+        )
+    profile = await get_user_profile(current_user, db)
+
+    brief = JobBrief.model_validate(letter.brief)
+    known_ids = [str(x) for x in (letter.fact_ids_used or [])]
+    facts = []
+    if known_ids:
+        facts = list((await db.execute(
+            select(Fact).where(
+                Fact.id.in_(known_ids),
+                Fact.user_id == current_user.id,
+                Fact.status == "approved",  # a fact rejected since generation is no longer evidence
+            )
+        )).scalars())
+    known_ids = [fid for fid in known_ids if fid in {str(f.id) for f in facts}]
+    voice = []
+    if letter.voice_sample_ids:
+        voice = list((await db.execute(
+            select(Proposal).where(
+                Proposal.id.in_([str(x) for x in letter.voice_sample_ids]),
+                Proposal.user_id == current_user.id,
+            )
+        )).scalars())
+
+    history = [m for m in (letter.refine_messages or []) if isinstance(m, dict)]
+    last = next((m for m in reversed(history) if m.get("role") == "assistant"), None)
+    # Revise what the sidebar shows (hand edits included); stored copies are the fallback.
+    if body.screening_answers is not None:
+        current_answers = [a.model_dump() for a in body.screening_answers]
+    else:
+        current_answers = list(last.get("screening_answers") or []) if last else []
+    current = Draft(
+        cover_letter=(body.current_draft or "").strip() or letter.content,
+        screening_answers=current_answers,
+        fact_ids_used=known_ids,
+    )
+
+    try:
+        outcome = await refine_application(
+            db, current_user.id, profile, brief,
+            Evidence(facts=facts, voice_samples=voice), current, history, message,
+        )
+    except RefineError as exc:
+        await db.rollback()
+        return generation_unavailable(
+            exc, status.HTTP_502_BAD_GATEWAY,
+            "Refining is temporarily unavailable. Please try again shortly.",
+        )
+
+    draft = outcome.draft
+    answers = [
+        {"question": str(a.get("question", "")), "answer": str(a.get("answer", ""))[:MAX_FINAL_ANSWER]}
+        for a in draft.screening_answers
+    ]
+    allowed = set(known_ids) | {str(f.id) for f in outcome.found_facts}
+    new_ids = [fid for fid in dict.fromkeys(draft.fact_ids_used) if fid in allowed and fid not in known_ids]
+    if new_ids:
+        letter.fact_ids_used = [*(letter.fact_ids_used or []), *new_ids]
+        await credit_facts(db, new_ids, won=False, user_id=current_user.id)  # times_used += 1
+
+    now = datetime.now(timezone.utc).isoformat()
+    letter.content = draft.cover_letter
+    letter.word_count = len(draft.cover_letter.split())
+    letter.model_used = settings.cover_letter_model
+    letter.refine_messages = [
+        *history,
+        {"role": "user", "content": message, "at": now},
+        {
+            "role": "assistant",
+            "content": draft.cover_letter,
+            "screening_answers": answers,
+            "warnings": [str(w) for w in outcome.warnings],
+            "claims_verified": outcome.claims_verified,
+            "at": now,
+        },
+    ][-MAX_HISTORY:]
+    await _capture_fact_candidates(
+        db, current_user.id, message, "refine_thread", letter.id,
+        context="; ".join(brief.needs) or None,
+    )
+    await db.commit()
+
+    return CoverLetterRefineResponse(
+        cover_letter=draft.cover_letter,
+        screening_answers=answers,
+        warnings=[str(w) for w in outcome.warnings],
+        refine_messages=letter.refine_messages,
+        claims_verified=outcome.claims_verified,
+    )
+
+
+CHRIS_REWRITE_THRESHOLD = 0.9  # ≥90% of words changed → treat the submission as Chris's own text
+
+
+async def _embed_or_none(text: str) -> Optional[List[float]]:
+    try:
+        return await generate_embedding(text)
+    except Exception as exc:
+        # Content-free: exception messages can carry user text.
+        logger.warning("Embedding failed (%d chars): %s", len(text), type(exc).__name__)
+        return None
+
+
+@router.put("/cover-letters/{letter_id}/final", response_model=CoverLetterFinalResponse)
+@limiter.limit("60/hour")
+async def submit_final_cover_letter(
+    request: Request,
+    letter_id: str,
+    body: CoverLetterFinalRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record what was actually submitted on Upwork → voice sample + fact candidates.
+
+    The voice-sample author is decided here from the edit distance, never by the client.
+    Idempotent: resubmitting the same text reuses the proposal row and skips extraction.
+    The letter row is locked so concurrent captures (double Submit click) serialize."""
+    final_text = body.final_text.strip()
+    if not final_text:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Final text is empty")
+
+    result = await db.execute(
+        select(CoverLetter).where(
+            CoverLetter.id == letter_id,
+            CoverLetter.user_id == current_user.id,
+        ).with_for_update()
+    )
+    letter = result.scalar_one_or_none()
+    if not letter:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover letter not found")
+
+    job = (await db.execute(
+        select(Job).where(Job.id == letter.job_id, Job.user_id == current_user.id)
+    )).scalar_one_or_none()
+    answers = [a.model_dump() for a in (body.final_answers or [])]
+    already_captured = letter.final_text == final_text
+    edit_pct = word_edit_distance_pct(letter.content, final_text)
+    author = "chris" if edit_pct >= CHRIS_REWRITE_THRESHOLD else "chris_edited_ai"
+    now = datetime.now(timezone.utc)
+
+    letter.final_text = final_text
+    letter.final_answers = answers
+    letter.edit_distance_pct = edit_pct
+    letter.submitted_text = final_text
+    letter.was_submitted = True
+    letter.submitted_at = letter.submitted_at or now
+    letter.is_final = True
+
+    prop = (await db.execute(
+        select(Proposal).where(
+            Proposal.user_id == current_user.id,
+            Proposal.job_id == letter.job_id,
+            Proposal.source == "extension",
+        )
+    )).scalars().first()
+    if prop is None:
+        prop = Proposal(
+            user_id=current_user.id,
+            job_id=letter.job_id,
+            cover_letter_text=final_text,
+            job_title=job.title if job else None,
+            job_skills=(job.skills_required or []) if job else [],
+            source="extension",
+            status="submitted",
+            submitted_at=now,
+        )
+        db.add(prop)
+    # Same meaning as Phase 1 Task 1.8: job_text is the job description only (title lives in job_title)
+    job_text = (job.description or None) if job else None
+    prop.cover_letter_text = final_text
+    prop.author = author
+    prop.job_text = job_text
+    prop.screening_answers = answers or None  # voice-sample answers (Phase 1 column)
+    if not already_captured:
+        prop.embedding = await _embed_or_none(final_text)
+        if job:
+            # Same text shape as Phase 1 Task 1.8 and Phase 2 select_evidence's voice query
+            prop.job_needs_embedding = await _embed_or_none(
+                "\n\n".join(t for t in (job.title, job.description) if t)
+            )
+    await db.flush()
+
+    fact_candidates = 0
+    if not already_captured:
+        qa = "\n\n".join(f"Q: {a['question']}\nA: {a['answer']}" for a in answers if a["answer"])
+        fact_candidates = await _capture_fact_candidates(
+            db, current_user.id,
+            final_text + (f"\n\n{qa}" if qa else ""),
+            "upwork_submission", letter.id,
+            context=job.title if job else None,
+        )
+        # Already extracted here, so /facts/from-proposals (Phase 1 Task 1.6) skips this letter
+        prop.facts_ingested_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return CoverLetterFinalResponse(
+        id=letter.id,
+        edit_distance_pct=edit_pct,
+        author=author,
+        proposal_id=prop.id,
+        fact_candidates=fact_candidates,
     )
 
 

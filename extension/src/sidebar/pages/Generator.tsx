@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
-import { apiClient, ScreeningAnswerSearchResult, AttachmentData, MilestoneSuggestion } from '../../lib/api-client';
+import { apiClient, ScreeningAnswerSearchResult, AttachmentData, MilestoneSuggestion, RefineMessage } from '../../lib/api-client';
 import JobHeader from '../components/generator/JobHeader';
 import AnalysisPanel from '../components/generator/AnalysisPanel';
 import CoverLetterPanel from '../components/generator/CoverLetterPanel';
 import ScreeningPanel from '../components/generator/ScreeningPanel';
 import MilestonesPanel from '../components/generator/MilestonesPanel';
+import RefineChat from '../components/generator/RefineChat';
+import LegacyRevise from '../components/generator/LegacyRevise';
 
 export default function GeneratorPage() {
   const {
@@ -16,12 +18,12 @@ export default function GeneratorPage() {
     coverLetter,
     coverLetterLoading,
     coverLetterError,
+    coverLetterId,
     draftMeta,
     savedJobId,
     applicationId,
     analyzeCurrentJob,
     generateCoverLetter,
-    regenerateCoverLetter,
     fillCoverLetter,
     fillScreeningQuestion,
     saveCurrentJob,
@@ -44,20 +46,24 @@ export default function GeneratorPage() {
   const [attachmentStatuses, setAttachmentStatuses] = useState<string[]>([]);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Regeneration feedback state
-  const [showFeedbackInput, setShowFeedbackInput] = useState(false);
-  const [feedbackText, setFeedbackText] = useState('');
+  // Refine thread state
+  const [refineMessages, setRefineMessages] = useState<RefineMessage[]>([]);
+  const [refineWarnings, setRefineWarnings] = useState<string[]>([]);
+  const [refining, setRefining] = useState(false);
+  const [refineError, setRefineError] = useState<string | null>(null);
+
+  // Legacy (generation_v2 off) revision state: refine only works on v2 letters
+  const [legacyRegenerating, setLegacyRegenerating] = useState(false);
+  const [improving, setImproving] = useState(false);
+  const [improvementNotes, setImprovementNotes] = useState<string[] | null>(null);
 
   // Application tracking state
   const [showAppliedPrompt, setShowAppliedPrompt] = useState(false);
   const [markingApplied, setMarkingApplied] = useState(false);
 
-  // Submit + improve feedback loop state
+  // Submit state
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [improving, setImproving] = useState(false);
-  const [improvementNotes, setImprovementNotes] = useState<string[] | null>(null);
-  const [showImprovementNotes, setShowImprovementNotes] = useState(false);
 
   // Missing skill add state
   const [addingSkill, setAddingSkill] = useState<string | null>(null);
@@ -112,6 +118,14 @@ export default function GeneratorPage() {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  // Link this draft to the job so the Upwork Submit-click capture can PUT /final
+  useEffect(() => {
+    if (!coverLetterId || !currentJob?.url) return;
+    chrome.storage.local.set({
+      activeDraft: { coverLetterId, jobUrl: currentJob.url, timestamp: Date.now() },
+    });
+  }, [coverLetterId, currentJob?.url]);
+
   const handleRefreshJob = () => {
     chrome.runtime.sendMessage({ type: 'REQUEST_JOB_EXTRACTION' }, (response) => {
       if (response?.success && response.data) {
@@ -124,8 +138,10 @@ export default function GeneratorPage() {
 
   const _resetFeedbackLoopState = () => {
     setSubmitted(false);
+    setRefineMessages([]);
+    setRefineWarnings([]);
+    setRefineError(null);
     setImprovementNotes(null);
-    setShowImprovementNotes(false);
   };
 
   const handleGenerate = () => {
@@ -133,21 +149,8 @@ export default function GeneratorPage() {
     generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
   };
 
-  const handleRegenerate = () => {
-    if (showFeedbackInput && feedbackText.trim()) {
-      _resetFeedbackLoopState();
-      regenerateCoverLetter(feedbackText.trim(), includeCallOffer);
-      setFeedbackText('');
-      setShowFeedbackInput(false);
-    } else {
-      setShowFeedbackInput(true);
-    }
-  };
-
   const handleRegenerateFresh = () => {
     _resetFeedbackLoopState();
-    setShowFeedbackInput(false);
-    setFeedbackText('');
     generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
   };
 
@@ -181,18 +184,78 @@ export default function GeneratorPage() {
     }
   };
 
+  const handleRefine = async (message: string) => {
+    if (!coverLetterId) return;
+    const refinedId = coverLetterId;
+    // A new draft or job switch while the request is in flight makes this result stale.
+    const isStale = () => useAppStore.getState().coverLetterId !== refinedId;
+    setRefining(true);
+    setRefineError(null);
+    const questions = currentJob?.screeningQuestions ?? [];
+    const currentAnswers = questions
+      .map((q, i) => ({ question: q.question, answer: questionAnswers[`q${i}`] ?? '' }))
+      .filter(a => a.answer);
+    try {
+      const result = await apiClient.refineCoverLetter(
+        refinedId, message, currentAnswers, useAppStore.getState().coverLetter ?? undefined,
+      );
+      if (isStale()) return;
+      useAppStore.getState().setCoverLetter(result.cover_letter);
+      // The first draft's warnings no longer apply (RefineChat shows the latest ones);
+      // the "Claims not verified" notice follows the refined draft's claim check.
+      const claimsVerified = result.claims_verified !== false;
+      useAppStore.setState((s) => ({
+        draftMeta: {
+          warnings: [],
+          factsUsed: s.draftMeta?.factsUsed ?? [],
+          screeningAnswers: s.draftMeta?.screeningAnswers ?? [],
+          claimsVerified,
+        },
+      }));
+      const revised: Record<string, string> = {};
+      const revisedUnverified: Record<string, boolean> = {};
+      questions.forEach((q, i) => {
+        const match = result.screening_answers.find(a => a.question.trim() === q.question.trim());
+        if (match) {
+          revised[`q${i}`] = match.answer;
+          revisedUnverified[`q${i}`] = !claimsVerified;
+        }
+      });
+      setQuestionAnswers(prev => ({ ...prev, ...revised }));
+      setUnverifiedAnswers(prev => ({ ...prev, ...revisedUnverified }));
+      setRefineMessages(result.refine_messages);
+      setRefineWarnings(result.warnings);
+      setSubmitted(false);
+    } catch (err) {
+      if (isStale()) return;
+      setRefineError(err instanceof Error ? err.message : 'Refine failed');
+    } finally {
+      setRefining(false);
+    }
+  };
+
+  const handleLegacyRegenerate = async (feedback: string) => {
+    if (!coverLetterId) return;
+    _resetFeedbackLoopState();
+    setLegacyRegenerating(true);
+    try {
+      const result = await apiClient.regenerateCoverLetter(coverLetterId, feedback, includeCallOffer);
+      useAppStore.setState({ coverLetter: result.content, coverLetterId: result.id, coverLetterError: null });
+    } catch (err) {
+      useAppStore.setState({ coverLetterError: err instanceof Error ? err.message : 'Regeneration failed' });
+    } finally {
+      setLegacyRegenerating(false);
+    }
+  };
+
   const handleImprove = async () => {
-    const { coverLetterId } = useAppStore.getState();
     if (!coverLetterId) return;
     setImproving(true);
     setImprovementNotes(null);
     try {
       const result = await apiClient.improveCoverLetter(coverLetterId);
-      useAppStore.getState().setCoverLetter(result.improved_content);
-      useAppStore.getState().setCoverLetterId(result.cover_letter_id);
-      useAppStore.getState().markDraftUnverified();
+      useAppStore.setState({ coverLetter: result.improved_content, coverLetterId: result.cover_letter_id });
       setImprovementNotes(result.improvement_notes);
-      setShowImprovementNotes(true);
       setSubmitted(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -329,6 +392,7 @@ export default function GeneratorPage() {
   };
 
   const handleGenerateAll = async () => {
+    _resetFeedbackLoopState();
     await generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
     // v2 answers come back with the letter (same evidence, one call) — use them instead of per-question calls
     const meta = useAppStore.getState().draftMeta;
@@ -534,13 +598,6 @@ export default function GeneratorPage() {
               setIncludeCallOffer={setIncludeCallOffer}
               coverLetterError={coverLetterError}
               coverLetterLoading={coverLetterLoading}
-              showFeedbackInput={showFeedbackInput}
-              feedbackText={feedbackText}
-              setFeedbackText={setFeedbackText}
-              improvementNotes={improvementNotes}
-              showImprovementNotes={showImprovementNotes}
-              setShowImprovementNotes={setShowImprovementNotes}
-              improving={improving}
               submitting={submitting}
               submitted={submitted}
               showAppliedPrompt={showAppliedPrompt}
@@ -554,14 +611,32 @@ export default function GeneratorPage() {
               onRetryGenerate={handleGenerate}
               onFill={handleFill}
               onCopy={handleCopy}
-              onRegenerate={handleRegenerate}
               onRegenerateFresh={handleRegenerateFresh}
               onOpenEditor={handleOpenEditor}
-              onImprove={handleImprove}
               onMarkSubmitted={handleMarkSubmitted}
               onMarkAsApplied={handleMarkAsApplied}
               onDismissAppliedPrompt={() => setShowAppliedPrompt(false)}
             />
+
+            {/* Refine needs a v2 letter (draftMeta is only set by the v2 engine) */}
+            {coverLetter && coverLetterId && draftMeta && (
+              <RefineChat
+                messages={refineMessages}
+                warnings={refineWarnings}
+                sending={refining}
+                error={refineError}
+                onSend={handleRefine}
+              />
+            )}
+            {coverLetter && coverLetterId && !draftMeta && (
+              <LegacyRevise
+                busy={legacyRegenerating}
+                improving={improving}
+                improvementNotes={improvementNotes}
+                onRegenerate={handleLegacyRegenerate}
+                onImprove={handleImprove}
+              />
+            )}
 
             {currentJob?.screeningQuestions && currentJob.screeningQuestions.length > 0 && (
               <ScreeningPanel

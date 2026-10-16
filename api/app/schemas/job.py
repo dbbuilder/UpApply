@@ -228,6 +228,55 @@ class CoverLetterImproveResponse(BaseModel):
     hired_examples_used: int   # How many won letters were compared against
 
 
+MAX_REFINE_MESSAGE = 4000
+MAX_FINAL_TEXT = 20000
+MAX_FINAL_ANSWER = 5000
+
+
+class QAPair(BaseModel):
+    """One screening question and its answer."""
+
+    question: str = Field(..., max_length=MAX_SCREENING_QUESTION)
+    answer: str = Field(..., max_length=MAX_FINAL_ANSWER)
+
+
+class CoverLetterRefineRequest(BaseModel):
+    """One refine-thread message from the user."""
+
+    message: str = Field(..., max_length=MAX_REFINE_MESSAGE)
+    # The draft as the sidebar shows it (includes hand edits); falls back to the stored letter
+    current_draft: Optional[str] = Field(None, max_length=MAX_FINAL_TEXT)
+    # Sidebar's current answers (includes hand edits); falls back to the thread's last answers
+    screening_answers: Optional[List[QAPair]] = Field(None, max_length=MAX_SCREENING_QUESTIONS)
+
+
+class CoverLetterRefineResponse(BaseModel):
+    """Revised draft after one refine turn."""
+
+    cover_letter: str
+    screening_answers: List[QAPair]
+    warnings: List[str]
+    refine_messages: List[dict]
+    claims_verified: bool = True  # False when the claim check was skipped for this draft
+
+
+class CoverLetterFinalRequest(BaseModel):
+    """What was actually submitted on Upwork (captured on Submit click)."""
+
+    final_text: str = Field(..., max_length=MAX_FINAL_TEXT)
+    final_answers: Optional[List[QAPair]] = Field(None, max_length=MAX_SCREENING_QUESTIONS)
+
+
+class CoverLetterFinalResponse(BaseModel):
+    """Result of recording the submitted text."""
+
+    id: str
+    edit_distance_pct: float
+    author: str  # chris | chris_edited_ai
+    proposal_id: Optional[str] = None
+    fact_candidates: int
+
+
 # Attachment extraction schemas
 
 class AttachmentData(BaseModel):

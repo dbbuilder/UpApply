@@ -42,7 +42,7 @@ from agent.autonomy_governor import (
     record_suggestion_rejected,
     update_avg_edit_distance,
 )
-from agent.learning_engine import contribute_signal, winning_proposal_to_memory
+from agent.learning_engine import contribute_signal
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -766,19 +766,6 @@ async def record_proposal_response(
             )
         except Exception as exc:
             logger.warning("Signal contribution failed for item %s: %s", item_id, exc)
-
-    # If hired: add winning cover letter to memory corpus
-    if body.response_type == "invited" and item.draft_cover_letter:
-        try:
-            await winning_proposal_to_memory(
-                user_id=current_user.id,
-                job_title=item.title,
-                job_description=item.description or "",
-                cover_letter_text=item.draft_cover_letter,
-                db=db,
-            )
-        except Exception as exc:
-            logger.warning("winning_proposal_to_memory failed for item %s: %s", item_id, exc)
 
     await db.flush()
     await db.refresh(item)

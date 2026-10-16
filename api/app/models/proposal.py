@@ -98,6 +98,11 @@ class Proposal(Base):
     facts_ingested_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Set (atomically) when a positive outcome credited this letter's facts
+    # (times_in_won), so re-syncing outcomes never credits twice (migration 024).
+    facts_credited_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Timestamps
     submitted_at: Mapped[Optional[datetime]] = mapped_column(

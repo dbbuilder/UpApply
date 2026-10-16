@@ -269,17 +269,26 @@ class ApiClient {
     return this.request<CoverLetter[]>(`/api/v1/jobs/cover-letters${params}`);
   }
 
-  async regenerateCoverLetter(id: string, feedback?: string, includeCallOffer: boolean = true) {
-    return this.request<CoverLetter>(`/api/v1/jobs/cover-letters/${id}/regenerate`, {
-      method: 'POST',
-      body: { feedback, include_call_offer: includeCallOffer },
-    });
-  }
-
   async submitCoverLetter(id: string, submittedText: string) {
     return this.request<CoverLetter>(`/api/v1/jobs/cover-letters/${id}/submit`, {
       method: 'PUT',
       body: { submitted_text: submittedText },
+    });
+  }
+
+  // currentDraft: the letter as the sidebar shows it (hand edits included), so they are revised, not lost
+  async refineCoverLetter(id: string, message: string, screeningAnswers?: QAPair[], currentDraft?: string) {
+    return this.request<RefineResponse>(`/api/v1/jobs/cover-letters/${id}/refine`, {
+      method: 'POST',
+      body: { message, screening_answers: screeningAnswers, current_draft: currentDraft },
+    });
+  }
+
+  // Legacy (generation_v2 off) revision paths; v2 letters use refineCoverLetter
+  async regenerateCoverLetter(id: string, feedback?: string, includeCallOffer: boolean = true) {
+    return this.request<CoverLetter>(`/api/v1/jobs/cover-letters/${id}/regenerate`, {
+      method: 'POST',
+      body: { feedback, include_call_offer: includeCallOffer },
     });
   }
 
@@ -290,6 +299,20 @@ class ApiClient {
       improvement_notes: string[];
       hired_examples_used: number;
     }>(`/api/v1/jobs/cover-letters/${id}/improve`, { method: 'POST' });
+  }
+
+  async submitFinal(id: string, finalText: string, finalAnswers: QAPair[]) {
+    return this.request<FinalSubmitResponse>(`/api/v1/jobs/cover-letters/${id}/final`, {
+      method: 'PUT',
+      body: { final_text: finalText, final_answers: finalAnswers },
+    });
+  }
+
+  async syncProposalOutcomes(items: ProposalOutcomeItem[]) {
+    return this.request<ProposalOutcomeSyncResponse>('/api/v1/proposals/outcomes', {
+      method: 'POST',
+      body: { items },
+    });
   }
 
   // Applications
@@ -946,6 +969,50 @@ export interface CoverLetter {
   verify_warnings?: string[] | null;
   facts_used?: { id: string; statement: string }[] | null;
   claims_verified?: boolean | null; // false when the claim check was skipped
+}
+
+export interface QAPair {
+  question: string;
+  answer: string;
+}
+
+export interface RefineMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  screening_answers?: QAPair[];
+  warnings?: string[];
+  claims_verified?: boolean;
+  at: string;
+}
+
+export interface RefineResponse {
+  cover_letter: string;
+  screening_answers: QAPair[];
+  warnings: string[];
+  refine_messages: RefineMessage[];
+  claims_verified: boolean; // false when the claim check was skipped for this draft
+}
+
+export interface FinalSubmitResponse {
+  id: string;
+  edit_distance_pct: number;
+  author: 'chris' | 'chris_edited_ai';
+  proposal_id: string | null;
+  fact_candidates: number;
+}
+
+export interface ProposalOutcomeItem {
+  upwork_proposal_id?: string;
+  proposal_id?: string;
+  job_title?: string;
+  status: string;
+  submitted_at?: string;
+}
+
+export interface ProposalOutcomeSyncResponse {
+  updated: number;
+  credited: number;
+  not_found: number;
 }
 
 export interface ApplicationCreate {
