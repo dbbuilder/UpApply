@@ -10,7 +10,11 @@ Usage:
     UPAPPLY_PASSWORD='...' python scripts/ingest_chatgpt_facts.py \\
         /Users/admin/dev2/UpApply/working/chatgpt-export \\
         --email chris@servicevision.net \\
-        [--api https://upapply-api.onrender.com] [--batch-size 5] [--limit N] [--dry-run]
+        [--api https://upapply-api.onrender.com] [--batch-size 5] [--limit N] [--dry-run] [--all]
+
+By default only work conversations are sent: any whose title or messages mention a cover
+letter, plus career-titled ones (proposal, CV, bio, interview, role...). Everything else
+(personal, medical, family, how-to chats) never leaves the machine. --all disables the filter.
 
 Re-runnable: conversations already ingested (by conversation id) are skipped server-side.
 Candidates land in the Facts review page (status=candidate) unless they match an
@@ -20,6 +24,7 @@ import argparse
 import getpass
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -31,6 +36,14 @@ SOURCE_TYPE = "chatgpt_user_turn"
 MAX_SOURCE_CHARS = 12000
 MAX_CONTEXT_CHARS = 4000
 MIN_USER_CHARS = 40
+COVER_LETTER = re.compile(r"cover[\s-]?letter", re.I)
+CAREER_TITLE = re.compile(
+    r"proposal|upwork|application|apply|resume|résumé|\bcv\b|\bbio\b|linkedin|profile|portfolio|"
+    r"interview|\brfp\b|\brfq\b|hire|hiring|job|role|position|expert|expertise|specialist|consult|"
+    r"freelanc|contract|\bcto\b|fractional|advisor|engineer|developer|architect|case stud|testimonial|"
+    r"client|pitch|capabilit|qualification|experience|background|career|screening|response to|reply to|offer",
+    re.I,
+)
 
 
 def load_conversations(export_dir: Path) -> list[dict]:
@@ -67,6 +80,14 @@ def conversation_messages(conv: dict) -> list[tuple[str, str]]:
         if text:
             messages.append((role, text))
     return messages
+
+
+def is_work_conversation(conv: dict) -> bool:
+    """Cover letter mentioned in the title or any message, or a career-flavoured title."""
+    title = conv.get("title") or ""
+    if COVER_LETTER.search(title) or CAREER_TITLE.search(title):
+        return True
+    return any(COVER_LETTER.search(text) for _, text in conversation_messages(conv))
 
 
 def chunk_text(text: str, size: int) -> list[str]:
@@ -133,14 +154,17 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--batch-size", type=int, default=5, help="Items per /facts/ingest call (max 25)")
     parser.add_argument("--limit", type=int, default=None, help="Only process the first N conversations")
     parser.add_argument("--dry-run", action="store_true", help="Parse and report; no API calls")
+    parser.add_argument("--all", action="store_true", help="Send every conversation, not just work ones")
     args = parser.parse_args(argv)
 
     export_dir = Path(args.export_dir)
-    conversations = load_conversations(export_dir)
+    loaded = load_conversations(export_dir)
+    conversations = loaded if args.all else [c for c in loaded if is_work_conversation(c)]
     if args.limit:
         conversations = conversations[: args.limit]
     items = [item for conv in conversations for item in build_items(conv)]
-    print(f"{len(conversations)} conversations -> {len(items)} items from {export_dir}")
+    scope = "all" if args.all else "work only"
+    print(f"{len(conversations)} of {len(loaded)} conversations ({scope}) -> {len(items)} items from {export_dir}")
 
     if args.dry_run:
         for item in items[:3]:
