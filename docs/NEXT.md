@@ -47,3 +47,4 @@ Phases 0–3 of the memory-driven generation rebuild (facts + voice samples, Opu
 - [2026-10-14] step 2 done — 33fad1f — v2 pipeline section in CLAUDE.md; legacy model setting corrected; 614 API tests pass
 - [2026-10-15] CodeRabbit re-review of #8 checked — no new findings (check green, only the summary was refreshed); #8 all 4 checks pass
 - [2026-10-16] #9 CodeRabbit: guarded letter re-embed, SQL-bounded backfill, anthropic>=1.13 — 15eb8d2; facts.py comment nitpick skipped (already correct); merged forward bd71642, 0840afc — 616 API tests pass
+- [2026-10-16] #9 merged (1a1fd74), deployed in ~100s, /facts/* live; #10 retargeted, main merged in (ddb68df), CI green, CodeRabbit rate-limited (no review yet)
