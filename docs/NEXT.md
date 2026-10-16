@@ -33,8 +33,8 @@ Phases 0–3 of the memory-driven generation rebuild (facts + voice samples, Opu
 ## Decisions pending
 
 - [2026-10-13] Rotate the UpApply password leaked in pushed commit 3b7affc and revoke old OpenAI keys (user action)
-- [2026-10-13] Review and merge PRs #8 → #9 → #10 → #11 in order, retargeting each to main so CI runs (user action)
-- [2026-10-13] Prod rollout per docs/superpowers/runbook-memory-driven-generation.md: deploy (migrations 022–024 via start.sh), bio relabel SQL, place ChatGPT export in working/chatgpt-export/ and run scripts/ingest_chatgpt_facts.py, scrape proposals, review facts, build-golden + blind A/B (≥75%) before flipping `generation_v2` (user action)
+- [2026-10-16] #8 merged (aae9ca8). #9 retargeted to main, CodeRabbit fixes pushed, CI green — merge #9, then retarget #10 → main, then #11 (user's go-ahead per PR). Note: retargeting alone does not trigger CI here (ci.yml has default pull_request types); push or close/reopen to run it
+- [2026-10-13] Prod rollout per docs/superpowers/runbook-memory-driven-generation.md: deploy (migrations 022–024 via start.sh), bio relabel SQL, run scripts/ingest_chatgpt_facts.py (export already unzipped to working/chatgpt-export/: 5,148 conversations → 5,611 Haiku extraction items; needs #9 deployed first), scrape proposals, review facts, build-golden + blind A/B (≥75%) before flipping `generation_v2` (user action)
 - [2026-10-15] CodeRabbit skipped #9–#11 (auto-review only runs on PRs into main). Either comment `@coderabbitai review` on each now (A), or let it review as each is retargeted to main during merge (B, recommended: no extra noise, same coverage)
 
 ## Log
@@ -46,3 +46,4 @@ Phases 0–3 of the memory-driven generation rebuild (facts + voice samples, Opu
 - [2026-10-14] step 1 done — 2ffc21d — migrations 013–024 added to CLAUDE.md; 614 API tests pass
 - [2026-10-14] step 2 done — 33fad1f — v2 pipeline section in CLAUDE.md; legacy model setting corrected; 614 API tests pass
 - [2026-10-15] CodeRabbit re-review of #8 checked — no new findings (check green, only the summary was refreshed); #8 all 4 checks pass
+- [2026-10-16] #9 CodeRabbit: guarded letter re-embed, SQL-bounded backfill, anthropic>=1.13 — 15eb8d2; facts.py comment nitpick skipped (already correct); merged forward bd71642, 0840afc — 616 API tests pass
