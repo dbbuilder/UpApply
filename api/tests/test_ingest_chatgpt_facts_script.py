@@ -93,3 +93,29 @@ def test_dry_run_makes_no_network_calls(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "2 conversations" in out
     assert "2 items" in out
+
+
+def _personal(conv_id="p-1", title="Ham in 2 Hours", text="How long do I bake a 10 lb ham at 325F? Asking for dinner."):
+    mapping = {
+        "root": _node("root", None, None, "", ["u1"]),
+        "u1": _node("u1", "root", "user", text, []),
+    }
+    return {"id": conv_id, "title": title, "current_node": "u1", "mapping": mapping}
+
+
+def test_is_work_conversation_matches_cover_letter_in_title_body_or_career_title():
+    assert ingest.is_work_conversation(_conv(title="Azure proposal"))
+    assert ingest.is_work_conversation(_personal(title="Cover Letter for SaaS Role"))
+    assert ingest.is_work_conversation(_personal(title="MSSQL to PostgreSQL Migration",
+                                                 text="Write a cover-letter for this job post about our migration."))
+    assert not ingest.is_work_conversation(_personal())
+    assert not ingest.is_work_conversation(_personal(title="Semaglutide Sleep Disruption", text="My sleep has changed since the new dose."))
+
+
+def test_main_filters_personal_conversations_unless_all(tmp_path, monkeypatch, capsys):
+    (tmp_path / "conversations.json").write_text(json.dumps([_conv("a"), _personal("p")]))
+    monkeypatch.setattr(ingest.requests, "post", lambda *a, **k: (_ for _ in ()).throw(AssertionError("network")))
+    ingest.main([str(tmp_path), "--dry-run"])
+    assert "1 of 2 conversations (work only) -> 1 items" in capsys.readouterr().out
+    ingest.main([str(tmp_path), "--dry-run", "--all"])
+    assert "2 of 2 conversations (all) -> 2 items" in capsys.readouterr().out

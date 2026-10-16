@@ -78,6 +78,9 @@ becomes `client_quote` facts whose statement quotes the client's words exactly.
 
 What to skip: the requirements of a client's job post, generic advice, opinions,
 writing-style preferences, plans or hypotheticals, and anything about other people's work.
+Never extract personal information, about the freelancer or anyone else: health, medical,
+family, relationships, religion, finances, home or legal matters outside their client work.
+Such text is not a proposal fact even when it contains numbers or names.
 
 Hard rules:
 - Use only the SOURCE TEXT. The CONTEXT block (if present) was not written by the
