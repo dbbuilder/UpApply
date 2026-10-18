@@ -200,7 +200,7 @@ Each job type maps to a credential anchor in `profile.proposal_anchors`:
 Two types of memories feed cover letter generation:
 
 **Bio/Achievement memories** — curated JSON, seeded via `scripts/import_chatgpt_corpus.py --bio-only`:
-- Format: `scripts/chris_bio_memories.json` (9 entries for Chris)
+- Format: `scripts/chris_bio_memories.json` (14 entries for Chris)
 - Importance scores 0.9–1.0 so they always surface in top-N search
 
 **Past proposal memories** — extracted from ChatGPT export, seeded via `scripts/import_chatgpt_corpus.py --proposals-only`:
@@ -246,8 +246,10 @@ Located in `scripts/`:
 |--------|---------|
 | `import_chatgpt_corpus.py` | Extract past proposals + bio memories from ChatGPT export and bulk-import to UpApply API |
 | `seed_proposal_anchors.py` | SET `proposal_anchors` JSONB on a user's profile via API PUT |
-| `chris_bio_memories.json` | Chris Therriault's 9 canonical bio/achievement memories |
+| `chris_bio_memories.json` | Chris Therriault's 14 canonical bio/achievement memories |
 | `chris_proposal_anchors.json` | Chris's job-type credential routing config (cto/saas/sql/cloud/ai/fullstack + always_include) |
+| `ingest_chatgpt_facts.py` | v2: send ChatGPT export conversations to `/facts/ingest` as fact candidates. Work-only by default (cover letter in the title or any message, plus career titles); `--all` disables the filter, `--dry-run` makes no API calls, `--limit N` caps conversations |
+| `eval_generation.py` | v2 rollout gate: `build-golden` (golden jobs from scraped proposals, read-only), `generate` (blind A/B packet, legacy vs v2), `score` (pass ≥75%) |
 
 **Usage (avoid shell `!` in passwords — use Python sys.argv injection):**
 ```python
