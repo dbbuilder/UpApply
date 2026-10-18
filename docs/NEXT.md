@@ -2,10 +2,10 @@
 
 autopilot: off
 autopilot-max: 10
-built: 2026-10-14T06:07
+built: 2026-10-17T23:43
 branch: feat/mdg-3-loop
-head: 7599806
-status: done
+head: e993612
+status: active
 
 <!--
 Contract for unattended work in this repo. Read by advance-all, the autopilot Stop hook and dispatch-workstreams.
@@ -15,36 +15,40 @@ Contract for unattended work in this repo. Read by advance-all, the autopilot St
 
 ## Goal
 
-Phases 0–3 of the memory-driven generation rebuild (facts + voice samples, Opus 5.5 engine behind `generation_v2`, refine/learn loop) are code-complete as stacked PRs #8 → #9 → #10 → #11. The only unattended work left is keeping repo docs in step with the new pipeline; everything else is a human handoff (see Decisions pending).
+The rebuild is merged and live (PRs #8–#13; prod on migration 025, `generation_v2` off). What remains unattended is bringing the repo docs in line with what shipped, so the next human step (fact ingest → review → golden set → blind A/B → flag flip) is self-explanatory. Everything that touches prod or needs a judgement is under Decisions pending.
 
 ## Guardrails
 
 - No database migrations, deploys, secrets or env-var writes (see ~/.config/claude/overnight-defaults.md)
-- Never push, merge, retarget or close PRs #8–#11; commit locally on `feat/mdg-3-loop` only
+- Never push, open/merge PRs or call the production API; commit locally on `feat/mdg-3-loop` only
 - Never commit the uncommitted extension version bump (extension/package.json, package-lock.json, public/manifest.json) or anything under `working/` / `docs/evals/`
-- Never flip `generation_v2`, run the bio relabel SQL, or call prod — those are in the runbook for the user
-- Tests: `cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q` (614 passing at head 7599806); `cd extension && npx vitest run && npm run type-check`
+- Never run `scripts/ingest_chatgpt_facts.py` without `--dry-run`, flip `generation_v2`, or touch the prod DB
+- Tests: `cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q` (620 passing at origin/main 247e0f3); `cd extension && npx vitest run && npm run type-check`
 
 ## Steps
 
-- [x] 1. (2ffc21d) Update CLAUDE.md "Database Migrations" table with rows 013–024 (one-line description each, taken from the `api/alembic/versions/*.py` docstrings) — Done when: `grep -c '^| 0' CLAUDE.md` returns 24 and each new row matches its migration file's docstring
-- [x] 2. (33fad1f) Add a "Memory-driven generation (v2)" subsection to CLAUDE.md under "Cover Letter Generation": `generation_v2` flag, facts store vs voice samples, Opus 5.5 writer / Haiku 4.5 extraction, verify + repair (incl. ≥2 verified specifics), refine loop caps, untrusted-text rule (`app/services/untrusted.neutralise()`), and links to the spec, plan and runbook; mark the existing sonnet-4-6 pipeline as the legacy (flag-off) path — Done when: CLAUDE.md mentions `generation_v2`, `claude-opus-5-5`, `neutralise()` and `docs/superpowers/runbook-memory-driven-generation.md`, and every path it cites exists (`ls` each)
+- [ ] 1. Bring `feat/mdg-3-loop` up to `origin/main` (`git merge --no-edit origin/main`; local HEAD e993612 lacks #13, and this NEXT.md commit means it cannot fast-forward) — Done when: `git merge-base --is-ancestor origin/main HEAD` exits 0 and `grep -c '^| 025' CLAUDE.md` returns 1
+- [ ] 2. CLAUDE.md "Corpus & Memory Scripts": add rows for `ingest_chatgpt_facts.py` (work-only filter by default — cover letter in title or any message, plus career titles; `--all` to disable; `--dry-run`, `--limit`) and `eval_generation.py` (`build-golden`, blind A/B); fix "9 entries" → 14 for `chris_bio_memories.json` — Done when: `grep -c 'ingest_chatgpt_facts.py\|eval_generation.py' CLAUDE.md` ≥ 3, `grep -c '9 entries' CLAUDE.md` returns 0, and `python3 -c "import json;print(len(json.load(open('scripts/chris_bio_memories.json'))))"` matches the number stated
+- [ ] 3. CLAUDE.md "Testing": add the real API test command (`TEST_DATABASE_URL=… ./venv/bin/pytest -q` against the `upapply-test-pg` container on port 55499) and `npx vitest run` for the extension — Done when: `grep -c 'TEST_DATABASE_URL' CLAUDE.md` ≥ 1 and `grep -c 'vitest' CLAUDE.md` ≥ 1, and the documented commands pass when run
+- [ ] 4. Runbook ingest section: document the work-only default and `--all`, the current export numbers (1,266 of 5,148 conversations → 1,286 items), running with `doppler run --project upapply --config dev -- …` once `UPAPPLY_PASSWORD` is set, and that step 3 (bio relabel) is now done by migration 025 — Done when: `grep -c -- '--all' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1 and `grep -c 'UPAPPLY_PASSWORD' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1
 
 ## Decisions pending
 
 - [2026-10-13] Rotate the UpApply password leaked in pushed commit 3b7affc and revoke old OpenAI keys (user action)
-- [2026-10-16] #8 merged (aae9ca8). #9 retargeted to main, CodeRabbit fixes pushed, CI green — merge #9, then retarget #10 → main, then #11 (user's go-ahead per PR). Note: retargeting alone does not trigger CI here (ci.yml has default pull_request types); push or close/reopen to run it
-- [2026-10-13] Prod rollout per docs/superpowers/runbook-memory-driven-generation.md: deploy (migrations 022–024 via start.sh), bio relabel SQL, run scripts/ingest_chatgpt_facts.py (export already unzipped to working/chatgpt-export/: 5,148 conversations → 5,611 Haiku extraction items; needs #9 deployed first), scrape proposals, review facts, build-golden + blind A/B (≥75%) before flipping `generation_v2` (user action)
-- [2026-10-15] CodeRabbit skipped #9–#11 (auto-review only runs on PRs into main). Either comment `@coderabbitai review` on each now (A), or let it review as each is retargeted to main during merge (B, recommended: no extra noise, same coverage)
+- [2026-10-16] Set `UPAPPLY_PASSWORD` in Doppler upapply/dev (`! doppler secrets set UPAPPLY_PASSWORD --project upapply --config dev`), then say "go": ingest loop = `/facts/from-memories` (confirms migration 025) → 50-conversation trial (review sample) → remaining work conversations → `/facts/from-proposals` (user action, then attended session)
+- [2026-10-16] After ingest: review facts (user), `build-golden`, blind A/B ≥75%, then flip `generation_v2` (user action)
+- [2026-10-16] Multi-user gaps, after Chris's A/B passes: (a) writing hard rules (no "I"-start, banned phrases, "Warm regards") are Chris's but apply to every user → per-user setting (needs a migration); (b) proposal `author` labels `chris`/`chris_edited_ai` are naming only (already user-scoped) → rename needs a data migration; (c) ChatGPT export ingest is a local script → in-app upload + background job for other users. Recommendation: design (c) first, it is the onboarding blocker
+- [2026-10-17] Steps 1–4 above are local doc commits on `feat/mdg-3-loop`; getting them to main needs a push + PR (user's go-ahead)
 
 ## Log
 
-- [2026-10-13] Phases 0–3 implemented, hardened, pushed as PRs #8–#11 — 7599806 — 614 API tests + 36 extension tests passing
-- [2026-10-13] CodeRabbit follow-ups: numeric-conflict facts, status case, ≥2 specifics, spec text — 9bf76ae, 5ceaf2a, 31a3ab8, 7599806
-- [2026-10-13] Deps fix `sqlalchemy[asyncio]` (greenlet) — 49e5bd7 — #8 CI green
-- [2026-10-13] build-golden, prod runbook, gitignore working/ + docs/evals/ — 493fe32, 8f1a1ea, 25bf4cd
 - [2026-10-14] step 1 done — 2ffc21d — migrations 013–024 added to CLAUDE.md; 614 API tests pass
 - [2026-10-14] step 2 done — 33fad1f — v2 pipeline section in CLAUDE.md; legacy model setting corrected; 614 API tests pass
-- [2026-10-15] CodeRabbit re-review of #8 checked — no new findings (check green, only the summary was refreshed); #8 all 4 checks pass
-- [2026-10-16] #9 CodeRabbit: guarded letter re-embed, SQL-bounded backfill, anthropic>=1.13 — 15eb8d2; facts.py comment nitpick skipped (already correct); merged forward bd71642, 0840afc — 616 API tests pass
-- [2026-10-16] #9 merged (1a1fd74), deployed in ~100s, /facts/* live; #10 retargeted, main merged in (ddb68df), CI green, CodeRabbit rate-limited (no review yet)
+- [2026-10-15] CodeRabbit re-review of #8 checked — no new findings; #8 all 4 checks pass
+- [2026-10-16] #8 merged — aae9ca8
+- [2026-10-16] #9 CodeRabbit fixes (guarded re-embed, SQL-bounded backfill, anthropic>=1.13) — 15eb8d2; merged — 1a1fd74; deployed ~100s, /facts/* live
+- [2026-10-16] #10 merged — 83f043b
+- [2026-10-16] #11 merged — 1058c54; deployed ~60s, /refine live
+- [2026-10-16] #12 work-only ChatGPT ingest filter + no personal facts — 1ab4d6a; merged — e993612
+- [2026-10-16] Prod DB refuses external connections, so bio relabel shipped as migration 025 — 5d3b55d; #13 merged — 247e0f3; 620 API tests pass
+- [2026-10-16] Export unzipped to working/chatgpt-export/ (gitignored); dry run: 1,266 of 5,148 conversations → 1,286 items
