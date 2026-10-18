@@ -27,7 +27,7 @@ The rebuild is merged and live (PRs #8–#13; prod on migration 025, `generation
 
 ## Steps
 
-- [ ] 1. Bring `feat/mdg-3-loop` up to `origin/main` (`git merge --no-edit origin/main`; local HEAD e993612 lacks #13, and this NEXT.md commit means it cannot fast-forward) — Done when: `git merge-base --is-ancestor origin/main HEAD` exits 0 and `grep -c '^| 025' CLAUDE.md` returns 1
+- [x] 1. (e17339b) Bring `feat/mdg-3-loop` up to `origin/main` (`git merge --no-edit origin/main`; local HEAD e993612 lacks #13, and this NEXT.md commit means it cannot fast-forward) — Done when: `git merge-base --is-ancestor origin/main HEAD` exits 0 and `grep -c '^| 025' CLAUDE.md` returns 1
 - [ ] 2. CLAUDE.md "Corpus & Memory Scripts": add rows for `ingest_chatgpt_facts.py` (work-only filter by default — cover letter in title or any message, plus career titles; `--all` to disable; `--dry-run`, `--limit`) and `eval_generation.py` (`build-golden`, blind A/B); fix "9 entries" → 14 for `chris_bio_memories.json` — Done when: `grep -c 'ingest_chatgpt_facts.py\|eval_generation.py' CLAUDE.md` ≥ 3, `grep -c '9 entries' CLAUDE.md` returns 0, and `python3 -c "import json;print(len(json.load(open('scripts/chris_bio_memories.json'))))"` matches the number stated
 - [ ] 3. CLAUDE.md "Testing": add the real API test command (`TEST_DATABASE_URL=… ./venv/bin/pytest -q` against the `upapply-test-pg` container on port 55499) and `npx vitest run` for the extension — Done when: `grep -c 'TEST_DATABASE_URL' CLAUDE.md` ≥ 1 and `grep -c 'vitest' CLAUDE.md` ≥ 1, and the documented commands pass when run
 - [ ] 4. Runbook ingest section: document the work-only default and `--all`, the current export numbers (1,266 of 5,148 conversations → 1,286 items), running with `doppler run --project upapply --config dev -- …` once `UPAPPLY_PASSWORD` is set, and that step 3 (bio relabel) is now done by migration 025 — Done when: `grep -c -- '--all' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1 and `grep -c 'UPAPPLY_PASSWORD' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1
@@ -42,7 +42,6 @@ The rebuild is merged and live (PRs #8–#13; prod on migration 025, `generation
 
 ## Log
 
-- [2026-10-14] step 1 done — 2ffc21d — migrations 013–024 added to CLAUDE.md; 614 API tests pass
 - [2026-10-14] step 2 done — 33fad1f — v2 pipeline section in CLAUDE.md; legacy model setting corrected; 614 API tests pass
 - [2026-10-15] CodeRabbit re-review of #8 checked — no new findings; #8 all 4 checks pass
 - [2026-10-16] #8 merged — aae9ca8
@@ -52,3 +51,4 @@ The rebuild is merged and live (PRs #8–#13; prod on migration 025, `generation
 - [2026-10-16] #12 work-only ChatGPT ingest filter + no personal facts — 1ab4d6a; merged — e993612
 - [2026-10-16] Prod DB refuses external connections, so bio relabel shipped as migration 025 — 5d3b55d; #13 merged — 247e0f3; 620 API tests pass
 - [2026-10-16] Export unzipped to working/chatgpt-export/ (gitignored); dry run: 1,266 of 5,148 conversations → 1,286 items
+- [2026-10-17] step 1 done — e17339b — branch merged with origin/main (247e0f3); test DB container was stopped, restarted; 620 API tests pass
