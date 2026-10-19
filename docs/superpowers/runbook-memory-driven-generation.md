@@ -73,10 +73,21 @@ COMMIT;
 
 ## 4. Load the knowledge base
 1. **Bio facts** (auto-approved, trusted): `POST /api/v1/facts/from-memories` — repeat until `remaining` is 0.
-2. **ChatGPT export**: unzip the fresh export to `working/chatgpt-export/`, then
+2. **ChatGPT export**: unzip only the conversation files to `working/chatgpt-export/` (gitignored):
+   `unzip -oq <export>.zip 'conversations*.json' -d working/chatgpt-export`.
+   By default the script sends **work conversations only**: any whose title or messages mention a
+   cover letter, plus career-titled ones (proposal, CV, bio, interview, RFP, role...). Personal,
+   medical, family and how-to chats never leave the machine; `--all` disables the filter. The
+   2026-10 export: **1,266 of 5,148 conversations → 1,286 items**. Store the password once in
+   Doppler (`doppler secrets set UPAPPLY_PASSWORD --project upapply --config dev`; it prompts),
+   then trial a batch before the full run (re-runs skip conversations already ingested). The Doppler
+   CLI must be logged into the workplace that holds `upapply` (`doppler projects` lists it); without
+   Doppler, `read -s UPAPPLY_PASSWORD && export UPAPPLY_PASSWORD` in the same shell works too
+   (or omit it and the script prompts):
    ```bash
-   python scripts/ingest_chatgpt_facts.py --dry-run            # parse + counts, no API calls
-   UPAPPLY_PASSWORD='...' python scripts/ingest_chatgpt_facts.py --email chris@servicevision.net
+   api/venv/bin/python scripts/ingest_chatgpt_facts.py --dry-run          # counts, no API calls
+   doppler run --project upapply --config dev -- api/venv/bin/python scripts/ingest_chatgpt_facts.py \
+       --email chris@servicevision.net --limit 50                         # trial, then drop --limit
    ```
 3. **Upwork proposals**: load the extension, open Upwork → Proposals (active + archived) and run the
    proposal import so each detail page is scraped (full letter, answers, job text, status).
