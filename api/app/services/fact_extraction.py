@@ -23,6 +23,9 @@ JOB_TYPES = ["cto", "saas", "sql", "cloud", "ai", "fullstack"]
 SOURCE_LABELS = {
     "client_feedback": "SOURCE TEXT (client feedback about the freelancer, copied from Upwork)",
     "upwork_contract": "SOURCE TEXT (Upwork contract record for the freelancer's own work)",
+    # Drafted with an assistant, then signed and sent by the freelancer under their own name.
+    "chatgpt_signed_letter": "SOURCE TEXT (a letter the freelancer signed and sent under their own name; "
+    "they endorse every claim it makes about their own work)",
 }
 DEFAULT_SOURCE_LABEL = "SOURCE TEXT (written by the freelancer)"
 
@@ -78,6 +81,12 @@ becomes `client_quote` facts whose statement quotes the client's words exactly.
 
 What to skip: the requirements of a client's job post, generic advice, opinions,
 writing-style preferences, plans or hypotheticals, and anything about other people's work.
+Also skip how-to and troubleshooting detail (debugging steps, configuration settings, code
+syntax, commands, file or function names) and capability statements with no named project,
+number or outcome ("experienced with Azure", "can build custom platforms if needed").
+The test for every fact: would a client deciding whom to hire find it persuasive proof?
+Keep named projects and products, roles with employers and dates, numbers with what they
+measure, outcomes, credentials and named clients. When in doubt, leave it out.
 Never extract personal information, about the freelancer or anyone else: health, medical,
 family, relationships, religion, finances, home or legal matters outside their client work.
 Such text is not a proposal fact even when it contains numbers or names.
@@ -95,8 +104,8 @@ Hard rules:
   saas (SaaS/MVP/product), sql (SQL Server/data), cloud (Azure/AWS/migration/cost),
   ai (LLM/RAG/vector/ML), fullstack (web app build).
 - `strength` 0-1: 0.9-1.0 for a hard number plus a named client/product plus an outcome;
-  0.6-0.8 for a concrete named project or scoped production work; 0.3-0.5 for a generic
-  capability claim.
+  0.6-0.8 for a concrete named project or scoped production work; 0.4-0.5 for a narrower
+  claim that still names what was built or achieved.
 - `evidence_quote`: a verbatim excerpt of up to 200 characters from the SOURCE TEXT that
   supports the fact.
 - If nothing qualifies, return {"facts": []}.
