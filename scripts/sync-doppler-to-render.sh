@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Sync Doppler prd secrets → Render upapply-api env vars
 # Usage: ./scripts/sync-doppler-to-render.sh
-# Requires: doppler CLI authenticated
+# Requires: doppler CLI authenticated, RENDER_API_KEY in the environment
 set -euo pipefail
 
 RENDER_SERVICE_ID="srv-d5hnmh6r433s73bsksg0"
-RENDER_API_KEY="${RENDER_API_KEY:-rnd_wfmF6x9CPhGMnM2IVtbnvLicYMaF}"
+RENDER_API_KEY="${RENDER_API_KEY:?set RENDER_API_KEY (Render account API key; never commit it)}"
 RENDER_API="https://api.render.com/v1"
 
 TMP_DIR=$(mktemp -d)
