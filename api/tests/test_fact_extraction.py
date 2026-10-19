@@ -144,6 +144,7 @@ async def test_signed_letter_is_labelled_as_endorsed_by_the_freelancer():
 def test_extraction_prompt_skips_how_to_detail_and_requires_persuasive_proof():
     assert "how-to and troubleshooting detail" in EXTRACTION_SYSTEM
     assert "would a client deciding whom to hire find it persuasive proof?" in EXTRACTION_SYSTEM
+    assert "generic\n  capability claim" not in EXTRACTION_SYSTEM  # no strength tier for claims we skip
 
 
 @pytest.mark.parametrize("variant", [

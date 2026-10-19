@@ -104,8 +104,8 @@ Hard rules:
   saas (SaaS/MVP/product), sql (SQL Server/data), cloud (Azure/AWS/migration/cost),
   ai (LLM/RAG/vector/ML), fullstack (web app build).
 - `strength` 0-1: 0.9-1.0 for a hard number plus a named client/product plus an outcome;
-  0.6-0.8 for a concrete named project or scoped production work; 0.3-0.5 for a generic
-  capability claim.
+  0.6-0.8 for a concrete named project or scoped production work; 0.4-0.5 for a narrower
+  claim that still names what was built or achieved.
 - `evidence_quote`: a verbatim excerpt of up to 200 characters from the SOURCE TEXT that
   supports the fact.
 - If nothing qualifies, return {"facts": []}.

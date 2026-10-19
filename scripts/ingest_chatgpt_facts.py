@@ -105,10 +105,12 @@ def is_signed(text: str) -> bool:
 
 
 def build_signed_item(conv: dict) -> list[dict]:
-    """The final Chris-signed message of a conversation (either role), or nothing."""
+    """The final Chris-signed message of a conversation (either role), or nothing. The first
+    user message is never the letter: it is usually the job post and travels as context."""
     conv_id = conv.get("id") or conv.get("conversation_id")
     messages = conversation_messages(conv)
-    signed = [text for _, text in messages if is_signed(text)]
+    first_user_idx = next((i for i, (role, _) in enumerate(messages) if role == "user"), None)
+    signed = [text for i, (_, text) in enumerate(messages) if i != first_user_idx and is_signed(text)]
     if not conv_id or not signed:
         return []
     context = f"Conversation title: {conv.get('title') or ''}"

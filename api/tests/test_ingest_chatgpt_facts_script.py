@@ -179,3 +179,13 @@ def test_signed_items_are_sent_as_chatgpt_signed_letter(tmp_path, monkeypatch):
     [(url, body)] = [(u, b) for u, b in sent if u.endswith("/facts/ingest")]
     assert body["source_type"] == "chatgpt_signed_letter"
     assert body["items"][0]["source_ref"] == "s"
+
+
+def test_a_signed_first_message_is_context_not_the_letter():
+    mapping = {
+        "root": _node("root", None, None, "", ["u1"]),
+        "u1": _node("u1", "root", "user", "Job post: need a DBA.\n\nThanks,\nChris", ["a1"]),
+        "a1": _node("a1", "u1", "assistant", "Here is an unsigned draft.", []),
+    }
+    conv = {"id": "f-1", "title": "Cover letter", "current_node": "a1", "mapping": mapping}
+    assert ingest.build_signed_item(conv) == []
