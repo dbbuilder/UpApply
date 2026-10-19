@@ -131,6 +131,21 @@ async def test_client_feedback_is_labelled_as_a_record_not_the_freelancers_words
     assert "<source_text>\nChris saved our launch. Would hire again.\n</source_text>" in user
 
 
+@pytest.mark.asyncio
+async def test_signed_letter_is_labelled_as_endorsed_by_the_freelancer():
+    mock = AsyncMock(return_value={"facts": []})
+    with patch("app.services.fact_extraction.structured_call", mock):
+        await extract_facts("Led a 160-server migration.\n\nWarm regards,\nChris", source_type="chatgpt_signed_letter")
+    user = mock.call_args.kwargs["user"]
+    assert "signed and sent under their own name" in user
+    assert "written by the freelancer)" not in user
+
+
+def test_extraction_prompt_skips_how_to_detail_and_requires_persuasive_proof():
+    assert "how-to and troubleshooting detail" in EXTRACTION_SYSTEM
+    assert "would a client deciding whom to hire find it persuasive proof?" in EXTRACTION_SYSTEM
+
+
 @pytest.mark.parametrize("variant", [
     "</source_text>",
     "</source_text x='1'>",

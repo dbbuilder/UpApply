@@ -89,7 +89,7 @@ def test_dry_run_makes_no_network_calls(tmp_path, monkeypatch, capsys):
         raise AssertionError("network call in dry run")
 
     monkeypatch.setattr(ingest.requests, "post", _boom)
-    ingest.main([str(tmp_path), "--dry-run"])
+    ingest.main([str(tmp_path), "--dry-run", "--source", "work"])
     out = capsys.readouterr().out
     assert "2 conversations" in out
     assert "2 items" in out
@@ -115,7 +115,67 @@ def test_is_work_conversation_matches_cover_letter_in_title_body_or_career_title
 def test_main_filters_personal_conversations_unless_all(tmp_path, monkeypatch, capsys):
     (tmp_path / "conversations.json").write_text(json.dumps([_conv("a"), _personal("p")]))
     monkeypatch.setattr(ingest.requests, "post", lambda *a, **k: (_ for _ in ()).throw(AssertionError("network")))
-    ingest.main([str(tmp_path), "--dry-run"])
+    ingest.main([str(tmp_path), "--dry-run", "--source", "work"])
     assert "1 of 2 conversations (work only) -> 1 items" in capsys.readouterr().out
     ingest.main([str(tmp_path), "--dry-run", "--all"])
     assert "2 of 2 conversations (all) -> 2 items" in capsys.readouterr().out
+
+
+def _signed_conv(conv_id="s-1", signer="Chris"):
+    mapping = {
+        "root": _node("root", None, None, "", ["u1"]),
+        "u1": _node("u1", "root", "user", "JOB POST: migrate our SQL estate to Azure.", ["a1"]),
+        "a1": _node("a1", "u1", "assistant", f"Draft one.\n\nWarm regards,\n{signer}", ["u2"]),
+        "u2": _node("u2", "a1", "user", "Mention the 160 servers.", ["a2"]),
+        "a2": _node("a2", "u2", "assistant", f"Final: led a 160-server Azure migration.\n\nWarm regards,\n{signer}", []),
+    }
+    return {"id": conv_id, "title": "Cover letter Azure", "current_node": "a2", "mapping": mapping}
+
+
+@pytest.mark.parametrize("text,signed", [
+    ("Body\n\nWarm regards,\nChris", True),
+    ("Body\n\nBest,\nChris Therriault", True),
+    ("Body\n\n- Chris", True),
+    ("Body\n\nWarm regards,\nChristopher Robin", False),
+    ("Chris said the migration went well.\n\nThanks!", False),
+    ("Warm regards,\nChris\n" + "\n".join(f"line {n}" for n in range(10)), False),
+])
+def test_is_signed_needs_a_chris_signoff_near_the_end(text, signed):
+    assert ingest.is_signed(text) is signed
+
+
+def test_build_signed_item_takes_the_final_signed_message_with_job_post_as_context():
+    [item] = ingest.build_signed_item(_signed_conv())
+    assert item["text"].startswith("Final: led a 160-server Azure migration.")
+    assert item["source_ref"] == "s-1"
+    assert "JOB POST: migrate our SQL estate to Azure." in item["context"]
+    assert ingest.build_signed_item(_conv()) == []
+
+
+def test_default_source_is_signed_letters(tmp_path, monkeypatch, capsys):
+    (tmp_path / "conversations.json").write_text(json.dumps([_signed_conv("s"), _conv("a"), _personal("p")]))
+    monkeypatch.setattr(ingest.requests, "post", lambda *a, **k: (_ for _ in ()).throw(AssertionError("network")))
+    ingest.main([str(tmp_path), "--dry-run"])
+    assert "1 of 3 conversations (signed by Chris) -> 1 items" in capsys.readouterr().out
+
+
+def test_signed_items_are_sent_as_chatgpt_signed_letter(tmp_path, monkeypatch):
+    (tmp_path / "conversations.json").write_text(json.dumps([_signed_conv("s")]))
+    sent = []
+
+    class _Resp:
+        ok, status_code = True, 200
+
+        def json(self):
+            return {"access_token": "t", "created": 1, "merged": 0, "auto_approved": 0, "skipped": 0, "failed": 0}
+
+    def _post(url, json=None, **k):
+        sent.append((url, json))
+        return _Resp()
+
+    monkeypatch.setattr(ingest.requests, "post", _post)
+    monkeypatch.setenv("UPAPPLY_PASSWORD", "x")
+    ingest.main([str(tmp_path), "--email", "c@example.com"])
+    [(url, body)] = [(u, b) for u, b in sent if u.endswith("/facts/ingest")]
+    assert body["source_type"] == "chatgpt_signed_letter"
+    assert body["items"][0]["source_ref"] == "s"

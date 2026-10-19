@@ -10,11 +10,16 @@ Usage:
     UPAPPLY_PASSWORD='...' python scripts/ingest_chatgpt_facts.py \\
         /Users/admin/dev2/UpApply/working/chatgpt-export \\
         --email chris@servicevision.net \\
-        [--api https://upapply-api.onrender.com] [--batch-size 5] [--limit N] [--dry-run] [--all]
+        [--api https://upapply-api.onrender.com] [--batch-size 5] [--limit N] [--dry-run]
+        [--source signed|work|all]
 
-By default only work conversations are sent: any whose title or messages mention a cover
-letter, plus career-titled ones (proposal, CV, bio, interview, role...). Everything else
-(personal, medical, family, how-to chats) never leaves the machine. --all disables the filter.
+--source signed (default): only the final message signed "Chris" / "Chris Therriault" in each
+  conversation, sent as source_type chatgpt_signed_letter. Those letters were sent under the
+  freelancer's name, so their claims are endorsed; the first user message (usually the job
+  post) travels as CONTEXT only.
+--source work: the freelancer's own turns from work conversations (cover letter in the title or
+  any message, plus career titles). --source all: every conversation (--all is an alias).
+Everything not selected never leaves the machine.
 
 Re-runnable: conversations already ingested (by conversation id) are skipped server-side.
 Candidates land in the Facts review page (status=candidate) unless they match an
@@ -33,6 +38,10 @@ import requests
 DEFAULT_EXPORT_DIR = "/Users/admin/dev2/UpApply/working/chatgpt-export"
 API_BASE = "https://upapply-api.onrender.com"
 SOURCE_TYPE = "chatgpt_user_turn"
+SIGNED_SOURCE_TYPE = "chatgpt_signed_letter"
+# A sign-off line ("Chris", "Chris Therriault", "- Chris,") within the last few lines of a message.
+SIGNATURE = re.compile(r"^\s*(?:[-–—]\s*)?Chris(?:\s+Therriault)?\s*[,.]?\s*$", re.M)
+SIGNATURE_TAIL_LINES = 6
 MAX_SOURCE_CHARS = 12000
 MAX_CONTEXT_CHARS = 4000
 MIN_USER_CHARS = 40
@@ -88,6 +97,25 @@ def is_work_conversation(conv: dict) -> bool:
     if COVER_LETTER.search(title) or CAREER_TITLE.search(title):
         return True
     return any(COVER_LETTER.search(text) for _, text in conversation_messages(conv))
+
+
+def is_signed(text: str) -> bool:
+    tail = [line for line in text.splitlines() if line.strip()][-SIGNATURE_TAIL_LINES:]
+    return bool(SIGNATURE.search("\n".join(tail)))
+
+
+def build_signed_item(conv: dict) -> list[dict]:
+    """The final Chris-signed message of a conversation (either role), or nothing."""
+    conv_id = conv.get("id") or conv.get("conversation_id")
+    messages = conversation_messages(conv)
+    signed = [text for _, text in messages if is_signed(text)]
+    if not conv_id or not signed:
+        return []
+    context = f"Conversation title: {conv.get('title') or ''}"
+    first_user = next((text for role, text in messages if role == "user"), "")
+    if first_user:
+        context += f"\n\nFirst message of the conversation (often the client's job post):\n{first_user[:MAX_CONTEXT_CHARS]}"
+    return [{"text": signed[-1][:MAX_SOURCE_CHARS], "source_ref": conv_id, "context": context}]
 
 
 def chunk_text(text: str, size: int) -> list[str]:
@@ -154,16 +182,23 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--batch-size", type=int, default=5, help="Items per /facts/ingest call (max 25)")
     parser.add_argument("--limit", type=int, default=None, help="Only process the first N conversations")
     parser.add_argument("--dry-run", action="store_true", help="Parse and report; no API calls")
-    parser.add_argument("--all", action="store_true", help="Send every conversation, not just work ones")
+    parser.add_argument("--source", choices=("signed", "work", "all"), default="signed",
+                        help="signed: final Chris-signed letters (default); work: own turns from work chats; all")
+    parser.add_argument("--all", action="store_true", help="Alias for --source all")
     args = parser.parse_args(argv)
 
     export_dir = Path(args.export_dir)
+    source = "all" if args.all else args.source
     loaded = load_conversations(export_dir)
-    conversations = loaded if args.all else [c for c in loaded if is_work_conversation(c)]
+    if source == "signed":
+        conversations = [c for c in loaded if build_signed_item(c)]
+        builder, source_type, scope = build_signed_item, SIGNED_SOURCE_TYPE, "signed by Chris"
+    else:
+        conversations = loaded if source == "all" else [c for c in loaded if is_work_conversation(c)]
+        builder, source_type, scope = build_items, SOURCE_TYPE, "all" if source == "all" else "work only"
     if args.limit:
         conversations = conversations[: args.limit]
-    items = [item for conv in conversations for item in build_items(conv)]
-    scope = "all" if args.all else "work only"
+    items = [item for conv in conversations for item in builder(conv)]
     print(f"{len(conversations)} of {len(loaded)} conversations ({scope}) -> {len(items)} items from {export_dir}")
 
     if args.dry_run:
@@ -183,7 +218,7 @@ def main(argv: list[str] | None = None) -> None:
         batch = items[start : start + batch_size]
         resp = requests.post(
             f"{api}/api/v1/facts/ingest",
-            json={"source_type": SOURCE_TYPE, "items": batch, "auto_approve": False},
+            json={"source_type": source_type, "items": batch, "auto_approve": False},
             headers=headers,
             timeout=600,
         )
