@@ -5,7 +5,7 @@ autopilot-max: 10
 built: 2026-10-17T23:43
 branch: feat/mdg-3-loop
 head: e993612
-status: active
+status: done
 
 <!--
 Contract for unattended work in this repo. Read by advance-all, the autopilot Stop hook and dispatch-workstreams.
@@ -30,11 +30,12 @@ The rebuild is merged and live (PRs #8–#13; prod on migration 025, `generation
 - [x] 1. (e17339b) Bring `feat/mdg-3-loop` up to `origin/main` (`git merge --no-edit origin/main`; local HEAD e993612 lacks #13, and this NEXT.md commit means it cannot fast-forward) — Done when: `git merge-base --is-ancestor origin/main HEAD` exits 0 and `grep -c '^| 025' CLAUDE.md` returns 1
 - [x] 2. (3f808d9) CLAUDE.md "Corpus & Memory Scripts": add rows for `ingest_chatgpt_facts.py` (work-only filter by default — cover letter in title or any message, plus career titles; `--all` to disable; `--dry-run`, `--limit`) and `eval_generation.py` (`build-golden`, blind A/B); fix "9 entries" → 14 for `chris_bio_memories.json` — Done when: `grep -c 'ingest_chatgpt_facts.py\|eval_generation.py' CLAUDE.md` ≥ 3, `grep -c '9 entries' CLAUDE.md` returns 0, and `python3 -c "import json;print(len(json.load(open('scripts/chris_bio_memories.json'))))"` matches the number stated
 - [x] 3. (e281022) CLAUDE.md "Testing": add the real API test command (`TEST_DATABASE_URL=… ./venv/bin/pytest -q` against the `upapply-test-pg` container on port 55499) and `npx vitest run` for the extension — Done when: `grep -c 'TEST_DATABASE_URL' CLAUDE.md` ≥ 1 and `grep -c 'vitest' CLAUDE.md` ≥ 1, and the documented commands pass when run
-- [ ] 4. Runbook ingest section: document the work-only default and `--all`, the current export numbers (1,266 of 5,148 conversations → 1,286 items), running with `doppler run --project upapply --config dev -- …` once `UPAPPLY_PASSWORD` is set, and that step 3 (bio relabel) is now done by migration 025 — Done when: `grep -c -- '--all' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1 and `grep -c 'UPAPPLY_PASSWORD' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1
+- [x] 4. (87d5839) Runbook ingest section: document the work-only default and `--all`, the current export numbers (1,266 of 5,148 conversations → 1,286 items), running with `doppler run --project upapply --config dev -- …` once `UPAPPLY_PASSWORD` is set, and that step 3 (bio relabel) is now done by migration 025 — Done when: `grep -c -- '--all' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1 and `grep -c 'UPAPPLY_PASSWORD' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1
 
 ## Decisions pending
 
 - [2026-10-13] Rotate the UpApply password leaked in pushed commit 3b7affc and revoke old OpenAI keys (user action)
+- [2026-10-18] The Doppler CLI on this Mac is logged into the DoGood workplace (projects: dogood, example-project, secondchance); `upapply` is not visible, so `doppler … --project upapply` fails. Log into the workplace that owns `upapply` (`doppler login`, then `doppler projects` should list it) before the step below — or run the ingest with `read -s UPAPPLY_PASSWORD && export UPAPPLY_PASSWORD` (user action)
 - [2026-10-16] Set `UPAPPLY_PASSWORD` in Doppler upapply/dev (`! doppler secrets set UPAPPLY_PASSWORD --project upapply --config dev`), then say "go": ingest loop = `/facts/from-memories` (confirms migration 025) → 50-conversation trial (review sample) → remaining work conversations → `/facts/from-proposals` (user action, then attended session)
 - [2026-10-16] After ingest: review facts (user), `build-golden`, blind A/B ≥75%, then flip `generation_v2` (user action)
 - [2026-10-16] Multi-user gaps, after Chris's A/B passes: (a) writing hard rules (no "I"-start, banned phrases, "Warm regards") are Chris's but apply to every user → per-user setting (needs a migration); (b) proposal `author` labels `chris`/`chris_edited_ai` are naming only (already user-scoped) → rename needs a data migration; (c) ChatGPT export ingest is a local script → in-app upload + background job for other users. Recommendation: design (c) first, it is the onboarding blocker
@@ -42,7 +43,6 @@ The rebuild is merged and live (PRs #8–#13; prod on migration 025, `generation
 
 ## Log
 
-- [2026-10-16] #8 merged — aae9ca8
 - [2026-10-16] #9 CodeRabbit fixes (guarded re-embed, SQL-bounded backfill, anthropic>=1.13) — 15eb8d2; merged — 1a1fd74; deployed ~100s, /facts/* live
 - [2026-10-16] #10 merged — 83f043b
 - [2026-10-16] #11 merged — 1058c54; deployed ~60s, /refine live
@@ -52,3 +52,4 @@ The rebuild is merged and live (PRs #8–#13; prod on migration 025, `generation
 - [2026-10-17] step 1 done — e17339b — branch merged with origin/main (247e0f3); test DB container was stopped, restarted; 620 API tests pass
 - [2026-10-18] step 2 done — 3f808d9 — ingest/eval scripts in CLAUDE.md table, bio count 14; flags verified via --help; 620 API tests pass
 - [2026-10-18] step 3 done — e281022 — Testing section: docker test DB, pytest, vitest; documented commands run: 620 API + 36 extension tests pass, type-check clean
+- [2026-10-18] step 4 done — 87d5839 — runbook ingest: work-only filter, --all, export numbers, trial batch, Doppler + read -s fallback; found Doppler CLI is on the DoGood workplace (no upapply) → Decisions pending; dry run reproduces 1,266/1,286; 620 API tests pass
