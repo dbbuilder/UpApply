@@ -37,6 +37,7 @@ router = APIRouter()
 async def list_facts(
     status_filter: Optional[FactStatus] = Query(None, alias="status"),
     kind: Optional[FactKind] = None,
+    doubtful: Optional[bool] = None,
     limit: int = Query(500, ge=1, le=1000),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -47,6 +48,8 @@ async def list_facts(
         query = query.where(Fact.status == status_filter)
     if kind:
         query = query.where(Fact.kind == kind)
+    if doubtful is not None:
+        query = query.where(Fact.doubtful.is_(doubtful))
     query = query.order_by(Fact.kind, Fact.strength.desc(), Fact.created_at.desc()).limit(limit)
     return (await db.execute(query)).scalars().all()
 

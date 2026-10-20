@@ -1580,6 +1580,7 @@ export interface Fact {
   job_types: string[];
   strength: number;
   status: FactStatus;
+  doubtful?: boolean;
   source_type: string;
   source_ref: string | null;
   sources: FactSource[];
@@ -1597,6 +1598,7 @@ export interface FactUpdate {
   skills?: string[];
   job_types?: string[];
   strength?: number;
+  doubtful?: boolean;
 }
 
 export interface FactIngestResult {
