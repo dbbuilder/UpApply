@@ -8,8 +8,7 @@ import { logger } from '../lib/logger';
 import { apiClient } from '../lib/api-client';
 import {
   MAX_CONSECUTIVE_THROTTLED, SAVE_BATCH_SIZE, THROTTLE_PAGE_TEXT,
-  completeProposalIds, isThrottledRead, randomDetailDelayMs, takeBatch, throttleBackoffMs,
-} from '../lib/proposal-scrape';
+  completeProposalIds, isThrottledRead, randomDetailDelayMs, takeBatch, throttleBackoffMs, RUN_BUDGET_MS } from '../lib/proposal-scrape';
 
 // A generated draft stays linked to its job's apply page for a day (Submit-click capture).
 const ACTIVE_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -639,6 +638,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // re-inject manually (that creates duplicate instances causing "message channel
       // closed" errors). We use a ping-wait instead to confirm the CS is ready.
       (async () => {
+        const runStart = Date.now();
         const setProgress = (p: Record<string, unknown>) =>
           chrome.storage.local.set({ proposalImportProgress: p });
 
@@ -772,6 +772,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const unsaved: import('../types').ScrapedProposal[] = [];
             let savedCount = 0;
             let createdCount = 0;
+            // Complete proposals skip the detail page, but their list-page status still goes to the
+            // import endpoint so outcome changes (hired, declined…) sync. An empty letter never
+            // overwrites a stored one.
+            const skippedRows = allProposals
+              .filter(p => p.proposalId && completeIds.has(p.proposalId))
+              .map(p => ({ ...p, coverLetter: null }));
             const flush = async (force = false) => {
               const batch = takeBatch(unsaved, SAVE_BATCH_SIZE, force);
               if (!batch) return;
@@ -837,11 +843,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
             };
 
+            for (const row of skippedRows) unsaved.push(row);
+            await flush(true);
+
             let consecutiveThrottled = 0;
             let stoppedAt: number | null = null;
+            // Chrome can end a single request after ~5 min, so each run works for a bounded time
+            // and replies `paused`; the sidebar starts the next chunk, which skips completed ones.
+            let paused = false;
+            const overBudget = (extraMs = 0) => Date.now() + extraMs - runStart > RUN_BUDGET_MS;
 
             for (let i = 0; i < detailCandidates.length; i++) {
               const proposal = detailCandidates[i];
+              if (i > 0 && overBudget()) { paused = true; break; }
               const progress = { current: i + 1, total, grandTotal: allProposals.length, skipped: skippedComplete, saved: savedCount };
               await setProgress({ stage: 'detail', ...progress });
 
@@ -870,12 +884,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 if (!throttled) break;
                 const waitMs = throttleBackoffMs(retry);
                 if (waitMs === null) break;
+                if (overBudget(waitMs)) { paused = true; break; }
                 const waitSec = Math.round(waitMs / 1000);
                 logger.log(`UpApply: Upwork throttled proposal ${proposal.proposalId} — waiting ${waitSec}s (retry ${retry + 1})`);
                 await setProgress({ stage: 'throttled', ...progress, waitSec });
                 await new Promise(r => setTimeout(r, waitMs));
                 await setProgress({ stage: 'detail', ...progress });
               }
+
+              if (paused) break;
 
               if (loadTimedOut) {
                 logger.log('UpApply: Timeout loading detail for proposal', proposal.proposalId);
@@ -967,6 +984,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 withLetters,
                 skippedComplete,
                 stoppedAt,
+                paused,
                 total,
               },
             });

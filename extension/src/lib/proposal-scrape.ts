@@ -10,6 +10,8 @@ export const THROTTLE_BACKOFF_MS = [30_000, 60_000, 120_000];
 export const THROTTLE_JITTER = 0.2;
 /** Stop the run after this many proposals in a row stay throttled after all retries. */
 export const MAX_CONSECUTIVE_THROTTLED = 3;
+/** Chrome can end one request after ~5 min; each import run stops by this point and the sidebar starts the next chunk. */
+export const RUN_BUDGET_MS = 240_000;
 /** Scraped proposals are saved to the API every this many results. */
 export const SAVE_BATCH_SIZE = 10;
 /** A stored proposal is complete (skipped on re-runs) at or above both lengths. */
