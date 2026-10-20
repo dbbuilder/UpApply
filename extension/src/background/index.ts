@@ -749,7 +749,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
               }
               allProposals = Array.from(proposalMap.values());
-              await chrome.storage.local.set({ proposalListCache: { ts: Date.now(), proposals: allProposals } });
+              // scrapeListPage returns [] for both "no proposals" and a failed read, so only a run
+              // where both lists came back is cached; otherwise each chunk reads them again.
+              if (activeProposals.length > 0 && archivedProposals.length > 0) {
+                await chrome.storage.local.set({ proposalListCache: { ts: Date.now(), proposals: allProposals } });
+              }
             }
             // The detail-page budget starts after the lists are read.
             runStart = Date.now();
