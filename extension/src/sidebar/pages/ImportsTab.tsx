@@ -56,8 +56,8 @@ async function saveLastRun(id: string, result: string): Promise<void> {
 async function runProposals(
   setMsg: (m: string) => void,
 ): Promise<string> {
-  chrome.storage.local.remove('proposalImportProgress');
-  chrome.storage.local.remove('proposalListProgress');
+  // A new import reads the proposal lists afresh (its later chunks reuse them); clear first.
+  await chrome.storage.local.remove(['proposalImportProgress', 'proposalListCache', 'proposalListProgress']);
 
   // Poll progress storage for live updates
   const interval = setInterval(() => {

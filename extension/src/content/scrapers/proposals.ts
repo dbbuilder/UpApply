@@ -266,6 +266,51 @@ export interface ProposalDetail {
   answers: { question: string; answer: string }[];
 }
 
+const PROPOSAL_DETAILS = '[data-test="proposal-details"]';
+const NOT_DESCRIPTION = 'h1, h2, h3, h4, [data-cy="cover-letter-section"], [data-test="terms-review"]';
+
+/** Clicks the "more" toggles inside the proposal's job details so the full description renders. */
+export function expandJobDescription(doc: Document = document): number {
+  const root = doc.querySelector(PROPOSAL_DETAILS);
+  if (!root) return 0;
+  let clicked = 0;
+  root.querySelectorAll<HTMLElement>('button, a, [role="button"]').forEach(el => {
+    // Visible label only: Upwork's toggle also carries an sr-only "More/Less about …" span.
+    const label = (el.querySelector('span:not(.sr-only)')?.textContent ?? el.textContent ?? '').trim().toLowerCase();
+    const isToggle = el.matches('.air3-truncation-btn, [data-ev-label="truncation_toggle"]') || label === 'more';
+    if (isToggle && label.startsWith('more')) { el.click(); clicked++; }
+  });
+  return clicked;
+}
+
+/**
+ * The client's job description from a proposal details page: the longest text block inside
+ * the job details that holds no heading, terms or cover letter. Upwork no longer exposes
+ * window.__NUXT__ here, so the rendered page is the source.
+ */
+export function readJobDescription(doc: Document = document): string | null {
+  const root = doc.querySelector(PROPOSAL_DETAILS);
+  if (!root) return null;
+  // Current markup: .fe-job-details .description > .air3-truncation (text span + "more" button
+  // whose sr-only label repeats the title). Read the text without the toggle.
+  const desc = root.querySelector<HTMLElement>('.description');
+  if (desc) {
+    const clone = desc.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll('.air3-truncation-labels, button, .sr-only').forEach(el => el.remove());
+    const text = (clone.textContent || '').replace(/\s*…\s*$/, '').trim();
+    if (text.length >= 80) return text;
+  }
+  // Fallback for other markup: the longest text block that holds no heading, terms or letter.
+  let best = '';
+  root.querySelectorAll<HTMLElement>('p, div, span, section').forEach(el => {
+    if (el.querySelector(NOT_DESCRIPTION) || el.closest('[data-cy="cover-letter-section"], [data-test="terms-review"]')) return;
+    const text = (el.textContent || '').trim();
+    if (text.length > best.length) best = text;
+  });
+  best = best.replace(/\s*(?:…|\.\.\.)?\s*(?:more|less)\s*$/i, '').trim();
+  return best.length >= 80 ? best : null;
+}
+
 /**
  * Extract the submitted cover letter and screening answers from an Upwork proposal
  * detail page. DOM fallback only — the background prefers window.__NUXT__, whose

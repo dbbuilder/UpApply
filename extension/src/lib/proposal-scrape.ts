@@ -39,15 +39,17 @@ export interface DetailRead {
 }
 
 /**
- * A detail page is throttled when Upwork's error toast is showing or the NUXT state has no
- * application. An application with an empty cover letter is a real (letter-less) proposal.
- * A null read (executeScript failed) counts as throttled.
+ * A detail page is throttled only when Upwork's error toast is showing, or the read could not
+ * run at all (null). Missing __NUXT__ proposal data is NOT throttling: Upwork's page state
+ * shape changes, and the caller falls back to reading the rendered page.
  */
 export function isThrottledRead(read: DetailRead | null | undefined): boolean {
   if (!read) return true;
-  if (read.hasErrorToast) return true;
-  return !read.hasApplication;
+  return !!read.hasErrorToast;
 }
+
+/** List pages are read once per import; later chunks reuse them for this long. */
+export const LIST_CACHE_TTL_MS = 60 * 60_000;
 
 export interface StoredProposalLike {
   upwork_proposal_id?: string | null;
@@ -78,3 +80,84 @@ export function takeBatch<T>(pending: T[], size: number, force = false): T[] | n
   if (!force && pending.length < size) return null;
   return pending.splice(0, force ? pending.length : size);
 }
+
+// ── Nuxt 3 payload (__NUXT_DATA__) ───────────────────────────────────────────
+// Upwork's proposal pages moved from window.__NUXT__ (Nuxt 2) to a serialized
+// <script id="__NUXT_DATA__"> payload: a flat array where object and array members
+// are indices into the same array, and wrappers look like ["ShallowReactive", i].
+
+const NUXT_WRAPPERS = new Set(['Reactive', 'ShallowReactive', 'Ref', 'ShallowRef', 'EmptyRef', 'EmptyShallowRef']);
+const NUXT_SCALARS = new Set(['Date', 'RegExp', 'BigInt', 'URL']);
+
+/** Rebuilds the value graph of a Nuxt 3 payload array (index 0 is the root). */
+export function reviveNuxtPayload(arr: unknown[]): unknown {
+  const memo = new Map<number, unknown>();
+  const revive = (i: unknown): unknown => {
+    if (typeof i !== 'number' || !Number.isInteger(i) || i < 0 || i >= arr.length) return null;
+    if (memo.has(i)) return memo.get(i);
+    const v = arr[i];
+    if (Array.isArray(v)) {
+      if (typeof v[0] === 'string' && NUXT_WRAPPERS.has(v[0])) {
+        const out = v.length > 1 ? revive(v[1]) : null;
+        memo.set(i, out);
+        return out;
+      }
+      if (typeof v[0] === 'string' && NUXT_SCALARS.has(v[0])) {
+        memo.set(i, v[1]);
+        return v[1];
+      }
+      const out: unknown[] = [];
+      memo.set(i, out);
+      for (const x of v) out.push(revive(x));
+      return out;
+    }
+    if (v && typeof v === 'object') {
+      const out: Record<string, unknown> = {};
+      memo.set(i, out);
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) out[k] = revive(x);
+      return out;
+    }
+    memo.set(i, v);
+    return v;
+  };
+  return revive(0);
+}
+
+export interface ProposalFields {
+  hasApplication: boolean;
+  coverLetter: string | null;
+  status: string | null;
+  bidAmount: string | null;
+  jobTitle: string | null;
+  answers: { question: string; answer: string }[];
+  jobDescription: string | null;
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/** Fields from a proposalDetailsV3Response object (same shape in Nuxt 2 and Nuxt 3 pages). */
+export function proposalFieldsFromV3(v3: any): ProposalFields {
+  const app = v3?.application;
+  const qa: any[] = Array.isArray(app?.questionsAnswers) ? app.questionsAnswers : [];
+  return {
+    hasApplication: !!app,
+    coverLetter: (typeof app?.coverLetter === 'string' && app.coverLetter) || null,
+    status: app?.status != null ? String(app.status) : null,
+    bidAmount: String(app?.terms?.chargeRate?.amount ?? '') || null,
+    jobTitle: v3?.jobDetails?.opening?.job?.info?.title || null,
+    answers: qa
+      .map(x => ({ question: String(x?.question ?? ''), answer: String(x?.answer ?? '') }))
+      .filter(x => x.answer.trim().length > 0),
+    jobDescription: (typeof v3?.jobDetails?.opening?.job?.description === 'string' && v3.jobDetails.opening.job.description) || null,
+  };
+}
+
+/** Proposal fields from the raw __NUXT_DATA__ text, or null when it holds no proposal. */
+export function proposalFromNuxtData(raw: string | null | undefined): ProposalFields | null {
+  if (!raw) return null;
+  let root: any;
+  try { root = reviveNuxtPayload(JSON.parse(raw)); } catch { return null; }
+  const store = root?.vuex?.['proposal-details'] ?? root?.state?.['proposal-details'];
+  const v3 = store?.proposalDetailsV3Response;
+  return v3 ? proposalFieldsFromV3(v3) : null;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */

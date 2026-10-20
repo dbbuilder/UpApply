@@ -32,7 +32,7 @@ describe('isThrottledRead', () => {
   it('treats a missing read or missing application as throttled', () => {
     expect(isThrottledRead(null)).toBe(true);
     expect(isThrottledRead(undefined)).toBe(true);
-    expect(isThrottledRead({ hasApplication: false })).toBe(true);
+    expect(isThrottledRead({ hasApplication: false })).toBe(false); // missing NUXT data → DOM fallback, not throttled
   });
 
   it('treats the error toast as throttled even with an application', () => {
