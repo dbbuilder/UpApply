@@ -1141,6 +1141,7 @@ export interface Proposal {
   cover_letter_text: string;
   job_title?: string;
   job_description_snippet?: string;
+  job_text?: string | null;
   job_skills?: string[];
   job_budget?: string;
   job_category?: string;
