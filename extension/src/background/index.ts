@@ -936,9 +936,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               // DOM fallback via content script (already injected by manifest — no re-inject)
               let domCoverLetter: string | null = null;
               let domAnswers: QA[] = [];
-              if (!nuxtCoverLetter || nuxtAnswers.length === 0) {
+              let domJobDescription: string | null = null;
+              if (!nuxtCoverLetter || nuxtAnswers.length === 0 || !nuxtJobDescription) {
                 await waitForContentScript(propTab.id, 5_000);
-                const domResult = await new Promise<{ coverLetter?: string | null; answers?: QA[] }>((resolve) => {
+                const domResult = await new Promise<{ coverLetter?: string | null; answers?: QA[]; jobDescription?: string | null }>((resolve) => {
                   chrome.tabs.sendMessage(propTab.id!, { type: 'SCRAPE_PROPOSAL_DETAIL' }, (resp) => {
                     if (chrome.runtime.lastError || !resp?.success) resolve({});
                     else resolve(resp);
@@ -946,6 +947,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 });
                 domCoverLetter = domResult.coverLetter || null;
                 domAnswers = domResult.answers || [];
+                domJobDescription = domResult.jobDescription || null;
               }
 
               const coverLetter = nuxtCoverLetter || domCoverLetter || null;
@@ -978,7 +980,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 submittedAt: proposal.submittedAt,
                 wasHired,
                 screeningAnswers: nuxtAnswers.length ? nuxtAnswers : domAnswers,
-                jobDescription: nuxtJobDescription,
+                jobDescription: nuxtJobDescription || domJobDescription,
               });
             }
 

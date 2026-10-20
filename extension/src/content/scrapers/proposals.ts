@@ -266,6 +266,38 @@ export interface ProposalDetail {
   answers: { question: string; answer: string }[];
 }
 
+const PROPOSAL_DETAILS = '[data-test="proposal-details"]';
+const NOT_DESCRIPTION = 'h1, h2, h3, h4, [data-cy="cover-letter-section"], [data-test="terms-review"]';
+
+/** Clicks the "more" toggles inside the proposal's job details so the full description renders. */
+export function expandJobDescription(doc: Document = document): number {
+  const root = doc.querySelector(PROPOSAL_DETAILS);
+  if (!root) return 0;
+  let clicked = 0;
+  root.querySelectorAll<HTMLElement>('button, a, [role="button"]').forEach(el => {
+    if ((el.textContent || '').trim().toLowerCase() === 'more') { el.click(); clicked++; }
+  });
+  return clicked;
+}
+
+/**
+ * The client's job description from a proposal details page: the longest text block inside
+ * the job details that holds no heading, terms or cover letter. Upwork no longer exposes
+ * window.__NUXT__ here, so the rendered page is the source.
+ */
+export function readJobDescription(doc: Document = document): string | null {
+  const root = doc.querySelector(PROPOSAL_DETAILS);
+  if (!root) return null;
+  let best = '';
+  root.querySelectorAll<HTMLElement>('p, div, span, section').forEach(el => {
+    if (el.querySelector(NOT_DESCRIPTION) || el.closest('[data-cy="cover-letter-section"], [data-test="terms-review"]')) return;
+    const text = (el.textContent || '').trim();
+    if (text.length > best.length) best = text;
+  });
+  best = best.replace(/\s*(?:…|\.\.\.)?\s*(?:more|less)\s*$/i, '').trim();
+  return best.length >= 80 ? best : null;
+}
+
 /**
  * Extract the submitted cover letter and screening answers from an Upwork proposal
  * detail page. DOM fallback only — the background prefers window.__NUXT__, whose
