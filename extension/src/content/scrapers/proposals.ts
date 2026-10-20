@@ -275,7 +275,10 @@ export function expandJobDescription(doc: Document = document): number {
   if (!root) return 0;
   let clicked = 0;
   root.querySelectorAll<HTMLElement>('button, a, [role="button"]').forEach(el => {
-    if ((el.textContent || '').trim().toLowerCase() === 'more') { el.click(); clicked++; }
+    // Visible label only: Upwork's toggle also carries an sr-only "More/Less about …" span.
+    const label = (el.querySelector('span:not(.sr-only)')?.textContent ?? el.textContent ?? '').trim().toLowerCase();
+    const isToggle = el.matches('.air3-truncation-btn, [data-ev-label="truncation_toggle"]') || label === 'more';
+    if (isToggle && label.startsWith('more')) { el.click(); clicked++; }
   });
   return clicked;
 }
@@ -288,6 +291,16 @@ export function expandJobDescription(doc: Document = document): number {
 export function readJobDescription(doc: Document = document): string | null {
   const root = doc.querySelector(PROPOSAL_DETAILS);
   if (!root) return null;
+  // Current markup: .fe-job-details .description > .air3-truncation (text span + "more" button
+  // whose sr-only label repeats the title). Read the text without the toggle.
+  const desc = root.querySelector<HTMLElement>('.description');
+  if (desc) {
+    const clone = desc.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll('.air3-truncation-labels, button, .sr-only').forEach(el => el.remove());
+    const text = (clone.textContent || '').replace(/\s*…\s*$/, '').trim();
+    if (text.length >= 80) return text;
+  }
+  // Fallback for other markup: the longest text block that holds no heading, terms or letter.
   let best = '';
   root.querySelectorAll<HTMLElement>('p, div, span, section').forEach(el => {
     if (el.querySelector(NOT_DESCRIPTION) || el.closest('[data-cy="cover-letter-section"], [data-test="terms-review"]')) return;

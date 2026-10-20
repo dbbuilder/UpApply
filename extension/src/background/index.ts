@@ -8,7 +8,7 @@ import { logger } from '../lib/logger';
 import { apiClient } from '../lib/api-client';
 import {
   MAX_CONSECUTIVE_THROTTLED, SAVE_BATCH_SIZE, THROTTLE_PAGE_TEXT,
-  completeProposalIds, isThrottledRead, randomDetailDelayMs, takeBatch, throttleBackoffMs, RUN_BUDGET_MS, LIST_CACHE_TTL_MS } from '../lib/proposal-scrape';
+  completeProposalIds, isThrottledRead, randomDetailDelayMs, takeBatch, throttleBackoffMs, RUN_BUDGET_MS, LIST_CACHE_TTL_MS, proposalFromNuxtData } from '../lib/proposal-scrape';
 
 // A generated draft stays linked to its job's apply page for a day (Submit-click capture).
 const ACTIVE_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -818,7 +818,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   args: [THROTTLE_PAGE_TEXT],
                   func: (throttleText: string) => {
                     const hasErrorToast = (document.body?.innerText || '').includes(throttleText);
-                    const empty = { hasApplication: false, hasErrorToast, coverLetter: null, status: null, bidAmount: null, jobTitle: null, answers: [], jobDescription: null };
+                    // Nuxt 3 pages: the raw payload is decoded in the worker (proposalFromNuxtData).
+                    const nuxtData = document.getElementById('__NUXT_DATA__')?.textContent || null;
+                    const empty = { hasApplication: false, hasErrorToast, nuxtData, coverLetter: null, status: null, bidAmount: null, jobTitle: null, answers: [], jobDescription: null };
                     try {
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       const n = (window as any).__NUXT__;
@@ -837,6 +839,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                       return {
                         hasApplication: !!app,
                         hasErrorToast,
+                        nuxtData,
                         coverLetter: (app?.coverLetter as string) || null,
                         status: statusStr,
                         bidAmount: String(app?.terms?.chargeRate?.amount || '') || null,
@@ -849,7 +852,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     } catch { return empty; }
                   },
                 });
-                return nuxtResult?.result ?? null;
+                const r = nuxtResult?.result ?? null;
+                // Nuxt 2 window.__NUXT__ is gone on current pages; decode __NUXT_DATA__ instead.
+                if (r && !r.hasApplication) {
+                  const fields = proposalFromNuxtData(r.nuxtData);
+                  if (fields) return { ...r, ...fields, nuxtData: null };
+                }
+                return r ? { ...r, nuxtData: null } : null;
               } catch (e) {
                 logger.log('UpApply: NUXT read failed', String(e));
                 return null;

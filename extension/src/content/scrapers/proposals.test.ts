@@ -11,7 +11,7 @@ describe('readJobDescription', () => {
     const text = readJobDescription(loadFixture());
     expect(text).toMatch(/^I have a physical electronic technology device/);
     expect(text).toMatch(/startup support necessary\.$/);
-    expect(text).not.toMatch(/Tech Startup Consultant Needed|Fundraising|Hourly rate|Getting a hardware product/);
+    expect(text).not.toMatch(/Tech Startup Consultant Needed|More\/Less|Fundraising|Hourly rate|Getting a hardware product/);
   });
 
   it('drops the trailing "more" toggle text', () => {
