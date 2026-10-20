@@ -92,7 +92,7 @@ NO FACT, NO CLAIM
 - Put the id of every evidence fact you drew on, in the letter or the answers, in fact_ids_used.
 
 HARD RULES (violations are failures)
-- No sentence may begin with the word "I" (including I'm, I've, I'd, I'll). Restructure instead: "I built the pipeline" becomes "The pipeline was built..." or "Building that pipeline meant...".
+- The first word of the letter must not be "I" (including I'm, I've, I'd, I'll); open on the client's problem instead. Later sentences may start with "I" where it reads naturally.
 - No salutation. Never start with Hello, Hi, Hey, Dear, Greetings or a Subject line; start with content.
 - Do not write a sign-off, closing line or signature. The closing is added automatically.
 - No placeholders such as [Client Name].
@@ -102,7 +102,7 @@ HARD RULES (violations are failures)
 SCREENING ANSWERS
 - Answer every question, in order, copying each question text exactly into the question field.
 - 2-5 sentences each. Draw on the same evidence as the letter, but prefer a different fact than the one the letter leans on when another fits.
-- Same voice. The salutation, placeholder and banned-phrase rules apply to answers too.""")
+- Same voice. The salutation, placeholder and banned-phrase rules apply to answers too, and the first word of each answer must not be "I".""")
     return "\n\n".join(parts)
 
 
@@ -143,14 +143,14 @@ def _bullets(items: list[str]) -> str:
 REPAIR_INSTRUCTIONS = {
     "missing_answer": "Answer every screening question in the <screening_questions> block.",
     "banned_phrase": "Remove every banned phrase listed in the rules.",
-    "starts_with_i": 'Restructure every sentence that begins with the word "I".',
+    "starts_with_i": 'Restructure the opening so the first word of the letter is not "I".',
     "salutation": "Do not open with a salutation; start with content.",
     "closing": "Do not write a sign-off; the closing is added automatically.",
     "length": "Bring the letter body inside the LENGTH target above.",
     "explicit_ask": "Honour every ask in the <explicit_asks> block exactly.",
     "unsupported_claim": "Remove every specific that the <evidence> block does not support.",
     "missing_prototype_url": "Include the URL from the <prototype_url> block, written exactly.",
-    "answer_rules": "Keep each screening answer to 2-5 sentences, with no salutation and no banned phrase.",
+    "answer_rules": 'Keep each screening answer to 2-5 sentences, with no salutation, no banned phrase and a first word other than "I".',
     "too_few_specifics": "Use at least two evidence facts that answer the client's needs, stated exactly, and list their ids in fact_ids_used.",
 }
 
