@@ -6,6 +6,9 @@ import type { JobData } from '../types';
 import { extractBudgetFromPageText, detectNotifChips, topOfRange as _topOfRange } from '../lib/notif-chips';
 import { logger } from '../lib/logger';
 import { apiClient } from '../lib/api-client';
+import {
+  MAX_CONSECUTIVE_THROTTLED, SAVE_BATCH_SIZE, THROTTLE_PAGE_TEXT,
+  completeProposalIds, isThrottledRead, randomDetailDelayMs, takeBatch, throttleBackoffMs, RUN_BUDGET_MS } from '../lib/proposal-scrape';
 
 // A generated draft stays linked to its job's apply page for a day (Submit-click capture).
 const ACTIVE_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -635,6 +638,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // re-inject manually (that creates duplicate instances causing "message channel
       // closed" errors). We use a ping-wait instead to confirm the CS is ready.
       (async () => {
+        const runStart = Date.now();
         const setProgress = (p: Record<string, unknown>) =>
           chrome.storage.local.set({ proposalImportProgress: p });
 
@@ -744,48 +748,64 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
 
             // 3. Visit detail pages to extract cover letters.
+            // Skip proposals already stored complete (letter + job text) so a re-run after a
+            // throttled or stopped run picks up where it left off.
+            let completeIds = new Set<string>();
+            try {
+              completeIds = completeProposalIds(await apiClient.getProposals({ limit: 1000 }));
+            } catch (e) {
+              logger.log('UpApply: Could not load stored proposals — not skipping any', String(e));
+            }
+            const pendingProposals = allProposals.filter(p => !p.proposalId || !completeIds.has(p.proposalId));
+            const skippedComplete = allProposals.length - pendingProposals.length;
+
             // Cap at 150 most recent — the list is newest-first so we take the head.
-            // Visiting 900+ detail pages would take ~45 min; 150 takes ~8 min and
-            // covers all the corpus-relevant recent work.
+            // Pages are paced 6–10 s apart: back-to-back loads get throttled after ~18 pages.
             const MAX_DETAIL_PAGES = 150;
-            const detailCandidates = allProposals.slice(0, MAX_DETAIL_PAGES);
+            const detailCandidates = pendingProposals.slice(0, MAX_DETAIL_PAGES);
             const results: import('../types').ScrapedProposal[] = [];
             const total = detailCandidates.length;
-            logger.log(`UpApply: Visiting ${total} detail pages (${allProposals.length} total proposals — capped at ${MAX_DETAIL_PAGES})`);
+            logger.log(`UpApply: Visiting ${total} detail pages (${allProposals.length} total proposals, ${skippedComplete} already complete — capped at ${MAX_DETAIL_PAGES})`);
 
-            for (let i = 0; i < detailCandidates.length; i++) {
-              const proposal = detailCandidates[i];
-              await setProgress({ stage: 'detail', current: i + 1, total, grandTotal: allProposals.length });
-
-              if (!proposal.proposalId) {
-                results.push(proposal);
-                continue;
-              }
-
-              const detailUrl = `https://www.upwork.com/nx/proposals/${proposal.proposalId}`;
+            // Save results in batches as we go so a stopped or throttled run keeps its progress.
+            // The import endpoint dedupes and backfills, so re-sending a batch is safe.
+            const unsaved: import('../types').ScrapedProposal[] = [];
+            let savedCount = 0;
+            let createdCount = 0;
+            // Complete proposals skip the detail page, but their list-page status still goes to the
+            // import endpoint so outcome changes (hired, declined…) sync. An empty letter never
+            // overwrites a stored one.
+            const skippedRows = allProposals
+              .filter(p => p.proposalId && completeIds.has(p.proposalId))
+              .map(p => ({ ...p, coverLetter: null }));
+            const flush = async (force = false) => {
+              const batch = takeBatch(unsaved, SAVE_BATCH_SIZE, force);
+              if (!batch) return;
               try {
-                await navigateAndWait(propTab.id, detailUrl, 15_000);
-              } catch {
-                logger.log('UpApply: Timeout loading detail for proposal', proposal.proposalId);
-                results.push({ ...proposal, coverLetter: null });
-                continue;
+                const created = await apiClient.importProposalsFromUpwork(batch as unknown as Record<string, unknown>[]);
+                savedCount += batch.length;
+                createdCount += created.length;
+              } catch (e) {
+                logger.log('UpApply: Proposal batch save failed — retrying with the next batch', String(e));
+                unsaved.unshift(...batch);
               }
-              await new Promise(r => setTimeout(r, 1500));
+            };
+            const record = async (p: import('../types').ScrapedProposal) => {
+              results.push(p);
+              unsaved.push(p);
+              await flush();
+            };
 
-              // Read window.__NUXT__ from the page's main world
-              type QA = { question: string; answer: string };
-              let nuxtCoverLetter: string | null = null;
-              let nuxtStatus: string | null = null;
-              let nuxtBidAmount: string | null = null;
-              let nuxtJobTitle: string | null = null;
-              let nuxtAnswers: QA[] = [];
-              let nuxtJobDescription: string | null = null;
+            // Read window.__NUXT__ from the page's main world (null if the script could not run)
+            const readDetail = async (tabId: number) => {
               try {
                 const [nuxtResult] = await chrome.scripting.executeScript({
-                  target: { tabId: propTab.id },
+                  target: { tabId },
                   world: 'MAIN',
-                  func: () => {
-                    const empty = { coverLetter: null, status: null, bidAmount: null, jobTitle: null, answers: [], jobDescription: null };
+                  args: [THROTTLE_PAGE_TEXT],
+                  func: (throttleText: string) => {
+                    const hasErrorToast = (document.body?.innerText || '').includes(throttleText);
+                    const empty = { hasApplication: false, hasErrorToast, coverLetter: null, status: null, bidAmount: null, jobTitle: null, answers: [], jobDescription: null };
                     try {
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       const n = (window as any).__NUXT__;
@@ -802,6 +822,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       const qa = Array.isArray(app?.questionsAnswers) ? (app!.questionsAnswers as any[]) : [];
                       return {
+                        hasApplication: !!app,
+                        hasErrorToast,
                         coverLetter: (app?.coverLetter as string) || null,
                         status: statusStr,
                         bidAmount: String(app?.terms?.chargeRate?.amount || '') || null,
@@ -814,17 +836,89 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     } catch { return empty; }
                   },
                 });
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const r = nuxtResult?.result as Record<string, any> | null;
-                nuxtCoverLetter = r?.coverLetter || null;
-                nuxtStatus = r?.status || null;
-                nuxtBidAmount = r?.bidAmount || null;
-                nuxtJobTitle = r?.jobTitle || null;
-                nuxtAnswers = (r?.answers as QA[]) || [];
-                nuxtJobDescription = r?.jobDescription || null;
+                return nuxtResult?.result ?? null;
               } catch (e) {
-                logger.log('UpApply: NUXT read failed for proposal', proposal.proposalId, String(e));
+                logger.log('UpApply: NUXT read failed', String(e));
+                return null;
               }
+            };
+
+            for (const row of skippedRows) unsaved.push(row);
+            await flush(true);
+
+            let consecutiveThrottled = 0;
+            let stoppedAt: number | null = null;
+            // Chrome can end a single request after ~5 min, so each run works for a bounded time
+            // and replies `paused`; the sidebar starts the next chunk, which skips completed ones.
+            let paused = false;
+            const overBudget = (extraMs = 0) => Date.now() + extraMs - runStart > RUN_BUDGET_MS;
+
+            for (let i = 0; i < detailCandidates.length; i++) {
+              const proposal = detailCandidates[i];
+              if (i > 0 && overBudget()) { paused = true; break; }
+              const progress = { current: i + 1, total, grandTotal: allProposals.length, skipped: skippedComplete, saved: savedCount };
+              await setProgress({ stage: 'detail', ...progress });
+
+              if (!proposal.proposalId) {
+                await record(proposal);
+                continue;
+              }
+
+              if (i > 0) await new Promise(r => setTimeout(r, randomDetailDelayMs()));
+
+              const detailUrl = `https://www.upwork.com/nx/proposals/${proposal.proposalId}`;
+              let read: Awaited<ReturnType<typeof readDetail>> = null;
+              let loadTimedOut = false;
+              let throttled = false;
+              // First attempt, then one retry per backoff step while Upwork is throttling.
+              for (let retry = 0; ; retry++) {
+                try {
+                  await navigateAndWait(propTab.id, detailUrl, 15_000);
+                } catch {
+                  loadTimedOut = true;
+                  break;
+                }
+                await new Promise(r => setTimeout(r, 1500));
+                read = await readDetail(propTab.id);
+                throttled = isThrottledRead(read);
+                if (!throttled) break;
+                const waitMs = throttleBackoffMs(retry);
+                if (waitMs === null) break;
+                if (overBudget(waitMs)) { paused = true; break; }
+                const waitSec = Math.round(waitMs / 1000);
+                logger.log(`UpApply: Upwork throttled proposal ${proposal.proposalId} — waiting ${waitSec}s (retry ${retry + 1})`);
+                await setProgress({ stage: 'throttled', ...progress, waitSec });
+                await new Promise(r => setTimeout(r, waitMs));
+                await setProgress({ stage: 'detail', ...progress });
+              }
+
+              if (paused) break;
+
+              if (loadTimedOut) {
+                logger.log('UpApply: Timeout loading detail for proposal', proposal.proposalId);
+                await record({ ...proposal, coverLetter: null });
+                continue;
+              }
+
+              if (throttled) {
+                // Not recorded: it is not complete in the API, so the next run retries it.
+                consecutiveThrottled++;
+                if (consecutiveThrottled >= MAX_CONSECUTIVE_THROTTLED) {
+                  stoppedAt = i + 1 - consecutiveThrottled;
+                  logger.log(`UpApply: Upwork is rate-limiting — stopped at ${stoppedAt}/${total}`);
+                  break;
+                }
+                continue;
+              }
+              consecutiveThrottled = 0;
+
+              type QA = { question: string; answer: string };
+              const nuxtCoverLetter: string | null = read?.coverLetter || null;
+              const nuxtStatus: string | null = read?.status || null;
+              const nuxtBidAmount: string | null = read?.bidAmount || null;
+              const nuxtJobTitle: string | null = read?.jobTitle || null;
+              const nuxtAnswers: QA[] = (read?.answers as QA[]) || [];
+              const nuxtJobDescription: string | null = read?.jobDescription || null;
 
               // DOM fallback via content script (already injected by manifest — no re-inject)
               let domCoverLetter: string | null = null;
@@ -860,7 +954,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 wasHired = false;
               }
 
-              results.push({
+              await record({
                 proposalId: proposal.proposalId,
                 jobTitle,
                 jobUrl: detailUrl,
@@ -875,9 +969,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               });
             }
 
+            await flush(true);
             await setProgress({ stage: 'done', current: total, total });
-            logger.log('UpApply: Proposal deep-scrape complete —', results.length, 'proposals,', results.filter(r => r.coverLetter).length, 'with cover letters');
-            sendResponse({ success: true, data: results });
+            const withLetters = results.filter(r => r.coverLetter).length;
+            logger.log('UpApply: Proposal deep-scrape complete —', results.length, 'proposals,', withLetters, 'with cover letters');
+            // Saved batches are already in the API; `unsaved` (failed saves) is left for the sidebar.
+            sendResponse({
+              success: true,
+              data: unsaved,
+              summary: {
+                scraped: results.length,
+                saved: savedCount,
+                created: createdCount,
+                withLetters,
+                skippedComplete,
+                stoppedAt,
+                paused,
+                total,
+              },
+            });
           } finally {
             try { await chrome.tabs.remove(propTab.id); } catch (e) { /* ignore */ }
             await restoreTab();

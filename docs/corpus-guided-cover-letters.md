@@ -273,7 +273,7 @@ When a user generates a cover letter, the system executes this sequence in `cove
 
 - The user's name, professional title, bio (first 400 chars), career goals, communication style, and unique strengths — all from the `UserProfile` record
 - Universal voice rules: peer-to-peer tone, pattern recognition hook, one concrete story, failure modes, no bullets
-- Universal sentence rules: no sentence starts with "I", no salutation, ends with "Warm regards,"
+- Universal rules: the letter's first word is not "I" (later sentences may start with "I"), no salutation, ends with "Warm regards,"
 - Universal job priority hierarchy: CTO/Advisory → SaaS/MVP → Full-Stack → SQL/Data → AI/Cloud
 - Universal banned phrases list (23 phrases that signal generic AI writing)
 - **Per-user always_include block** — pulled from `profile.proposal_anchors["always_include"]` if set; injected as a "PER-USER CREDENTIAL REQUIREMENTS" section
@@ -317,7 +317,7 @@ Without the corpus, Claude generates a plausible-sounding cover letter that coul
 | Generic voice calibration | Voice matched to 800+ past letters from this specific user |
 | No credential routing | Knows to lead with the 160-server migration for Azure jobs, UpApply/StratVault for AI jobs |
 | May omit MBA | Always includes MBA because `always_include` mandates it |
-| May start sentences with "I" | Hard rule prevents it at both prompt and post-processing layers |
+| Opens the letter with "I" | Hard rule bans "I" as the first word (later sentences may start with "I") |
 
 The memories retrieved by pgvector don't just provide facts — they provide the **specific language patterns, project names, and outcome statements** that Claude weaves into the narrative. Past proposals provide **voice fingerprinting**: the pacing, sentence structure, and level of technical detail that characterize this user's writing.
 

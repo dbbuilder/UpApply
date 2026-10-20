@@ -61,7 +61,7 @@ async def test_violation_triggers_exactly_one_repair_with_notes():
 async def test_still_failing_after_repair_returns_warnings():
     result, write, _ = await _run([_draft(DIRTY), _draft(DIRTY)])
     assert write.call_count == 2
-    assert any('starts with "I"' in w for w in result.warnings)
+    assert any('must not open with "I"' in w for w in result.warnings)
 
 
 @pytest.mark.asyncio

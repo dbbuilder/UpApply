@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from pgvector.sqlalchemy import Vector
@@ -51,6 +51,10 @@ class Fact(Base):
     strength: Mapped[float] = mapped_column(Float, nullable=False, default=0.5, server_default="0.5")
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="candidate", server_default="candidate"
+    )
+    # Review hint only: never changes status, generation or auto-approval.
+    doubtful: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
     )
 
     # First source that produced the fact; `sources` holds every merged provenance entry

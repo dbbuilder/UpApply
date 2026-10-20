@@ -141,6 +141,12 @@ async def test_signed_letter_is_labelled_as_endorsed_by_the_freelancer():
     assert "written by the freelancer)" not in user
 
 
+def test_extraction_prompt_never_extracts_compensation():
+    assert "Compensation is never a fact" in EXTRACTION_SYSTEM
+    for term in ("rates", "wages", "salary", "hourly", "project pricing", "bids", "earnings figures"):
+        assert term in EXTRACTION_SYSTEM
+
+
 def test_extraction_prompt_skips_how_to_detail_and_requires_persuasive_proof():
     assert "how-to and troubleshooting detail" in EXTRACTION_SYSTEM
     assert "would a client deciding whom to hire find it persuasive proof?" in EXTRACTION_SYSTEM

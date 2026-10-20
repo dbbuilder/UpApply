@@ -181,7 +181,7 @@ The legacy pipeline in `api/app/services/cover_letter.py` is corpus-trained and 
 6. `append_closing()` — appends user's `preferred_closing`
 
 **Key prompt rules (hard failures if violated):**
-- No sentence may begin with "I" — must restructure ("I built..." → "That system was built...")
+- The first word of the letter must not be "I" (nor I'm, I've, I'd, I'll); later sentences may start with "I". Same for the first word of each screening answer (v2)
 - No salutation opening (Hello/Hi/Dear/Subject)
 - Always ends with "Warm regards,"
 - 23 banned phrases that signal generic AI writing
@@ -293,6 +293,7 @@ exec(open('scripts/import_chatgpt_corpus.py').read())
 | 023 | Generation v2: cover letter traceability columns + per-user generation_v2 flag |
 | 024 | Refine-thread and submitted-final columns on cover_letters, proposals.facts_credited_at |
 | 025 | Data: relabel Chris's 14 curated bio memories chatgpt_corpus → bio_import |
+| 026 | Add facts.doubtful review flag (marks a candidate doubtful without rejecting it) |
 
 ## Environment Variables
 

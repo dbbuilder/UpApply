@@ -1141,6 +1141,7 @@ export interface Proposal {
   cover_letter_text: string;
   job_title?: string;
   job_description_snippet?: string;
+  job_text?: string | null;
   job_skills?: string[];
   job_budget?: string;
   job_category?: string;
@@ -1580,6 +1581,7 @@ export interface Fact {
   job_types: string[];
   strength: number;
   status: FactStatus;
+  doubtful?: boolean;
   source_type: string;
   source_ref: string | null;
   sources: FactSource[];
@@ -1597,6 +1599,7 @@ export interface FactUpdate {
   skills?: string[];
   job_types?: string[];
   strength?: number;
+  doubtful?: boolean;
 }
 
 export interface FactIngestResult {

@@ -71,33 +71,77 @@ async function runProposals(
           ? ` — Page ${lp.page}${lp.totalPages ? ` of ${lp.totalPages}` : ''}`
           : '';
         setMsg(`Scraping ${label} proposals${pageInfo}…`);
-      } else if (p.stage === 'detail') {
+      } else if (p.stage === 'detail' || p.stage === 'throttled') {
         const cur = p.current as number;
         const tot = p.total as number;
         const grand = p.grandTotal as number | undefined;
+        const skipped = p.skipped as number | undefined;
+        const saved = p.saved as number | undefined;
         const sfx = grand && grand > tot ? ` of ${grand} total` : '';
-        setMsg(`Fetching cover letters… (${cur}/${tot}${sfx})`);
+        const extra = [
+          skipped ? `skipped ${skipped} already complete` : '',
+          saved ? `${saved} saved` : '',
+        ].filter(Boolean).join(' · ');
+        const counts = `(${cur}/${tot}${sfx})${extra ? ` · ${extra}` : ''}`;
+        setMsg(p.stage === 'throttled'
+          ? `Upwork is slowing us down — waiting ${p.waitSec as number} s… ${counts}`
+          : `Fetching cover letters… ${counts}`);
       }
     });
   }, 800);
 
   try {
-    const scrapeResult = await new Promise<{ success: boolean; data?: unknown[]; error?: string }>(
-      (resolve) => chrome.runtime.sendMessage({ type: 'IMPORT_PROPOSALS' }, resolve)
-    );
-    clearInterval(interval);
-
-    if (!scrapeResult?.success || !scrapeResult.data?.length) {
-      throw new Error(scrapeResult?.error || 'No proposals found.');
+    type ScrapeResult = {
+      success: boolean;
+      data?: unknown[];
+      error?: string;
+      summary?: {
+        scraped: number; saved: number; created: number; withLetters: number;
+        skippedComplete: number; stoppedAt: number | null; paused?: boolean; total: number;
+      };
+    };
+    // Each background run works for a bounded time (Chrome ends long requests) and replies
+    // `paused`; keep starting chunks until it finishes. Saved batches persist between chunks
+    // and completed proposals are skipped, so every chunk carries on where the last stopped.
+    const MAX_CHUNKS = 25;
+    let scraped = 0, created = 0, withLetters = 0, interrupted = 0;
+    let last: NonNullable<ScrapeResult['summary']> | null = null;
+    for (let chunk = 1; chunk <= MAX_CHUNKS; chunk++) {
+      if (chunk > 1) setMsg(`Continuing (part ${chunk})…`);
+      const scrapeResult = await new Promise<ScrapeResult | undefined>(
+        (resolve) => chrome.runtime.sendMessage({ type: 'IMPORT_PROPOSALS' }, (r) => {
+          void chrome.runtime.lastError;
+          resolve(r);
+        })
+      );
+      if (!scrapeResult) {
+        // The background worker ended mid-run; what it saved is kept, so try once more.
+        if (++interrupted > 1) throw new Error('The import was interrupted twice — run it again; completed proposals are skipped.');
+        continue;
+      }
+      interrupted = 0;
+      if (!scrapeResult.success || !scrapeResult.summary) {
+        throw new Error(scrapeResult.error || 'No proposals found.');
+      }
+      const s = scrapeResult.summary;
+      last = s;
+      scraped += s.scraped; created += s.created; withLetters += s.withLetters;
+      // The background saves in batches as it goes; only rows whose save failed come back in data.
+      const unsaved = (scrapeResult.data || []) as Record<string, unknown>[];
+      if (unsaved.length) {
+        setMsg(`Saving ${unsaved.length} proposals…`);
+        created += (await apiClient.importProposalsFromUpwork(unsaved)).length;
+      }
+      if (!s.paused) break;
     }
-
-    const total = scrapeResult.data.length;
-    setMsg(`Saving ${total} proposals…`);
-    const imported = await apiClient.importProposalsFromUpwork(
-      scrapeResult.data as Record<string, unknown>[]
-    );
-    const withLetters = (scrapeResult.data as Record<string, unknown>[]).filter(p => p.coverLetter).length;
-    return `${total} scraped · ${imported.length} new · ${withLetters} with cover letters`;
+    if (!last) throw new Error('No proposals found.');
+    const summary = `${scraped} scraped · ${created} new · ${withLetters} with cover letters`
+      + (last.skippedComplete ? ` · ${last.skippedComplete} already complete` : '');
+    if (last.stoppedAt !== null) {
+      return `Upwork is rate-limiting; stopped — run again later, completed ones are skipped. ${summary}`;
+    }
+    if (last.paused) return `Paused after ${MAX_CHUNKS} parts — run again to continue. ${summary}`;
+    return summary;
   } finally {
     clearInterval(interval);
     chrome.storage.local.remove('proposalListProgress');

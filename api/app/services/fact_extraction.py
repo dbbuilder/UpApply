@@ -84,6 +84,8 @@ writing-style preferences, plans or hypotheticals, and anything about other peop
 Also skip how-to and troubleshooting detail (debugging steps, configuration settings, code
 syntax, commands, file or function names) and capability statements with no named project,
 number or outcome ("experienced with Azure", "can build custom platforms if needed").
+Compensation is never a fact: skip the freelancer's rates, wages, salary, hourly, monthly
+or project pricing, bids, and any other compensation or earnings figures.
 The test for every fact: would a client deciding whom to hire find it persuasive proof?
 Keep named projects and products, roles with employers and dates, numbers with what they
 measure, outcomes, credentials and named clients. When in doubt, leave it out.

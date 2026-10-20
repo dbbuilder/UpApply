@@ -53,6 +53,7 @@ class FactUpdate(BaseModel):
     skills: Optional[List[TagStr]] = Field(None, max_length=MAX_TAGS)
     job_types: Optional[List[JobType]] = None
     strength: Optional[float] = Field(None, ge=0.0, le=1.0)
+    doubtful: Optional[bool] = None
 
 
 class FactOut(BaseModel):
@@ -65,6 +66,7 @@ class FactOut(BaseModel):
     job_types: List[str] = []
     strength: float
     status: str
+    doubtful: bool = False
     source_type: str
     source_ref: Optional[str] = None
     sources: List[dict] = []

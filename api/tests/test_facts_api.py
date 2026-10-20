@@ -153,3 +153,31 @@ async def test_manual_create_near_duplicate_keeps_user_wording(
     assert body["status"] == "approved"
     assert body["sources"][-1]["source_type"] == "manual"
     assert body["sources"][-1]["snippet"] == "Migrated 160 servers"
+
+
+@pytest.mark.asyncio
+async def test_doubtful_flag_round_trips_without_changing_status(client: AsyncClient, auth_headers: dict, fake_embed):
+    uid = await _user_id(client, auth_headers)
+    fid = await _seed_fact(uid, "Maybe true", 21)
+    await _seed_fact(uid, "Fine", 22)
+
+    r = await client.get(BASE, headers=auth_headers)
+    assert all(f["doubtful"] is False for f in r.json())
+
+    r = await client.patch(f"{BASE}/{fid}", headers=auth_headers, json={"doubtful": True})
+    assert r.status_code == 200
+    assert r.json()["doubtful"] is True
+    assert r.json()["status"] == "candidate"
+    fake_embed.assert_not_awaited()
+
+    r = await client.get(BASE, headers=auth_headers, params={"doubtful": "true"})
+    assert [f["id"] for f in r.json()] == [fid]
+    r = await client.get(BASE, headers=auth_headers, params={"doubtful": "false"})
+    assert [f["statement"] for f in r.json()] == ["Fine"]
+
+    r = await client.patch(f"{BASE}/{fid}", headers=auth_headers, json={"doubtful": None})
+    assert r.json()["doubtful"] is True  # explicit null is ignored
+
+    r = await client.patch(f"{BASE}/{fid}", headers=auth_headers, json={"doubtful": False})
+    assert r.json()["doubtful"] is False
+    assert r.json()["status"] == "candidate"
