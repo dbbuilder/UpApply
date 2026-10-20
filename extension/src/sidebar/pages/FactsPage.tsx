@@ -76,6 +76,16 @@ export default function FactsPage() {
     }
   };
 
+  // Review hint only: status is unchanged, so the fact stays in the current tab.
+  const toggleDoubtful = async (fact: Fact) => {
+    try {
+      const updated = await apiClient.updateFact(fact.id, { doubtful: !fact.doubtful });
+      setFacts(prev => prev.map(f => (f.id === fact.id ? updated : f)));
+    } catch (err) {
+      setError(errorText(err, 'Update failed.'));
+    }
+  };
+
   const toggle = (id: string) => {
     setSelected(prev => {
       const next = new Set(prev);
@@ -277,6 +287,9 @@ export default function FactsPage() {
                   ) : (
                     <p className="flex-1 text-sm text-gray-800">{fact.statement}</p>
                   )}
+                  {fact.doubtful && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700">Doubtful</span>
+                  )}
                   <span className="text-[10px] text-gray-400 tabular-nums">{fact.strength.toFixed(1)}</span>
                 </div>
 
@@ -310,6 +323,9 @@ export default function FactsPage() {
                         className="text-xs text-gray-600"
                       >
                         Edit
+                      </button>
+                      <button type="button" onClick={() => toggleDoubtful(fact)} className="text-xs text-amber-700">
+                        {fact.doubtful ? 'Not doubtful' : 'Doubtful'}
                       </button>
                       {status !== 'rejected' && (
                         <button type="button" onClick={() => setFactStatus(fact, 'rejected')} className="text-xs text-red-600">

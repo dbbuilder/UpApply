@@ -287,6 +287,7 @@ exec(open('scripts/import_chatgpt_corpus.py').read())
 | 023 | Generation v2: cover letter traceability columns + per-user generation_v2 flag |
 | 024 | Refine-thread and submitted-final columns on cover_letters, proposals.facts_credited_at |
 | 025 | Data: relabel Chris's 14 curated bio memories chatgpt_corpus → bio_import |
+| 026 | Add facts.doubtful review flag (marks a candidate doubtful without rejecting it) |
 
 ## Environment Variables
 
