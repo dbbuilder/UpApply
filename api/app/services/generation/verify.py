@@ -122,7 +122,8 @@ def _sentences(text: str) -> list[str]:
 
 
 def check_answer_rules(screening_answers: list[dict]) -> list[Issue]:
-    """Hard rules for screening answers: 2-5 sentences, no salutation, no banned phrase.
+    """Hard rules for screening answers: 2-5 sentences, no salutation, not opening with "I",
+    no banned phrase.
     Empty answers are reported separately by the orchestrator."""
     violations: list[Issue] = []
     low, high = ANSWER_SENTENCES
@@ -137,6 +138,9 @@ def check_answer_rules(screening_answers: list[dict]) -> list[Issue]:
             violations.append(Issue(f'Answer to "{label}" {problem}', "answer_rules", f'Answer to "{label}" {problem}'))
         if _SALUTATION.match(answer.splitlines()[0].strip()):
             problem = "opens with a salutation; start with content."
+            violations.append(Issue(f'Answer to "{label}" {problem}', "answer_rules", f'Answer to "{label}" {problem}'))
+        if _STARTS_WITH_I.match(answer):
+            problem = 'opens with "I"; its first word must not be "I".'
             violations.append(Issue(f'Answer to "{label}" {problem}', "answer_rules", f'Answer to "{label}" {problem}'))
         lowered = answer.lower()
         for phrase in BANNED_PHRASES:
@@ -223,9 +227,9 @@ def check_rules(
     if _SALUTATION.match(first_line):
         violations.append(Issue("Letter opens with a salutation; start with content.", "salutation", first_line[:80]))
 
-    for sentence in _sentences(body):
-        if _STARTS_WITH_I.match(sentence):
-            violations.append(Issue(f'Sentence starts with "I": "{sentence[:80]}"', "starts_with_i", sentence[:80]))
+    opening = next(iter(_sentences(body)), "")
+    if _STARTS_WITH_I.match(opening):
+        violations.append(Issue(f'Letter must not open with "I": "{opening[:80]}"', "starts_with_i", opening[:80]))
 
     lowered = body.lower()
     for phrase in BANNED_PHRASES:

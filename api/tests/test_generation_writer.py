@@ -74,6 +74,17 @@ async def test_writer_call_uses_opus_effort_and_cached_system():
         assert phrase in system[0]["text"]
 
 
+def test_writer_and_refine_systems_ban_i_as_first_word_only():
+    from app.services.generation.refine import _system_prompt
+
+    for system in (build_writer_system(PROFILE), _system_prompt(PROFILE)):
+        assert 'The first word of the letter must not be "I"' in system
+        assert 'Later sentences may start with "I"' in system
+        assert 'the first word of each answer must not be "I"' in system
+        assert "No sentence may begin" not in system
+        assert "every sentence" not in system
+
+
 @pytest.mark.asyncio
 async def test_writer_user_prompt_carries_job_evidence_voice_and_options():
     _, kwargs = await _write()

@@ -58,10 +58,16 @@ def test_salutation_is_flagged():
     assert any("salutation" in v for v in violations)
 
 
-def test_sentence_starting_with_i_is_flagged_but_in_and_it_are_not():
+def test_letter_opening_with_i_is_flagged():
+    for opener in ("I have done this before. ", "I'm sure of it. ", "\"I\" said it. "):
+        violations = check_rules(opener + _letter(), _brief(), None)
+        assert sum(v.code == "starts_with_i" for v in violations) == 1
+        assert any('must not open with "I"' in v for v in violations)
+
+
+def test_later_sentence_starting_with_i_is_not_flagged():
     assert check_rules(_letter(extra=" In practice it holds. It works."), _brief(), None) == []
-    violations = check_rules(_letter(extra=" I have done this before. I'm sure."), _brief(), None)
-    assert sum('starts with "I"' in v for v in violations) == 2
+    assert check_rules(_letter(extra=" I have done this before. I'm sure."), _brief(), None) == []
 
 
 def test_banned_phrase_is_flagged():
@@ -178,6 +184,18 @@ def test_screening_answer_hard_rules_are_enforced():
     assert check_rules(_letter(), _brief(), None, [hi]) != []
 
 
+def test_screening_answer_opening_with_i_is_flagged():
+    answer = {"question": "Mine?", "answer": "I ran the cutover in waves. Each wave had a rollback."}
+    violations = check_answer_rules([answer])
+    assert len(violations) == 1
+    assert violations[0].code == "answer_rules" and 'opens with "I"' in violations[0]
+
+
+def test_screening_answer_later_sentence_starting_with_i_is_not_flagged():
+    answer = {"question": "Mine?", "answer": "The cutover ran in waves. I kept a rollback for each."}
+    assert check_answer_rules([answer]) == []
+
+
 @pytest.mark.asyncio
 async def test_check_claims_with_no_facts_tells_the_auditor_every_specific_is_unsupported():
     draft = SimpleNamespace(cover_letter="Migrated 160 servers.", screening_answers=[])
@@ -209,7 +227,8 @@ def test_rule_violations_carry_fixed_codes_and_stay_human_readable():
     answers = [{"question": "Q <b>?", "answer": "Hi. I am passionate about it."}]
     issues = check_rules(text, brief, None, answers)
     codes = {issue.code for issue in issues}
-    assert {"closing", "salutation", "starts_with_i", "banned_phrase", "length", "explicit_ask", "answer_rules"} <= codes
+    assert {"closing", "salutation", "banned_phrase", "length", "explicit_ask", "answer_rules"} <= codes
+    assert "starts_with_i" not in codes  # "I" opens later sentences only
     assert all(isinstance(issue, str) for issue in issues)
     assert 'Explicit ask not honoured: Start your reply with "blue"' in issues
     ask = next(i for i in issues if i.code == "explicit_ask")
