@@ -57,6 +57,8 @@ async function runProposals(
   setMsg: (m: string) => void,
 ): Promise<string> {
   chrome.storage.local.remove('proposalImportProgress');
+  // A new import reads the proposal lists afresh; its later chunks reuse them.
+  chrome.storage.local.remove('proposalListCache');
   chrome.storage.local.remove('proposalListProgress');
 
   // Poll progress storage for live updates

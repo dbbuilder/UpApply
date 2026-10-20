@@ -39,15 +39,17 @@ export interface DetailRead {
 }
 
 /**
- * A detail page is throttled when Upwork's error toast is showing or the NUXT state has no
- * application. An application with an empty cover letter is a real (letter-less) proposal.
- * A null read (executeScript failed) counts as throttled.
+ * A detail page is throttled only when Upwork's error toast is showing, or the read could not
+ * run at all (null). Missing __NUXT__ proposal data is NOT throttling: Upwork's page state
+ * shape changes, and the caller falls back to reading the rendered page.
  */
 export function isThrottledRead(read: DetailRead | null | undefined): boolean {
   if (!read) return true;
-  if (read.hasErrorToast) return true;
-  return !read.hasApplication;
+  return !!read.hasErrorToast;
 }
+
+/** List pages are read once per import; later chunks reuse them for this long. */
+export const LIST_CACHE_TTL_MS = 60 * 60_000;
 
 export interface StoredProposalLike {
   upwork_proposal_id?: string | null;

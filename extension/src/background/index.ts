@@ -8,7 +8,7 @@ import { logger } from '../lib/logger';
 import { apiClient } from '../lib/api-client';
 import {
   MAX_CONSECUTIVE_THROTTLED, SAVE_BATCH_SIZE, THROTTLE_PAGE_TEXT,
-  completeProposalIds, isThrottledRead, randomDetailDelayMs, takeBatch, throttleBackoffMs, RUN_BUDGET_MS } from '../lib/proposal-scrape';
+  completeProposalIds, isThrottledRead, randomDetailDelayMs, takeBatch, throttleBackoffMs, RUN_BUDGET_MS, LIST_CACHE_TTL_MS } from '../lib/proposal-scrape';
 
 // A generated draft stays linked to its job's apply page for a day (Submit-click capture).
 const ACTIVE_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -638,7 +638,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // re-inject manually (that creates duplicate instances causing "message channel
       // closed" errors). We use a ping-wait instead to confirm the CS is ready.
       (async () => {
-        const runStart = Date.now();
+        let runStart = Date.now();
         const setProgress = (p: Record<string, unknown>) =>
           chrome.storage.local.set({ proposalImportProgress: p });
 
@@ -712,34 +712,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (!propTab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }
 
           try {
-            // 1. Scrape active proposals list
-            await setProgress({ stage: 'scraping_active' });
-            await waitForTabLoad(propTab.id);
-            await new Promise(r => setTimeout(r, 2000));
-            await waitForContentScript(propTab.id);
-            const activeProposals = await scrapeListPage(propTab.id);
-            logger.log('UpApply: Active proposals found:', activeProposals.length);
-
-            // 2. Scrape archived proposals list
-            await setProgress({ stage: 'scraping_archived' });
-            await navigateAndWait(propTab.id, 'https://www.upwork.com/nx/proposals/archived');
-            await new Promise(r => setTimeout(r, 2000));
-            await waitForContentScript(propTab.id);
-            const archivedProposals = await scrapeListPage(propTab.id);
-            logger.log('UpApply: Archived proposals found:', archivedProposals.length);
-
-            // Merge — active first, archived fills in gaps; track which list each came from
+            // Lists are read once per import and reused by later chunks (see LIST_CACHE_TTL_MS);
+            // the sidebar clears the cache when a new import starts.
             type ProposalWithSource = import('../types').ScrapedProposal & { _isArchived: boolean };
-            const proposalMap = new Map<string, ProposalWithSource>();
-            for (const p of activeProposals) {
-              if (p.proposalId) proposalMap.set(p.proposalId, { ...p, _isArchived: false });
-            }
-            for (const p of archivedProposals) {
-              if (p.proposalId && !proposalMap.has(p.proposalId)) {
-                proposalMap.set(p.proposalId, { ...p, _isArchived: true });
+            let allProposals: ProposalWithSource[] = [];
+            const cache = (await chrome.storage.local.get('proposalListCache')).proposalListCache as
+              { ts: number; proposals: ProposalWithSource[] } | undefined;
+            if (cache && Date.now() - cache.ts < LIST_CACHE_TTL_MS && cache.proposals?.length) {
+              allProposals = cache.proposals;
+              logger.log('UpApply: Reusing cached proposal list:', allProposals.length);
+            } else {
+              // 1. Scrape active proposals list
+              await setProgress({ stage: 'scraping_active' });
+              await waitForTabLoad(propTab.id);
+              await new Promise(r => setTimeout(r, 2000));
+              await waitForContentScript(propTab.id);
+              const activeProposals = await scrapeListPage(propTab.id);
+              logger.log('UpApply: Active proposals found:', activeProposals.length);
+
+              // 2. Scrape archived proposals list
+              await setProgress({ stage: 'scraping_archived' });
+              await navigateAndWait(propTab.id, 'https://www.upwork.com/nx/proposals/archived');
+              await new Promise(r => setTimeout(r, 2000));
+              await waitForContentScript(propTab.id);
+              const archivedProposals = await scrapeListPage(propTab.id);
+              logger.log('UpApply: Archived proposals found:', archivedProposals.length);
+
+              // Merge — active first, archived fills in gaps; track which list each came from
+              const proposalMap = new Map<string, ProposalWithSource>();
+              for (const p of activeProposals) {
+                if (p.proposalId) proposalMap.set(p.proposalId, { ...p, _isArchived: false });
               }
+              for (const p of archivedProposals) {
+                if (p.proposalId && !proposalMap.has(p.proposalId)) {
+                  proposalMap.set(p.proposalId, { ...p, _isArchived: true });
+                }
+              }
+              allProposals = Array.from(proposalMap.values());
+              await chrome.storage.local.set({ proposalListCache: { ts: Date.now(), proposals: allProposals } });
             }
-            const allProposals = Array.from(proposalMap.values());
+            // The detail-page budget starts after the lists are read.
+            runStart = Date.now();
             logger.log('UpApply: Total unique proposals:', allProposals.length);
 
             if (allProposals.length === 0) {
