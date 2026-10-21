@@ -117,7 +117,8 @@ async def _extract_from_conversation(
             system=_EXTRACT_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=2000,
-            temperature=0.2,
+            # Anthropic SDK >=1.13 dropped the temperature kwarg; the API still honours it.
+            extra_body={"temperature": 0.2},
         )
         raw = resp.content[0].text.strip()
         return json.loads(raw)
