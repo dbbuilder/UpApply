@@ -252,7 +252,7 @@ Located in `scripts/`:
 | `seed_proposal_anchors.py` | SET `proposal_anchors` JSONB on a user's profile via API PUT |
 | `chris_bio_memories.json` | Chris Therriault's 14 canonical bio/achievement memories |
 | `chris_proposal_anchors.json` | Chris's job-type credential routing config (cto/saas/sql/cloud/ai/fullstack + always_include) |
-| `ingest_chatgpt_facts.py` | v2: send ChatGPT export conversations to `/facts/ingest` as fact candidates. Work-only by default (cover letter in the title or any message, plus career titles); `--all` disables the filter, `--dry-run` makes no API calls, `--limit N` caps conversations |
+| `ingest_chatgpt_facts.py` | v2: send ChatGPT export conversations to `/facts/ingest` as fact candidates. Default `--source signed`: only the final message signed "Chris" / "Chris Therriault" in each conversation, sent as `chatgpt_signed_letter` (the first user message, usually the job post, travels as context only). `--source work`: the user's own turns from work conversations (cover letter in the title or any message, plus career titles); `--source all` (alias `--all`): every conversation. `--dry-run` makes no API calls, `--limit N` caps conversations |
 | `eval_generation.py` | v2 rollout gate: `build-golden` (golden jobs from scraped proposals, read-only), `generate` (blind A/B packet, legacy vs v2), `score` (pass ≥75%) |
 
 **Usage (avoid shell `!` in passwords — use Python sys.argv injection):**
