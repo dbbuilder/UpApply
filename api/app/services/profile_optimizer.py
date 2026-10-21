@@ -183,7 +183,8 @@ async def optimize_profile(profile: UserProfile) -> ProfileOptimizeResponse:
         ),
         messages=[{"role": "user", "content": prompt}],
         max_tokens=4096,
-        temperature=0.2,
+        # Anthropic SDK >=1.13 dropped the temperature kwarg; the API still honours it for this model.
+        extra_body={"temperature": 0.2},
     )
 
     raw = response.content[0].text.strip()
