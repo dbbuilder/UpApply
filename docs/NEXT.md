@@ -2,10 +2,10 @@
 
 autopilot: off
 autopilot-max: 10
-built: 2026-10-17T23:43
+built: 2026-10-21T06:05
 branch: feat/mdg-3-loop
-head: e993612
-status: done
+head: 64afe8a
+status: active
 
 <!--
 Contract for unattended work in this repo. Read by advance-all, the autopilot Stop hook and dispatch-workstreams.
@@ -15,41 +15,40 @@ Contract for unattended work in this repo. Read by advance-all, the autopilot St
 
 ## Goal
 
-The rebuild is merged and live (PRs #8–#13; prod on migration 025, `generation_v2` off). What remains unattended is bringing the repo docs in line with what shipped, so the next human step (fact ingest → review → golden set → blind A/B → flag flip) is self-explanatory. Everything that touches prod or needs a judgement is under Decisions pending.
+The v2 engine is built, merged and live behind `generation_v2` (off). Facts are loaded (265 approved), the proposal history is scraped (194 / 166 complete) and the blind A/B packet is waiting on Chris's judgement. What is left unattended: make the docs match what actually shipped and stop the scraper storing Upwork's opaque numeric status codes, so outcomes can drive the learning loop.
 
 ## Guardrails
 
 - No database migrations, deploys, secrets or env-var writes (see ~/.config/claude/overnight-defaults.md)
-- Never push, open/merge PRs or call the production API; commit locally on `feat/mdg-3-loop` only
+- Never push, open/merge PRs, call the production API, or touch the Render Postgres ipAllowList; commit locally on `feat/mdg-3-loop` only
 - Never commit the uncommitted extension version bump (extension/package.json, package-lock.json, public/manifest.json) or anything under `working/` / `docs/evals/`
-- Never run `scripts/ingest_chatgpt_facts.py` without `--dry-run`, flip `generation_v2`, or touch the prod DB
-- Tests: `cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q` (620 passing at origin/main 247e0f3); `cd extension && npx vitest run && npm run type-check`
+- Never flip `generation_v2`, never open or summarise `docs/evals/*/key.json` (the A/B answer key)
+- Tests: `docker start upapply-test-pg`, then `cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q` (644 passing at 64afe8a; a large skipped count means the DB is down) and `cd extension && npx vitest run && npm run type-check` (56 passing)
 
 ## Steps
 
-- [x] 1. (e17339b) Bring `feat/mdg-3-loop` up to `origin/main` (`git merge --no-edit origin/main`; local HEAD e993612 lacks #13, and this NEXT.md commit means it cannot fast-forward) — Done when: `git merge-base --is-ancestor origin/main HEAD` exits 0 and `grep -c '^| 025' CLAUDE.md` returns 1
-- [x] 2. (3f808d9) CLAUDE.md "Corpus & Memory Scripts": add rows for `ingest_chatgpt_facts.py` (work-only filter by default — cover letter in title or any message, plus career titles; `--all` to disable; `--dry-run`, `--limit`) and `eval_generation.py` (`build-golden`, blind A/B); fix "9 entries" → 14 for `chris_bio_memories.json` — Done when: `grep -c 'ingest_chatgpt_facts.py\|eval_generation.py' CLAUDE.md` ≥ 3, `grep -c '9 entries' CLAUDE.md` returns 0, and `python3 -c "import json;print(len(json.load(open('scripts/chris_bio_memories.json'))))"` matches the number stated
-- [x] 3. (e281022) CLAUDE.md "Testing": add the real API test command (`TEST_DATABASE_URL=… ./venv/bin/pytest -q` against the `upapply-test-pg` container on port 55499) and `npx vitest run` for the extension — Done when: `grep -c 'TEST_DATABASE_URL' CLAUDE.md` ≥ 1 and `grep -c 'vitest' CLAUDE.md` ≥ 1, and the documented commands pass when run
-- [x] 4. (87d5839) Runbook ingest section: document the work-only default and `--all`, the current export numbers (1,266 of 5,148 conversations → 1,286 items), running with `doppler run --project upapply --config dev -- …` once `UPAPPLY_PASSWORD` is set, and that step 3 (bio relabel) is now done by migration 025 — Done when: `grep -c -- '--all' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1 and `grep -c 'UPAPPLY_PASSWORD' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1
+- [ ] 1. CLAUDE.md "Corpus & Memory Scripts": the `ingest_chatgpt_facts.py` row still says "Work-only by default"; since #15 the default is `--source signed` (final message signed "Chris"/"Chris Therriault" per conversation, sent as `chatgpt_signed_letter`), with `--source work` / `--source all` (`--all` alias) — Done when: `grep -c 'source signed' CLAUDE.md` ≥ 1, `grep -c 'Work-only by default' CLAUDE.md` returns 0, and `api/venv/bin/python scripts/ingest_chatgpt_facts.py --help` lists `--source`
+- [ ] 2. Runbook (`docs/superpowers/runbook-memory-driven-generation.md`): record what the rollout actually needed — ingest default `--source signed`; proposal import pacing/chunks and that Upwork pages now carry `<script id="__NUXT_DATA__">` (Nuxt 3) instead of `window.__NUXT__`; `/facts/from-proposals` and `/facts/from-contracts`; build-golden/generate need prod DB access, done by temporarily setting the Render Postgres `ipAllowList` to this Mac's `/32` and clearing it afterwards — Done when: `grep -c '__NUXT_DATA__' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1, `grep -c 'ipAllowList' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1, `grep -c 'source signed' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1
+- [ ] 3. Extension: when recording a scraped proposal, prefer the list page's human-readable status text over the detail page's numeric Upwork code (`status: nuxtStatus || …` in `extension/src/background/index.ts`), keeping the numeric code only as a last resort, via a pure helper in `extension/src/lib/proposal-scrape.ts` — Done when: `npx vitest run` passes including a new test for the helper (list text wins; numeric code used only when no list text), and `npm run type-check` is clean
 
 ## Decisions pending
 
-- [2026-10-13] Rotate the UpApply password leaked in pushed commit 3b7affc and revoke old OpenAI keys (user action)
-- [2026-10-18] The Doppler CLI on this Mac is logged into the DoGood workplace (projects: dogood, example-project, secondchance); `upapply` is not visible, so `doppler … --project upapply` fails. Log into the workplace that owns `upapply` (`doppler login`, then `doppler projects` should list it) before the step below — or run the ingest with `read -s UPAPPLY_PASSWORD && export UPAPPLY_PASSWORD` (user action)
-- [2026-10-16] Set `UPAPPLY_PASSWORD` in Doppler upapply/dev (`! doppler secrets set UPAPPLY_PASSWORD --project upapply --config dev`), then say "go": ingest loop = `/facts/from-memories` (confirms migration 025) → 50-conversation trial (review sample) → remaining work conversations → `/facts/from-proposals` (user action, then attended session)
-- [2026-10-16] After ingest: review facts (user), `build-golden`, blind A/B ≥75%, then flip `generation_v2` (user action)
-- [2026-10-16] Multi-user gaps, after Chris's A/B passes: (a) writing hard rules (no "I"-start, banned phrases, "Warm regards") are Chris's but apply to every user → per-user setting (needs a migration); (b) proposal `author` labels `chris`/`chris_edited_ai` are naming only (already user-scoped) → rename needs a data migration; (c) ChatGPT export ingest is a local script → in-app upload + background job for other users. Recommendation: design (c) first, it is the onboarding blocker
-- [2026-10-17] Steps 1–4 above are local doc commits on `feat/mdg-3-loop`; getting them to main needs a push + PR (user's go-ahead)
+- [2026-10-13] Rotate the UpApply password (exposed in commit 3b7affc and in the 2026-10-19 session transcript); revoke the dead Render key still in git history (`rnd_wfmF…`, removed by #14) (user action)
+- [2026-10-21] Judge the blind A/B at https://claude.ai/artifact/D6rGtxxbmnGPBDkihzFzQ9, then say "score the A/B": read `judgments` → fill `docs/evals/2026-10-20/scores.csv` → `eval_generation.py score`; ≥75% of decided pairs → flip `generation_v2` for Chris (user action, then attended session)
+- [2026-10-21] Upwork numeric application status codes ('8' ×97, '2' ×44, '7' ×6, '3', '10') can't be mapped to outcomes yet — only '7' = active submitted is confirmed (saved page source). Needs a few proposal pages with known outcomes to map, or step 3's list-text status on a re-scrape (user to provide pages, or re-run the Proposals import after step 3 ships)
+- [2026-10-21] Won Contracts import stores contract titles/dates but no client feedback text, so no `client_quote` facts exist; capturing feedback gives the strongest evidence type — design needed (A: scrape feedback on contract pages, B: paste testimonials manually as facts)
+- [2026-10-21] `scripts/sync-doppler-to-render.sh` pushes every Doppler `prd` value; Doppler and Render had drifted (stale key, wrong `/v1` base URL) — decide the source of truth before the next sync (A: Doppler authoritative, fix it first; B: sync only named keys)
+- [2026-10-21] Unused candidates in the queue: 1,722 from signed ChatGPT letters (pairs/weaker one-offs), 791 weaker proposal claims, 61 low-value, 22 contract records, 142 doubtful unsigned turns — keep (harmless, never reach a letter) or bulk-reject (recommendation: keep until the A/B passes)
 
 ## Log
 
-- [2026-10-16] #9 CodeRabbit fixes (guarded re-embed, SQL-bounded backfill, anthropic>=1.13) — 15eb8d2; merged — 1a1fd74; deployed ~100s, /facts/* live
-- [2026-10-16] #10 merged — 83f043b
-- [2026-10-16] #11 merged — 1058c54; deployed ~60s, /refine live
-- [2026-10-16] #12 work-only ChatGPT ingest filter + no personal facts — 1ab4d6a; merged — e993612
-- [2026-10-16] Prod DB refuses external connections, so bio relabel shipped as migration 025 — 5d3b55d; #13 merged — 247e0f3; 620 API tests pass
-- [2026-10-16] Export unzipped to working/chatgpt-export/ (gitignored); dry run: 1,266 of 5,148 conversations → 1,286 items
-- [2026-10-17] step 1 done — e17339b — branch merged with origin/main (247e0f3); test DB container was stopped, restarted; 620 API tests pass
-- [2026-10-18] step 2 done — 3f808d9 — ingest/eval scripts in CLAUDE.md table, bio count 14; flags verified via --help; 620 API tests pass
-- [2026-10-18] step 3 done — e281022 — Testing section: docker test DB, pytest, vitest; documented commands run: 620 API + 36 extension tests pass, type-check clean
-- [2026-10-18] step 4 done — 87d5839 — runbook ingest: work-only filter, --all, export numbers, trial batch, Doppler + read -s fallback; found Doppler CLI is on the DoGood workplace (no upapply) → Decisions pending; dry run reproduces 1,266/1,286; 620 API tests pass
+- [2026-10-19] #14 sync script reads RENDER_API_KEY from env (hardcoded key removed); 24 loose key files moved to Keychain
+- [2026-10-19] Prod keys replaced (Anthropic; revoked OpenAI → new); Render env spliced per key; AICostCentral proxy later re-enabled with the new key
+- [2026-10-19] #15 facts from Chris-signed letters only + tighter extractor; #16 doubtful flag (migration 026); 129 approved after consolidation
+- [2026-10-20] #17 'I' banned only as first word; extractor skips compensation; 9 compensation facts removed; one-offs 143→62; 198 approved
+- [2026-10-20] #18 throttle-safe scraper (pacing, backoff, chunks, incremental save, skip complete)
+- [2026-10-20] #19 scraper decodes Upwork's Nuxt 3 `__NUXT_DATA__` (window.__NUXT__ gone); 194 proposals, 166 complete
+- [2026-10-20] #20 prod bug: anthropic SDK 1.13 rejects `temperature` → legacy cover letters crashed; moved to extra_body + AST guard test — 7b09267
+- [2026-10-20] /facts/from-proposals: 1,362 candidates → 284 dup rejected → 69 shortlisted → 67 approved; 265 approved total
+- [2026-10-20] Golden set (20 jobs) + blind A/B packet generated via temporary prod DB allowlist (removed after); judging page published
+- [2026-10-21] /facts/from-contracts: 22 weak contract-record candidates, left unused; no client feedback captured
