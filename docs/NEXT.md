@@ -27,7 +27,7 @@ The v2 engine is built, merged and live behind `generation_v2` (off). Facts are 
 
 ## Steps
 
-- [ ] 1. CLAUDE.md "Corpus & Memory Scripts": the `ingest_chatgpt_facts.py` row still says "Work-only by default"; since #15 the default is `--source signed` (final message signed "Chris"/"Chris Therriault" per conversation, sent as `chatgpt_signed_letter`), with `--source work` / `--source all` (`--all` alias) — Done when: `grep -c 'source signed' CLAUDE.md` ≥ 1, `grep -c 'Work-only by default' CLAUDE.md` returns 0, and `api/venv/bin/python scripts/ingest_chatgpt_facts.py --help` lists `--source`
+- [x] 1. (e7906d3) CLAUDE.md "Corpus & Memory Scripts": the `ingest_chatgpt_facts.py` row still says "Work-only by default"; since #15 the default is `--source signed` (final message signed "Chris"/"Chris Therriault" per conversation, sent as `chatgpt_signed_letter`), with `--source work` / `--source all` (`--all` alias) — Done when: `grep -c 'source signed' CLAUDE.md` ≥ 1, `grep -c 'Work-only by default' CLAUDE.md` returns 0, and `api/venv/bin/python scripts/ingest_chatgpt_facts.py --help` lists `--source`
 - [ ] 2. Runbook (`docs/superpowers/runbook-memory-driven-generation.md`): record what the rollout actually needed — ingest default `--source signed`; proposal import pacing/chunks and that Upwork pages now carry `<script id="__NUXT_DATA__">` (Nuxt 3) instead of `window.__NUXT__`; `/facts/from-proposals` and `/facts/from-contracts`; build-golden/generate need prod DB access, done by temporarily setting the Render Postgres `ipAllowList` to this Mac's `/32` and clearing it afterwards — Done when: `grep -c '__NUXT_DATA__' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1, `grep -c 'ipAllowList' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1, `grep -c 'source signed' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1
 - [ ] 3. Extension: when recording a scraped proposal, prefer the list page's human-readable status text over the detail page's numeric Upwork code (`status: nuxtStatus || …` in `extension/src/background/index.ts`), keeping the numeric code only as a last resort, via a pure helper in `extension/src/lib/proposal-scrape.ts` — Done when: `npx vitest run` passes including a new test for the helper (list text wins; numeric code used only when no list text), and `npm run type-check` is clean
 
@@ -42,7 +42,6 @@ The v2 engine is built, merged and live behind `generation_v2` (off). Facts are 
 
 ## Log
 
-- [2026-10-19] #14 sync script reads RENDER_API_KEY from env (hardcoded key removed); 24 loose key files moved to Keychain
 - [2026-10-19] Prod keys replaced (Anthropic; revoked OpenAI → new); Render env spliced per key; AICostCentral proxy later re-enabled with the new key
 - [2026-10-19] #15 facts from Chris-signed letters only + tighter extractor; #16 doubtful flag (migration 026); 129 approved after consolidation
 - [2026-10-20] #17 'I' banned only as first word; extractor skips compensation; 9 compensation facts removed; one-offs 143→62; 198 approved
@@ -52,3 +51,4 @@ The v2 engine is built, merged and live behind `generation_v2` (off). Facts are 
 - [2026-10-20] /facts/from-proposals: 1,362 candidates → 284 dup rejected → 69 shortlisted → 67 approved; 265 approved total
 - [2026-10-20] Golden set (20 jobs) + blind A/B packet generated via temporary prod DB allowlist (removed after); judging page published
 - [2026-10-21] /facts/from-contracts: 22 weak contract-record candidates, left unused; no client feedback captured
+- [2026-10-21] step 1 done — e7906d3 — CLAUDE.md ingest row: default --source signed, work/all modes; --help lists --source; 644 API tests pass
