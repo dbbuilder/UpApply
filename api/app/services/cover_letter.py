@@ -483,7 +483,8 @@ async def generate_cover_letter(
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
         max_tokens=1200,
-        temperature=0.75,
+        # Anthropic SDK >=1.13 dropped the temperature kwarg; the API still honours it for this model.
+        extra_body={"temperature": 0.75},
     )
 
     raw_content = response.content[0].text.strip()
@@ -524,7 +525,8 @@ Please revise the cover letter based on this feedback while maintaining personal
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
         max_tokens=1000,
-        temperature=0.7,
+        # Anthropic SDK >=1.13 dropped the temperature kwarg; the API still honours it for this model.
+        extra_body={"temperature": 0.7},
     )
 
     raw_content = response.content[0].text.strip()
@@ -594,7 +596,8 @@ Respond with JSON only, no markdown:
         system=system,
         messages=[{"role": "user", "content": user}],
         max_tokens=1500,
-        temperature=0.4,  # Lower temp — this is an analytical + editing task
+        # Anthropic SDK >=1.13 dropped the temperature kwarg; the API still honours it for this model.
+        extra_body={"temperature": 0.4},  # Lower temp — this is an analytical + editing task
     )
 
     raw = response.content[0].text.strip()
