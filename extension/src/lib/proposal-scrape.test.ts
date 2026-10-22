@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   COMPLETE_JOB_TEXT_MIN_CHARS, COMPLETE_LETTER_MIN_CHARS, DETAIL_DELAY_MAX_MS, DETAIL_DELAY_MIN_MS,
   THROTTLE_BACKOFF_MS, completeProposalIds, isProposalComplete, isThrottledRead,
-  randomDetailDelayMs, takeBatch, throttleBackoffMs,
+  pickProposalStatus, randomDetailDelayMs, takeBatch, throttleBackoffMs,
 } from './proposal-scrape';
 
 describe('randomDetailDelayMs', () => {
@@ -80,5 +80,26 @@ describe('takeBatch', () => {
     expect(takeBatch(pending, 4, true)).toEqual([5]);
     expect(pending).toEqual([]);
     expect(takeBatch(pending, 4, true)).toBeNull();
+  });
+});
+
+describe('pickProposalStatus', () => {
+  it('keeps the list page outcome text over Upwork\'s numeric code', () => {
+    expect(pickProposalStatus('interviewed', '8', false)).toBe('interviewed');
+    expect(pickProposalStatus('Responded', '2', true)).toBe('responded');
+  });
+
+  it('marks archived rows archived when the list only says submitted', () => {
+    expect(pickProposalStatus('submitted', '8', true)).toBe('archived');
+  });
+
+  it('keeps submitted for active rows instead of the numeric code', () => {
+    expect(pickProposalStatus('submitted', '7', false)).toBe('submitted');
+  });
+
+  it('falls back to the numeric code only without list text', () => {
+    expect(pickProposalStatus(null, '7', false)).toBe('7');
+    expect(pickProposalStatus('', null, false)).toBe('submitted');
+    expect(pickProposalStatus(undefined, '8', true)).toBe('archived');
   });
 });
