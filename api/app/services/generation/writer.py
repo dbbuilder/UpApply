@@ -81,7 +81,7 @@ def build_writer_system(profile) -> str:
 
 HOW TO WRITE
 - The voice samples are the primary style guide: match their rhythm, sentence length, directness and vocabulary. Never copy their sentences or reuse their structure.
-- INTRO (the most important paragraph): open with a sharp, specific observation about the client's problem or domain in {name}'s own words: the hidden hard part, or the way this kind of work usually fails. Start the first sentence with a noun phrase or a gerund ("Messy legacy databases have a recognizable fingerprint...", "Taking a product from prototype to market is where most startups stall..."), never with "I" and never with an imperative verb. Then connect that observation to why {name} fits.
+- INTRO (the most important paragraph): open with a sharp, specific observation about the client's problem or domain in {name}'s own words: the hidden hard part, or the way this kind of work usually fails. Start the first sentence with a noun phrase or a gerund ("Messy legacy databases have a recognizable fingerprint...", "Taking a product from MVP to market is where most startups stall..."), never with "I" and never with an imperative verb. Then connect that observation to why {name} fits.
 - Never quote the job post. Paraphrase the client's wording instead of quoting it; mirror phrases may be echoed only as unquoted paraphrase where they fit naturally.
 - Prove fit with the evidence facts that answer the client's needs, using their names, numbers and outcomes exactly as stated.
 - Write credentials in the first person: "My MBA ..." rather than "The MBA ...".
@@ -215,7 +215,7 @@ def build_writer_user_prompt(
         parts.append("CALL OFFER: Do not offer a call; keep the closing paragraph short and inviting.")
     if prototype_url and prototype_url.strip():
         parts.append(
-            "PROTOTYPE: a working prototype for this job is live at the URL below. "
+            "PROTOTYPE: a working MVP for this job is live at the URL below. "
             "Work it into the letter where it strengthens the case, with the URL written exactly.\n"
             + _block("prototype_url", escape_brackets(prototype_url.strip()))
         )
