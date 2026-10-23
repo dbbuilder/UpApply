@@ -236,7 +236,7 @@ async def build_golden(email: str, out: Path, n: int) -> None:
         print("WARNING: fewer than 15 eligible jobs — scrape more proposal details first (spec §4.2)")
 
 
-async def _generate_one(email: str, job: dict) -> tuple[str, object]:
+async def _generate_one(email: str, job: dict) -> tuple[str, object, list[dict]]:
     from sqlalchemy import select, text
 
     from app.core.database import async_session_maker
@@ -279,8 +279,10 @@ async def _generate_one(email: str, job: dict) -> tuple[str, object]:
                 f"{job['id']}: its own submitted letter was retrieved as a voice sample; "
                 "add its proposal_id / upwork_proposal_id to the golden file"
             )
+        # Read before the rollback expires the rows.
+        evidence = [{"id": str(f.id), "statement": f.statement} for f in new.evidence.facts]
         await db.rollback()
-    return old, new
+    return old, new, evidence
 
 
 JOB_ATTEMPTS = 2
@@ -334,7 +336,7 @@ async def generate(email: str, golden: Path, out_dir: Path, seed: int) -> None:
             continue
         for attempt in range(JOB_ATTEMPTS):
             try:
-                old, new = await _generate_one(email, job)
+                old, new, evidence = await _generate_one(email, job)
                 break
             except (OSError, DBAPIError) as exc:
                 if attempt == JOB_ATTEMPTS - 1:
@@ -345,7 +347,7 @@ async def generate(email: str, golden: Path, out_dir: Path, seed: int) -> None:
             "warnings": new.warnings,
             "fact_ids_used": new.draft.fact_ids_used,
             "screening_answers": new.draft.screening_answers,
-            "evidence": [{"id": str(f.id), "statement": f.statement} for f in new.evidence.facts],
+            "evidence": evidence,
         }
         saved.write_text(json.dumps({"output": outputs[job["id"]], "meta": new_meta[job["id"]]}, indent=2))
         print(f"generated {job['id']} ({len(new.draft.fact_ids_used)} facts, {len(new.warnings)} warnings)")
