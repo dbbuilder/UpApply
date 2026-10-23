@@ -136,13 +136,15 @@ def build_writer_system(profile, email: Optional[str] = None) -> str:
 
 HOW TO WRITE
 - The voice samples are the primary style guide: match their rhythm, sentence length, directness and vocabulary. Never copy their sentences or reuse their structure.
-- INTRO (the most important paragraph): open with a sharp, specific observation about the client's problem or domain in {name}'s own words: the hidden hard part, or the way this kind of work usually fails. Start the first sentence with a noun phrase or a gerund ("Messy legacy databases have a recognizable fingerprint...", "Taking a product from MVP to market is where most startups stall..."), never with "I" and never with an imperative verb. Then connect that observation to why {name} fits.
+- INTRO (the most important paragraph, two or three sentences): open with a sharp, specific observation in {name}'s own words. Choose the form that fits this post: the hidden hard part, the way this kind of work usually fails, the business outcome the client is after, a genuine compliment on the idea, or {name}'s matching experience framed as an insight about the work. Do not fall back on one formula (such as "X rarely fails where you would expect"). When the post asks a business question, start from the business and bring the technical detail in later. Start the first sentence with a noun phrase or a gerund ("Messy legacy databases have a recognizable fingerprint...", "Taking a product from MVP to market is where most startups stall..."), never with "I" and never with an imperative verb. End the paragraph with the reassurance: why {name}'s experience makes them safe to hire for exactly this. Say it freshly for this job, through the specific experience that fits; avoid stock lines such as "that is where I have spent most of my career".
 - Never quote the job post. Paraphrase the client's wording instead of quoting it; mirror phrases may be echoed only as unquoted paraphrase where they fit naturally.
 - Prove fit with the evidence facts that answer the client's needs, using their names, numbers and outcomes exactly as stated.
-- Choose the evidence that matches this client's domain; leave out products and industries that do not apply (for example, healthcare work gets healthcare products; edtech only when the work is edtech).
+- Choose the evidence that matches this client's domain; leave out products and industries that do not apply (for example, healthcare work gets healthcare products; edtech only when the work is edtech). When a product or project in the evidence sits in the client's own domain (inspection software for an inspection platform), it leads the proof.
+- When the post names one AI tool but means AI work in general, write about AI work generally rather than building the letter around that tool.
+- Keep paragraphs short. A short list is fine for steps or deliverables, with its lead-in sentence directly above it (no blank line between). Do not repeat a word or its root in nearby sentences.
 - Write credentials in the first person: "My MBA ..." rather than "The MBA ...".
 - Make one concrete "here's how I'd start" move specific to this job.
-- CLOSING: end the body with one short, inviting paragraph that is not specific: no agenda, dates, deliverables or detailed topics. When the CALL OFFER instruction asks for a call, offer it there as "{call_offer_wording(voice)} ..."; never write a sentence starting "Happy to".
+- CLOSING: end the body with one short, inviting paragraph that is not specific: no agenda, dates, deliverables or detailed topics. When the CALL OFFER instruction asks for a call, offer it there as "{call_offer_wording(voice)} ..." in a short sentence, and make it the last sentence of the letter: nothing after it. Never write a sentence starting "Happy to".
 - Then stop. There is no template beyond the intro and closing: vary the shape and paragraphing of the middle from letter to letter.
 - Honour every explicit ask the client made of applicants' replies (a word to start with, a detail to mention) exactly, unless it conflicts with the rules here.
 
@@ -221,6 +223,12 @@ REPAIR_INSTRUCTIONS = {
     "exit_caveat": 'Drop the conditional ("If this sounds like the right fit, ...") from the closing paragraph and keep the invitation.',
     "also_credential": 'State each credential or role without "also" ("I am a technical founder", not "I am also ...").',
     "stack_in_opening": "Open on the client's problem, not a list of technologies; mention the stack later in the letter.",
+    "dash": "Remove every em dash and en dash; rewrite each sentence with a period, comma, colon or parentheses.",
+    "emoji": "Remove every emoji and decorative glyph; use plain words.",
+    "tell_word": "Replace the words listed in the repair notes with plain ones; they read as machine-written.",
+    "company_name": "Do not name the company listed in the repair notes; use the replacement wording given there.",
+    "close_after_offer": "End the letter on a short call-offer sentence: move or cut anything after it and any detail inside it.",
+    "nda_offer": "The letter talks about seeing the client's code or documents: add, before the call offer, that you are glad to sign an NDA.",
 }
 
 
@@ -266,11 +274,19 @@ def build_writer_user_prompt(
         f"{_format_voice_samples(evidence.voice_samples)}",
         f"LENGTH: aim for {low}-{high} words in the letter body.",
     ]
+    voice = load_voice(email)
+    nda = ((((voice or {}).get("rules") or {}).get("closing") or {}).get("nda_offer") or "").strip().rstrip(".")
     if include_call_offer:
-        parts.append(
-            "CALL OFFER: in the closing paragraph, offer a quick call in one sentence worded "
-            f'"{call_offer_wording(load_voice(email))} ...".'
+        offer = (
+            "CALL OFFER: in the closing paragraph, offer a quick call in one short sentence worded "
+            f'"{call_offer_wording(voice)} ...", and end the letter on it.'
         )
+        if nda:
+            offer += (
+                " If the letter offers to review the client's code, repo, data or documents, the sentence before "
+                f'the call offer says "{nda}" and the call is the next step after that review.'
+            )
+        parts.append(offer)
     else:
         parts.append("CALL OFFER: Do not offer a call; keep the closing paragraph short and inviting.")
     if prototype_url and prototype_url.strip():

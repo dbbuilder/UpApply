@@ -456,3 +456,59 @@ async def test_check_claims_ignores_spans_that_only_appear_in_a_screening_questi
         {"claim": "AWS Solutions Architect certification", "reason": "omitted"}]})
     with patch("app.services.generation.verify.structured_call", call):
         assert await check_claims(draft, Evidence(facts=[FACT])) == []
+
+
+# Voice-kit checks (de-AI bans and round-3 notes) run only when the user's kit is passed.
+from app.services.generation.voice import _bundle  # noqa: E402
+
+KIT = _bundle("chris")
+OFFER = "I would be happy to jump on a quick call at no cost or obligation"
+
+
+def test_vendored_kit_carries_round_3_rules():
+    assert KIT["kit_version"].startswith("v0.3.0")
+    assert KIT["de_ai"]["hard"]["dashes"] and KIT["rules"]["avoid_names"][0]["name"] == "DBBuilder"
+
+
+def test_voice_kit_checks_are_off_without_a_kit():
+    letter = _letter(extra=" It ran on a robust stack — DBBuilder built it.")
+    codes = _codes(check_rules(letter, _brief(), None))
+    assert not codes & {"dash", "tell_word", "company_name"}
+
+
+def test_clean_letter_passes_the_kit_checks():
+    assert check_rules(_letter(extra=f"\n\n{OFFER} to talk it through."), _brief(), None, voice=KIT) == []
+
+
+@pytest.mark.parametrize("extra,code", [
+    (" Rollback — then cutover.", "dash"),
+    (" Weeks run 3–5.", "dash"),
+    (" Shipped ✅ on time.", "emoji"),
+    (" A robust and seamless rollout.", "tell_word"),
+    (" That platform came from DBBuilder, Inc. originally.", "company_name"),
+])
+def test_kit_bans(extra, code):
+    assert code in _codes(check_rules(_letter(extra=extra), _brief(), None, voice=KIT))
+
+
+def test_kit_bans_apply_to_screening_answers():
+    answers = [{"question": "Q?", "answer": "Two weeks — maybe three. It went well."}]
+    assert "dash" in _codes(check_rules(_letter(), _brief(), None, answers, voice=KIT))
+
+
+@pytest.mark.parametrize("close", [
+    f"{OFFER} to talk it through. Looking forward to hearing from you.",
+    f"{OFFER} to talk through your approach, including which tools make sense for the compliance tasks you "
+    "have in mind and how to structure the engagement.",
+])
+def test_close_must_end_on_a_short_offer(close):
+    assert "close_after_offer" in _codes(check_rules(_letter(extra=f"\n\n{close}"), _brief(), None, voice=KIT))
+
+
+def test_nda_offer_needed_when_their_code_comes_up():
+    no_nda = _letter(extra=f" If you share the repo, I will review it first.\n\n{OFFER} after that review.")
+    assert "nda_offer" in _codes(check_rules(no_nda, _brief(), None, voice=KIT))
+    with_nda = _letter(
+        extra=f" If you share the repo, I will review it first, and I am glad to sign an NDA.\n\n{OFFER} after that review."
+    )
+    assert "nda_offer" not in _codes(check_rules(with_nda, _brief(), None, voice=KIT))

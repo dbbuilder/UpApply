@@ -28,6 +28,7 @@ REPAIR_CODES = (
     "explicit_ask", "unsupported_claim", "missing_prototype_url", "answer_rules", "too_few_specifics",
     "quote_in_opening", "dangling_paragraph", "happy_to", "duplicate_closing",
     "exit_caveat", "also_credential", "stack_in_opening",
+    "dash", "emoji", "tell_word", "company_name", "close_after_offer", "nda_offer",
 )
 
 
@@ -310,15 +311,90 @@ def _check_round2(body: str) -> list[Issue]:
     return violations
 
 
+# Round-3 / de-AI checks. They run only for users with a voice kit, which supplies the lists.
+_DASHES = ("\u2014", "\u2013")
+_EMOJI = re.compile(
+    "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF\U00002190-\U000021FF\u2B50\u2705\u26A0]"
+)
+_SEES_CLIENT_MATERIAL = re.compile(
+    r"\b(?:share|sharing|shared|access to|review|reviewing|look at|looking at|read through|walk me through|audit)\b"
+    r"(?:\W+\w+){0,5}?\W+(?:repo|repos|repository|repositories|codebase|code base|source code|code|documents|"
+    r"documentation|files|data|database|schema)\b",
+    re.IGNORECASE,
+)
+_NDA = re.compile(r"\bNDA\b|non-disclosure", re.IGNORECASE)
+DEFAULT_OFFER_STEM = "I would be happy to jump on a quick call"
+OFFER_SENTENCE_MAX_WORDS = 30
+
+
+def _check_voice_kit(body: str, answers: list[dict], voice: dict) -> list[Issue]:
+    """The voice kit's de-AI bans and Chris's round-3 notes: no dashes or emojis, no tell-words,
+    never the company's legal name, the close ends on the call offer, and an NDA offer whenever
+    the letter talks about seeing the client's code or documents."""
+    violations: list[Issue] = []
+    rules = voice.get("rules") or {}
+    de_ai = (voice.get("de_ai") or {}).get("hard") or {}
+    exceptions = [e.lower() for e in (voice.get("de_ai") or {}).get("exceptions") or []]
+    texts = [body] + [str(a.get("answer") or "") for a in answers]
+    joined = "\n".join(texts)
+    if any(d in joined for d in _DASHES):
+        violations.append(Issue(
+            "Em or en dash used; rewrite with a period, comma, colon or parentheses.", "dash",
+            next(s for s in _sentences(joined) if any(d in s for d in _DASHES))[:120],
+        ))
+    emoji = _EMOJI.search(joined)
+    if emoji:
+        violations.append(Issue("Emoji or decorative glyph used; use plain words.", "emoji", emoji.group(0)))
+    lowered = joined.lower()
+    for exc in exceptions:
+        lowered = lowered.replace(exc, " " * len(exc))
+    tells = [w for w in de_ai.get("words") or [] if re.search(r"\b" + re.escape(w.lower()) + r"\b", lowered)]
+    tells += [p for p in de_ai.get("phrases") or [] if p.lower() in lowered]
+    if tells:
+        violations.append(Issue(
+            f"Words that read as machine-written: {', '.join(tells)}.", "tell_word", ", ".join(tells),
+        ))
+    for avoid in rules.get("avoid_names") or []:
+        name = str(avoid.get("name") or "")
+        if name and re.search(r"\b" + re.escape(name) + r"\b", joined, re.IGNORECASE):
+            instead = avoid.get("instead") or "a description"
+            violations.append(Issue(
+                f'Do not name "{name}"; write "{instead}".', "company_name", f"{name} -> {instead}",
+            ))
+
+    paragraphs = [p.strip() for p in _PARAGRAPH_SPLIT.split(body) if p.strip()]
+    offer = (((rules.get("closing") or {}).get("call_offer")) or DEFAULT_OFFER_STEM).strip().rstrip(".\u2026 ")
+    if paragraphs and offer.lower() in paragraphs[-1].lower():
+        last = paragraphs[-1]
+        tail = last[last.lower().index(offer.lower()):]
+        sentence, _, after = tail.partition(". ")
+        if after.strip() or len(sentence.split()) > OFFER_SENTENCE_MAX_WORDS:
+            violations.append(Issue(
+                "The close must end on the call offer, kept short, with nothing after it.", "close_after_offer",
+                tail[:200],
+            ))
+    ids = {r.get("id") for r in (rules.get("hard") or []) + (rules.get("soft") or [])}
+    if "offer_nda" in ids:
+        match = _SEES_CLIENT_MATERIAL.search(body)
+        if match and not _NDA.search(body):
+            violations.append(Issue(
+                "The letter talks about seeing the client's code or documents; say you are glad to sign an NDA.",
+                "nda_offer", match.group(0),
+            ))
+    return violations
+
+
 def check_rules(
     text: str,
     brief: JobBrief,
     preferred_closing: Optional[str],
     screening_answers: Optional[list[dict]] = None,
+    voice: Optional[dict] = None,
 ) -> list[Issue]:
     """Chris's hard rules. Returns human-readable violations (empty = clean).
     With `screening_answers`, the answer rules are checked too and explicit asks may be
-    honoured in either the letter or the answers."""
+    honoured in either the letter or the answers. With `voice` (the user's voice-kit bundle),
+    the kit's de-AI bans and round-3 rules are checked too."""
     violations: list[Issue] = []
     stripped = text.strip()
     closing = expected_closing(preferred_closing)
@@ -359,6 +435,8 @@ def check_rules(
             violations.append(Issue(f"Explicit ask not honoured: {ask}", "explicit_ask", ask))
 
     violations.extend(check_answer_rules(answers))
+    if voice:
+        violations.extend(_check_voice_kit(body, answers, voice))
     return violations
 
 

@@ -24,6 +24,7 @@ from app.services.facts import search_facts
 from app.services.generation.brief import JobBrief
 from app.services.generation.evidence import Evidence, format_facts
 from app.services.generation.verify import CLAIM_CHECK_SKIPPED, Issue, check_claims, check_rules, check_specifics
+from app.services.generation.voice import load_voice
 from app.services.generation.writer import (
     Draft,
     _align_answers,
@@ -291,7 +292,7 @@ async def refine_application(
 
     all_evidence = Evidence(facts=list(merged.values()), voice_samples=evidence.voice_samples)
     warnings: list[str] = check_rules(
-        draft.cover_letter, brief, profile.preferred_closing, draft.screening_answers
+        draft.cover_letter, brief, profile.preferred_closing, draft.screening_answers, load_voice(email)
     )
     for item in draft.screening_answers:
         if not item.get("answer"):

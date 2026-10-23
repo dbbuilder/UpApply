@@ -161,10 +161,10 @@ Two pipelines, selected per user by `user_profiles.generation_v2` (default `fals
 
 Package `api/app/services/generation/`: brief → evidence → write → verify → at most one repair.
 - `brief.py` — structured job brief (needs, explicit asks) via `extraction_model` (`claude-haiku-4-5`)
-- `evidence.py` — approved **facts** (verified claims, `/api/v1/facts`) ranked per need (0.55·similarity + 0.25·strength + 0.20·win signal), plus **voice samples** (past proposals written or edited by the user, never AI-only) for tone
+- `evidence.py` — approved **facts** (verified claims, `/api/v1/facts`) ranked per need (0.55·similarity + 0.25·strength + 0.20·win signal), plus up to `DOMAIN_FACTS` closest to the whole post (so an on-domain product reaches the writer), plus **voice samples** (past proposals written or edited by the user, never AI-only) for tone
 - `writer.py` — `cover_letter_model` (`claude-opus-5-5`, `writer_effort="high"`; no temperature, thinking or prefill), structured output with `fact_ids_used`
 - Voice: a user mapped in `api/app/voice/index.json` (email → writer) gets the writer's persona, `sales-proposal` register, house style, soft rules, two exemplar sections and call-offer wording from the vendored ServiceVision voice kit (`api/app/voice/<writer>.json`, loaded by `voice.py`, copied by `scripts/sync_voice_kit.py` from repo `dbbuilder-org/sv-writing-style`, stamped with `kit_version`); users with no mapping get the built-in prompt. To change the voice: update the kit, tag it, re-run the sync script, open a PR
-- `verify.py` — rule checks, claim check against evidence, and ≥2 verified specifics (`MIN_SPECIFICS`); failures map to `REPAIR_CODES` for the single repair pass
+- `verify.py` — rule checks, claim check against evidence, and ≥2 verified specifics (`MIN_SPECIFICS`); failures map to `REPAIR_CODES` for the single repair pass. Users with a voice kit also get the kit's checks: no em/en dashes or emojis, no de-AI tell-words, `avoid_names` (never "DBBuilder"), the close ends on a short call offer, and an NDA offer whenever the letter talks about seeing the client's code or documents
 - `refine.py` — `POST /api/v1/jobs/cover-letters/{letter_id}/refine` chat with a `search_facts` tool (caps: `MAX_TOOL_ROUNDS=4`, `MAX_TOOL_CALLS=6`, `MAX_FOUND_FACTS=8`)
 - Facts: `api/app/services/facts.py` (dedupe at 0.92 cosine; matches of an approved fact auto-approve unless figures conflict or the source is the client) and `fact_extraction.py`; outcome sync credits facts once via `proposals.facts_credited_at`
 - **Untrusted text** (job posts, client messages, scraped pages) must pass through `app/services/untrusted.neutralise()` before it reaches any prompt
@@ -257,7 +257,7 @@ Located in `scripts/`:
 | `chris_bio_memories.json` | Chris Therriault's 14 canonical bio/achievement memories |
 | `chris_proposal_anchors.json` | Chris's job-type credential routing config (cto/saas/sql/cloud/ai/fullstack + always_include) |
 | `ingest_chatgpt_facts.py` | v2: send ChatGPT export conversations to `/facts/ingest` as fact candidates. Default `--source signed`: only the final message signed "Chris" / "Chris Therriault" in each conversation, sent as `chatgpt_signed_letter` (the first user message, usually the job post, travels as context only). `--source work`: the user's own turns from work conversations (cover letter in the title or any message, plus career titles); `--source all` (alias `--all`): every conversation. `--dry-run` makes no API calls, `--limit N` caps conversations |
-| `eval_generation.py` | v2 rollout gate: `build-golden` (golden jobs from scraped proposals, read-only), `generate` (blind A/B packet, legacy vs v2), `score` (pass ≥75%) |
+| `eval_generation.py` | v2 rollout gate: `build-golden` (golden jobs from scraped proposals, read-only), `generate` (blind A/B packet, legacy vs v2), `score` (pass ≥75%). `generate` also reports phrases repeated across a batch's openings or closes (`batch_sameness`) |
 
 **Usage (avoid shell `!` in passwords — use Python sys.argv injection):**
 ```python

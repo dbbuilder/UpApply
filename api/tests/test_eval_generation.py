@@ -224,3 +224,19 @@ async def test_golden_facts_delete_hides_facts_sourced_from_the_golden_proposal(
         left = sorted((await s.execute(select(Fact.statement).where(Fact.user_id == u.id))).scalars())
         await s.rollback()
     assert left == ["other"]
+
+
+def test_batch_sameness_flags_a_repeated_opening_formula_but_not_the_fixed_offer():
+    offer = "I would be happy to jump on a quick call at no cost or obligation"
+    letters = [
+        f"{topic} rarely fails where you would expect it to. The work is underneath.\n\n"
+        f"Proof paragraph about {topic} work.\n\n{offer} {tail}.\n\nRegards,"
+        for topic, tail in (
+            ("Inspection software", "about the platform"), ("Payroll reporting", "to compare notes"),
+            ("Video automation", "about your vision"), ("Legacy SQL", "once you have a moment"),
+        )
+    ]
+    found = eval_generation.batch_sameness(letters, ignore=(offer,))
+    assert any(f.startswith('opening: "rarely fails where you"') for f in found)
+    assert not any(f.startswith("close:") for f in found)
+    assert eval_generation.batch_sameness(letters[:2], ignore=(offer,)) == []

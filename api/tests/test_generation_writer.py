@@ -279,7 +279,10 @@ def test_writer_and_refine_systems_carry_ab_feedback_rules():
     from app.services.generation.refine import _system_prompt
 
     for system in (build_writer_system(PROFILE), _system_prompt(PROFILE)):
-        assert "INTRO (the most important paragraph)" in system
+        assert "INTRO (the most important paragraph, two or three sentences)" in system
+        assert "Do not fall back on one formula" in system
+        assert "it leads the proof" in system
+        assert "make it the last sentence of the letter: nothing after it" in system
         assert "noun phrase or a gerund" in system
         assert "Never quote the job post" in system
         assert "No quotation marks in the first paragraph." in system

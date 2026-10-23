@@ -22,6 +22,11 @@ MIN_FACTS = 4
 MAX_FACTS = 8
 FILL_MIN_SCORE = 0.55
 ANCHOR_MIN_SIMILARITY = 0.75
+# Whole-job search: the facts closest to the post as a whole, so a product in the client's own
+# domain (inspection software for an inspection platform) reaches the writer even when no single
+# need names it. A long post scores lower against a short fact than a need does, hence the floor.
+DOMAIN_FACTS = 2
+DOMAIN_MIN_SIMILARITY = 0.35
 VOICE_SAMPLE_LIMIT = 3
 VOICE_AUTHORS = ("chris", "chris_edited_ai")
 OUTCOME_BOOST = {"hired": 0.15, "interviewed": 0.10, "replied": 0.08, "viewed": 0.02}
@@ -148,7 +153,8 @@ async def select_evidence(
     anchors: Optional[dict],
     exclude_proposal_ids: Optional[list[str]] = None,
 ) -> Evidence:
-    """Per-need fact retrieval + rerank, always-include floor, and 2-3 voice samples."""
+    """Per-need fact retrieval + rerank, always-include floor, whole-job domain facts, and 2-3
+    voice samples."""
     needs = [n for n in brief.needs if n.strip()]
     always = [a for a in ((anchors or {}).get("always_include") or []) if isinstance(a, str) and a.strip()]
     # Job<->job: same text shape Phase 1 (Task 1.8) and Phase 3 (Task 3.4) embed into
@@ -181,16 +187,20 @@ async def select_evidence(
             facts.append(hits[0][0])
             seen.add(str(hits[0][0].id))
 
-    # Embedded on its own: if the job-text embedding still fails it costs only the voice
-    # samples (with a warning), never the facts.
+    # Embedded on its own: if the job-text embedding still fails it costs only the domain facts
+    # and voice samples (with a warning), never the per-need facts.
     voice: list[Proposal] = []
     warnings: list[str] = []
     if voice_query:
         try:
-            voice_vector = (await generate_embeddings_batch([voice_query]))[0]
+            job_vector = (await generate_embeddings_batch([voice_query]))[0]
         except Exception as exc:
             logger.warning("Voice-sample query embedding failed: %s", type(exc).__name__)
             warnings.append(VOICE_UNAVAILABLE_WARNING)
         else:
-            voice = await _find_voice_samples(db, user_id, voice_vector, exclude_ids=exclude_proposal_ids)
+            for fact, similarity in await search_facts(db, user_id, job_vector, limit=DOMAIN_FACTS):
+                if similarity >= DOMAIN_MIN_SIMILARITY and str(fact.id) not in seen:
+                    facts.append(fact)
+                    seen.add(str(fact.id))
+            voice = await _find_voice_samples(db, user_id, job_vector, exclude_ids=exclude_proposal_ids)
     return Evidence(facts=facts, voice_samples=voice, warnings=warnings)

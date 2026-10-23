@@ -67,7 +67,11 @@ def test_format_facts_includes_id_kind_and_detail():
 @pytest.mark.asyncio
 async def test_select_evidence_covers_needs_adds_anchor_floor_and_voice():
     a, b, c, anchor = _fact("a", 0.9), _fact("b", 0.5), _fact("c", 0.8), _fact("anchor", 0.7)
-    results = {1.0: [(a, 0.9), (b, 0.8)], 2.0: [(a, 0.85), (c, 0.7)], 3.0: [(anchor, 0.81)]}
+    domain, weak = _fact("domain", 0.6), _fact("weak", 0.6)
+    results = {
+        1.0: [(a, 0.9), (b, 0.8)], 2.0: [(a, 0.85), (c, 0.7)], 3.0: [(anchor, 0.81)],
+        4.0: [(domain, 0.5), (a, 0.45), (weak, 0.2)],
+    }
 
     async def fake_search(db, user_id, query_embedding, limit=8, status="approved"):
         return results[query_embedding[0]][:limit]
@@ -83,7 +87,8 @@ async def test_select_evidence_covers_needs_adds_anchor_floor_and_voice():
         )
     assert embed.call_args_list[0].args[0] == ["need one", "need two", "160-server migration"]
     assert embed.call_args_list[1].args[0] == ["need one\nneed two"]
-    assert [f.id for f in result.facts] == ["a", "c", "b", "anchor"]
+    # The whole-job search adds the on-domain fact; "a" is already in and "weak" is past DOMAIN_FACTS.
+    assert [f.id for f in result.facts] == ["a", "c", "b", "anchor", "domain"]
     assert result.voice_samples == voice
     assert find_voice.call_args.args[1] == "u1"
     assert find_voice.call_args.args[2] == [4.0]
@@ -288,3 +293,22 @@ def test_format_facts_keeps_every_fact_at_maximum_field_sizes():
     ]
     out = format_facts(facts)
     assert all(f'"id": "f{i}"' in out for i in range(ev.MAX_FACTS))
+
+
+@pytest.mark.asyncio
+async def test_select_evidence_skips_weak_domain_match():
+    a, weak = _fact("a"), _fact("weak")
+    brief = JobBrief(
+        needs=["need one"], job_types=[], client_signals={}, mirror_phrases=[],
+        explicit_asks=[], questions=[], title="Inspection app", description="Maintain our Flutter app",
+    )
+
+    async def fake_search(db, user_id, query_embedding, limit=8, status="approved"):
+        return {1.0: [(a, 0.9)], 2.0: [(weak, ev.DOMAIN_MIN_SIMILARITY - 0.01)]}[query_embedding[0]][:limit]
+
+    embed = AsyncMock(side_effect=[[[1.0]], [[2.0]]])
+    with patch.object(ev, "generate_embeddings_batch", embed), \
+         patch.object(ev, "search_facts", AsyncMock(side_effect=fake_search)), \
+         patch.object(ev, "_find_voice_samples", AsyncMock(return_value=[])):
+        result = await select_evidence(None, "u1", brief, None)
+    assert [f.id for f in result.facts] == ["a"]
