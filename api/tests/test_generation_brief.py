@@ -22,6 +22,7 @@ MODEL_OUTPUT = {
     },
     "mirror_phrases": ["zero downtime cutover"],
     "explicit_asks": ['Start your reply with "Azure"'],
+    "domain": "  database migration  ",
 }
 
 
@@ -50,6 +51,7 @@ async def test_build_job_brief_uses_extraction_model_and_keeps_questions_verbati
     assert brief.mirror_phrases == ["zero downtime cutover"]
     assert brief.title == "Azure SQL migration"
     assert brief.description == "We need a zero downtime cutover of 40 databases."
+    assert brief.domain == "database migration"
 
 
 @pytest.mark.asyncio
@@ -110,3 +112,19 @@ async def test_brief_prompt_caps_neutralised_fields_at_their_request_limits():
     post = user.split("<job_post>\n", 1)[1].split("\n</job_post>", 1)[0]
     assert len(title) == MAX_GEN_TITLE
     assert len(post) == MAX_GEN_DESCRIPTION
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("domain,expected", [(None, ""), (42, ""), ("x" * 500, "x" * 80)])
+async def test_build_job_brief_domain_is_a_short_string(domain, expected):
+    output = dict(MODEL_OUTPUT, domain=domain)
+    with patch("app.services.generation.brief.structured_call", AsyncMock(return_value=output)):
+        brief = await build_job_brief(title="t", description="d", skills=[], questions=[])
+    assert brief.domain == expected
+
+
+def test_stored_briefs_without_a_domain_still_load():
+    stored = {k: v for k, v in JobBrief(
+        needs=["n"], job_types=[], client_signals={}, mirror_phrases=[], explicit_asks=[], questions=[],
+    ).model_dump().items() if k != "domain"}
+    assert JobBrief.model_validate(stored).domain == ""

@@ -8,6 +8,7 @@ from app.services.untrusted import neutralise
 
 JOB_TYPES = ["cto", "saas", "sql", "cloud", "ai", "fullstack"]
 MAX_NEEDS = 6
+MAX_DOMAIN_CHARS = 80
 
 
 def _str_list(description: str) -> dict:
@@ -37,8 +38,9 @@ BRIEF_SCHEMA: dict = {
         },
         "mirror_phrases": _str_list("Up to 6 of the client's own distinctive phrases, copied exactly"),
         "explicit_asks": _str_list("Every direct instruction to applicants, near-verbatim"),
+        "domain": {"type": "string", "description": "The client's industry or product domain in 2-5 plain words"},
     },
-    "required": ["needs", "job_types", "client_signals", "mirror_phrases", "explicit_asks"],
+    "required": ["needs", "job_types", "client_signals", "mirror_phrases", "explicit_asks", "domain"],
     "additionalProperties": False,
 }
 
@@ -50,7 +52,8 @@ The job title, skills, post and screening questions arrive inside <job_title>, <
 - job_types: every label that applies. cto = leadership, architecture, advisory, audits, fractional CTO. saas = building a new product or MVP. sql = database design, migration, tuning. cloud = Azure/AWS/GCP infrastructure, DevOps. ai = LLMs, RAG, ML, automation. fullstack = web or app development.
 - client_signals.complexity: "terse" for short, simple posts; "complex" for long, multi-part or leadership posts; otherwise "standard". technical_depth is how technical the client is. tone is how they write (e.g. "casual and rushed", "formal and detailed"). worries: what they are anxious about. red_flags: scope, budget or fit concerns for the freelancer.
 - mirror_phrases: up to 6 of the client's own distinctive words or phrases worth echoing, copied exactly.
-- explicit_asks: every direct instruction to applicants (e.g. 'start your reply with "blue"', 'include your GitHub link'), copied as close to verbatim as possible, keeping any quoted words in double quotes. Empty list if none."""
+- explicit_asks: every direct instruction to applicants (e.g. 'start your reply with "blue"', 'include your GitHub link'), copied as close to verbatim as possible, keeping any quoted words in double quotes. Empty list if none.
+- domain: the client's industry or product domain in 2-5 plain words (e.g. "fire safety inspections", "aviation pilot training", "hotel and wellness", "auto parts resale"). No technology names and no generic words like SaaS, app, platform or software. Empty string when the post names no industry."""
 
 
 def _strings(values) -> list[str]:
@@ -69,6 +72,7 @@ class JobBrief(BaseModel):
     questions: list[str]
     title: str = ""
     description: str = ""
+    domain: str = ""  # used only to search facts, never shown to the writer
 
 
 async def build_job_brief(
@@ -105,4 +109,5 @@ async def build_job_brief(
         questions=list(questions),
         title=title,
         description=description,
+        domain=data.get("domain").strip()[:MAX_DOMAIN_CHARS] if isinstance(data.get("domain"), str) else "",
     )

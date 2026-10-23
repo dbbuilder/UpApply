@@ -22,11 +22,11 @@ MIN_FACTS = 4
 MAX_FACTS = 8
 FILL_MIN_SCORE = 0.55
 ANCHOR_MIN_SIMILARITY = 0.75
-# Whole-job search: the facts closest to the post as a whole, so a product in the client's own
-# domain (inspection software for an inspection platform) reaches the writer even when no single
-# need names it. A long post scores lower against a short fact than a need does, hence the floor.
+# Domain search: the facts closest to the brief's domain phrase ("fire safety inspections"), so a
+# product in the client's own domain reaches the writer even when no single need names it. The whole
+# post and the title are too diffuse: generic SaaS facts outrank the on-domain ones (round 4 probe).
 DOMAIN_FACTS = 2
-DOMAIN_MIN_SIMILARITY = 0.35
+DOMAIN_MIN_SIMILARITY = 0.45
 VOICE_SAMPLE_LIMIT = 3
 VOICE_AUTHORS = ("chris", "chris_edited_ai")
 OUTCOME_BOOST = {"hired": 0.15, "interviewed": 0.10, "replied": 0.08, "viewed": 0.02}
@@ -193,12 +193,16 @@ async def select_evidence(
     warnings: list[str] = []
     if voice_query:
         try:
-            job_vector = (await generate_embeddings_batch([voice_query]))[0]
+            domain_text = _clip_for_embedding(brief.domain.strip())
+            job_vectors = await generate_embeddings_batch([voice_query, domain_text] if domain_text else [voice_query])
+            job_vector = job_vectors[0]
+            domain_vector = job_vectors[1] if domain_text else None
         except Exception as exc:
             logger.warning("Voice-sample query embedding failed: %s", type(exc).__name__)
             warnings.append(VOICE_UNAVAILABLE_WARNING)
         else:
-            for fact, similarity in await search_facts(db, user_id, job_vector, limit=DOMAIN_FACTS):
+            domain = await search_facts(db, user_id, domain_vector, limit=DOMAIN_FACTS) if domain_vector else []
+            for fact, similarity in domain:
                 if similarity >= DOMAIN_MIN_SIMILARITY and str(fact.id) not in seen:
                     facts.append(fact)
                     seen.add(str(fact.id))
