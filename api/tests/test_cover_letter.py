@@ -338,3 +338,21 @@ def test_system_prompt_carries_ab_feedback_rules():
     assert "NEVER open with a quote from the posting" in prompt
     assert "one-line paragraph that ends in a comma or colon" in prompt
     assert "not specific" in prompt
+
+
+@pytest.mark.parametrize("draft", [
+    "Body.\n\nWarm regards,\nChris",
+    "Body.\n\nWarm regards,\nChris Therriault",
+    "Body.\n\nWarm regards,\n\nChris",
+])
+def test_append_closing_drops_a_model_signature_with_its_signoff(draft):
+    assert append_closing(draft, "Regards,") == "Body.\n\nRegards,"
+    assert append_closing(clean_cover_letter(draft), "Regards,").count("Regards,") == 1
+
+
+def test_append_closing_name_only_without_model_signoff_adds_a_default():
+    assert append_closing("Body.", "Chris") == "Body.\n\nRegards,\n\nChris"
+
+
+def test_append_closing_keeps_a_short_capitalised_last_line_that_is_not_a_signature():
+    assert append_closing("Body.\n\nAcme Corp", "Regards,") == "Body.\n\nAcme Corp\n\nRegards,"

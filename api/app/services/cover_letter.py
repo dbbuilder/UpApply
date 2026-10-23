@@ -67,14 +67,26 @@ def is_signoff_line(line: str) -> bool:
     return _signoff_rest(line, CLOSING_SIGNOFFS) in ("", ",")
 
 
+def _is_signature_line(line: str) -> bool:
+    """A short name-only line ("Chris", "Chris Therriault"): 1-4 capitalised words, no sentence punctuation."""
+    words = line.strip().split()
+    return 0 < len(words) <= 4 and not line.strip()[-1] in ".!?:;," and all(w[0].isupper() for w in words)
+
+
 def split_trailing_signoffs(text: str) -> tuple[str, Optional[str]]:
-    """Drop every trailing bare sign-off line (a model-written "Warm regards," possibly
-    repeated); return the body and the last sign-off line dropped, if any."""
+    """Drop every trailing sign-off (a model-written "Warm regards," possibly repeated, and a
+    signature name line right under one); return the body and the last sign-off line dropped."""
     lines = text.rstrip().split("\n")
     signoff = None
-    while len(lines) > 1 and is_signoff_line(lines[-1]):
-        signoff = signoff or lines[-1].strip()
-        lines.pop()
+    while len(lines) > 1:
+        prev = [i for i, line in enumerate(lines[:-1]) if line.strip()]
+        if is_signoff_line(lines[-1]):
+            signoff = signoff or lines[-1].strip()
+            lines.pop()
+        elif prev and len(lines) > 2 and _is_signature_line(lines[-1]) and is_signoff_line(lines[prev[-1]]):
+            lines.pop()  # the model's signature under its own sign-off; the sign-off goes next
+        else:
+            break
         while lines and not lines[-1].strip():
             lines.pop()
     return "\n".join(lines).rstrip(), signoff
@@ -464,11 +476,12 @@ def append_prototype_url(content: str, url: Optional[str]) -> str:
 def append_closing(content: str, closing: Optional[str]) -> str:
     """End the letter with one sign-off: any model-written sign-off lines are dropped and the
     user's preferred closing is appended once. A closing that is only a name keeps the
-    model's sign-off above it."""
+    model's sign-off above it, or "Regards," when the model wrote none."""
     body, signoff = split_trailing_signoffs(content)
     closing = (closing or "").strip()
     if closing and not is_signoff_line(closing.split("\n")[0]):
-        closing = f"{signoff}\n\n{closing}" if signoff else closing
+        # A name-only closing still gets a sign-off above it: the model's, or a plain default.
+        closing = f"{signoff or 'Regards,'}\n\n{closing}"
     closing = closing or signoff
     return f"{body}\n\n{closing}" if closing else body
 
