@@ -314,12 +314,14 @@ def _check_round2(body: str) -> list[Issue]:
 # Round-3 / de-AI checks. They run only for users with a voice kit, which supplies the lists.
 _DASHES = ("\u2014", "\u2013")
 _EMOJI = re.compile(
-    "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF\U00002190-\U000021FF\u2B50\u2705\u26A0]"
+    "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF\U00002190-\U000021FF\u2B50\u2705\u26A0\u20E3]"  # \u20E3: the keycap in "1\ufe0f\u20e3"
 )
 _SEES_CLIENT_MATERIAL = re.compile(
-    r"\b(?:share|sharing|shared|access to|review|reviewing|look at|looking at|read through|walk me through|audit)\b"
+    r"\b(?:share|sharing|shared|access to|review|reviewing|look at|looking at|read through|walk me through|audit|"
+    r"inspect|inspecting|examine|go through|dig into)\b"
     r"(?:\W+\w+){0,5}?\W+(?:repo|repos|repository|repositories|codebase|code base|source code|code|documents|"
-    r"documentation|files|data|database|schema)\b",
+    r"documentation|files|data|database|schema)\b"
+    r"|\bcode (?:review|audit)\b",
     re.IGNORECASE,
 )
 _NDA = re.compile(r"\bNDA\b|non-disclosure", re.IGNORECASE)
@@ -362,12 +364,12 @@ def _check_voice_kit(body: str, answers: list[dict], voice: dict) -> list[Issue]
                 f'Do not name "{name}"; write "{instead}".', "company_name", f"{name} -> {instead}",
             ))
 
-    paragraphs = [p.strip() for p in _PARAGRAPH_SPLIT.split(body) if p.strip()]
     offer = (((rules.get("closing") or {}).get("call_offer")) or DEFAULT_OFFER_STEM).strip().rstrip(".\u2026 ")
-    if paragraphs and offer.lower() in paragraphs[-1].lower():
-        last = paragraphs[-1]
-        tail = last[last.lower().index(offer.lower()):]
-        sentence, _, after = tail.partition(". ")
+    if offer.lower() in body.lower():
+        # From the last offer to the end of the body, so a paragraph after the offer counts too.
+        tail = body[body.lower().rindex(offer.lower()):].strip()
+        sentence, *rest = re.split(r"(?<=[.!?])\s+", tail, maxsplit=1)
+        after = rest[0] if rest else ""
         if after.strip() or len(sentence.split()) > OFFER_SENTENCE_MAX_WORDS:
             violations.append(Issue(
                 "The close must end on the call offer, kept short, with nothing after it.", "close_after_offer",

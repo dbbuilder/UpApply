@@ -230,7 +230,7 @@ def test_batch_sameness_flags_a_repeated_opening_formula_but_not_the_fixed_offer
     offer = "I would be happy to jump on a quick call at no cost or obligation"
     letters = [
         f"{topic} rarely fails where you would expect it to. The work is underneath.\n\n"
-        f"Proof paragraph about {topic} work.\n\n{offer} {tail}.\n\nRegards,"
+        f"Proof paragraph about {topic} work.\n\n{offer} {tail}.\n\nWarm regards,\nChris Therriault"
         for topic, tail in (
             ("Inspection software", "about the platform"), ("Payroll reporting", "to compare notes"),
             ("Video automation", "about your vision"), ("Legacy SQL", "once you have a moment"),

@@ -291,12 +291,17 @@ def batch_sameness(letters: list[str], ignore: tuple[str, ...] = ()) -> list[str
     """Four-word phrases that recur in the opening or closing paragraph of many letters in one
     batch. One letter never shows it, but a judge reading twenty does (round 3). `ignore` holds
     fixed wording that is meant to repeat, such as the call offer."""
+    from app.services.cover_letter import is_signoff_line
+
     floor = max(3, round(len(letters) * SAMENESS_MIN_SHARE))
     found = []
     for part, index in (("opening", 0), ("close", -1)):
         counts: Counter = Counter()
         for letter in letters:
-            paras = [p.strip() for p in re.split(r"\n\s*\n", letter) if len(p.split()) >= 4]
+            paras = [
+                p.strip() for p in re.split(r"\n\s*\n", letter)
+                if len(p.split()) >= 4 and not is_signoff_line(p.strip().splitlines()[0])
+            ]
             if not paras:
                 continue
             para = paras[index].lower()

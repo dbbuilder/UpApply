@@ -512,3 +512,14 @@ def test_nda_offer_needed_when_their_code_comes_up():
         extra=f" If you share the repo, I will review it first, and I am glad to sign an NDA.\n\n{OFFER} after that review."
     )
     assert "nda_offer" not in _codes(check_rules(with_nda, _brief(), None, voice=KIT))
+
+
+def test_close_after_offer_catches_a_paragraph_after_the_offer():
+    letter = _letter(extra=f"\n\n{OFFER} to talk it through.\n\nI am glad to sign an NDA as well.")
+    assert "close_after_offer" in _codes(check_rules(letter, _brief(), None, voice=KIT))
+
+
+@pytest.mark.parametrize("phrase", ["I can inspect your code first.", "A short code review comes first."])
+def test_nda_offer_covers_other_ways_of_seeing_their_code(phrase):
+    letter = _letter(extra=f" {phrase}\n\n{OFFER} after that.")
+    assert "nda_offer" in _codes(check_rules(letter, _brief(), None, voice=KIT))
