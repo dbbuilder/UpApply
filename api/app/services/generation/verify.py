@@ -85,9 +85,17 @@ _ASK_WINDOW = 40
 # client an easy out ("If this sounds like the right fit, ...").
 _EXIT_CAVEAT = re.compile(r"\bif (this|that)\b", re.IGNORECASE)
 # "also" demotes a credential or role: "I am also a technical founder", "I also hold an MBA".
+# A credential or role word must follow within a few words, so "I also have a migration
+# plan" or "I am also a fan of ..." are not flagged.
+_CREDENTIAL_WORDS = (
+    r"(?:MBA|MCSD|degree|degrees|certification|certifications|certificate|credential|credentials|license|"
+    r"licence|BS|BA|MS|MSc|PhD|founder|co-founder|CTO|CEO|CIO|president|owner|architect|engineer|developer|"
+    r"consultant|advisor|adviser|director|lead|manager|certified|licensed|accredited)"
+)
 _ALSO_CREDENTIAL = re.compile(
-    r"\bI(?:\s+am|['’]m|\s+was)\s+also\s+(?:a|an|the|certified|licensed|accredited)\b"
-    r"|\bI\s+also\s+(?:hold|held|have|earned|completed)\s+(?:a|an|the|my)\b"
+    r"\bI(?:\s+am|['’]m|\s+was)\s+also\s+(?:(?:a|an|the|my)\s+)?(?:[\w-]+\s+){0,3}" + _CREDENTIAL_WORDS + r"\b"
+    r"|\bI\s+also\s+(?:hold|held|have|earned|completed)\s+(?:(?:a|an|the|my)\s+)?(?:[\w-]+\s+){0,3}"
+    + _CREDENTIAL_WORDS + r"\b"
     r"|\bI\s+also\s+(?:serve|served|work|worked)\s+as\b",
 )
 # Technologies that must not pile up in the first sentence (stacks change). React, Node
@@ -383,7 +391,9 @@ async def check_claims(draft: "Draft", evidence: Evidence) -> list[str]:
         return [CLAIM_CHECK_SKIPPED]
     # A flagged claim must quote the draft. Spans that are not in the draft are the checker
     # reporting evidence the draft left out, which is allowed (and pushing it back in adds detail).
-    drafted = _norm_span(f"{draft.cover_letter}\n{answers}")
+    drafted = _norm_span("\n".join(
+        [draft.cover_letter or ""] + [str(item.get("answer", "")) for item in draft.screening_answers]
+    ))  # the letter and Chris's answers only: a credential named in a client's question doesn't count
     return [
         Issue(f"Unsupported claim: {item['claim']} ({item['reason']})", "unsupported_claim",
               f"{item['claim']} ({item['reason']})")

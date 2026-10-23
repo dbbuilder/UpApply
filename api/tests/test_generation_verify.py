@@ -434,3 +434,25 @@ async def test_check_claims_keeps_a_real_span_despite_case_quotes_and_fencing():
 def test_claims_prompt_says_omission_is_not_a_problem():
     from app.services.generation.verify import CLAIMS_SYSTEM
     assert "do not report evidence the draft omits or understates" in CLAIMS_SYSTEM
+
+
+@pytest.mark.parametrize("sentence,flag", [
+    ("I am also a technical founder who sold a SaaS company.", True),
+    ("I also hold an MBA.", True),
+    ("I'm also a certified Azure architect.", True),
+    ("I also have a migration plan ready for week one.", False),
+    ("I am also a fan of incremental rollouts.", False),
+])
+def test_also_credential_needs_a_credential_or_role_word(sentence, flag):
+    from app.services.generation.verify import _ALSO_CREDENTIAL
+    assert bool(_ALSO_CREDENTIAL.search(sentence)) is flag
+
+
+@pytest.mark.asyncio
+async def test_check_claims_ignores_spans_that_only_appear_in_a_screening_question():
+    draft = SimpleNamespace(cover_letter="Body.", screening_answers=[
+        {"question": "Do you hold an AWS Solutions Architect certification?", "answer": "Not that one; Azure is my focus."}])
+    call = AsyncMock(return_value={"unsupported_claims": [
+        {"claim": "AWS Solutions Architect certification", "reason": "omitted"}]})
+    with patch("app.services.generation.verify.structured_call", call):
+        assert await check_claims(draft, Evidence(facts=[FACT])) == []
