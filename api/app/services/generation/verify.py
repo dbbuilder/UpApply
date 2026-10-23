@@ -7,7 +7,7 @@ import unicodedata
 from typing import TYPE_CHECKING, NamedTuple, Optional
 
 from app.core.config import settings
-from app.services.cover_letter import BANNED_PHRASES
+from app.services.cover_letter import BANNED_PHRASES, is_signoff_line
 from app.services.generation.brief import JobBrief
 from app.services.generation.evidence import Evidence, format_facts
 from app.services.llm import structured_call
@@ -26,6 +26,7 @@ CLAIM_CHECK_SKIPPED = "Claim check skipped (verifier unavailable) - review speci
 REPAIR_CODES = (
     "missing_answer", "banned_phrase", "starts_with_i", "salutation", "closing", "length",
     "explicit_ask", "unsupported_claim", "missing_prototype_url", "answer_rules", "too_few_specifics",
+    "quote_in_opening", "dangling_paragraph", "happy_to", "duplicate_closing",
 )
 
 
@@ -63,6 +64,9 @@ def repair_note(warning: str) -> RepairNote:
 _SALUTATION = re.compile(r"^(hello|hi|hey|dear|greetings|good (morning|afternoon|evening)|subject:)\b", re.IGNORECASE)
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 _STARTS_WITH_I = re.compile(r"^[\"'“‘(\-–—*\s]*I\b")
+_HAPPY_TO = re.compile(r"^[\"'“‘(\-–—*\s]*happy to\b", re.IGNORECASE)
+_DOUBLE_QUOTES = ('"', "“", "”")
+_PARAGRAPH_SPLIT = re.compile(r"\n\s*\n")
 # The inner class excludes opening quotes too, so an unclosed run cannot rescan (linear).
 _QUOTED = re.compile(r"[\"“]([^\"“”]+)[\"”]")
 # A quoted span is a required word only when the words just before it ask for it
@@ -111,8 +115,10 @@ def length_band(brief: JobBrief) -> tuple[int, int]:
 
 
 def expected_closing(preferred_closing: Optional[str]) -> str:
+    """A preferred closing that opens with its own sign-off ("Regards,") is used as is,
+    so the letter carries one sign-off; a bare name gets "Warm regards," above it."""
     closing = (preferred_closing or "").strip()
-    if closing.lower().startswith("warm regards"):
+    if is_signoff_line(closing.split("\n")[0]) or closing.lower().startswith("warm regards"):
         return closing
     return f"{WARM_REGARDS}\n{closing}" if closing else WARM_REGARDS
 
@@ -142,6 +148,9 @@ def check_answer_rules(screening_answers: list[dict]) -> list[Issue]:
         if _STARTS_WITH_I.match(answer):
             problem = 'opens with "I"; its first word must not be "I".'
             violations.append(Issue(f'Answer to "{label}" {problem}', "answer_rules", f'Answer to "{label}" {problem}'))
+        if any(_HAPPY_TO.match(s) for s in _sentences(answer)):
+            problem = 'has a sentence starting "Happy to"; write "I would be happy to ...".'
+            violations.append(Issue(f'Answer to "{label}" {problem}', "happy_to", f'Answer to "{label}" {problem}'))
         lowered = answer.lower()
         for phrase in BANNED_PHRASES:
             if phrase.lower() in lowered:
@@ -205,6 +214,31 @@ def check_specifics(fact_ids_used: list[str], facts: list) -> list[str]:
     )]
 
 
+def _check_shape(letter: str, body: str) -> list[Issue]:
+    """Chris's A/B feedback: no quoted opening, no dangling one-line paragraphs, no
+    "Happy to ..." sentences, and one sign-off."""
+    violations: list[Issue] = []
+    paragraphs = [p.strip() for p in _PARAGRAPH_SPLIT.split(body) if p.strip()]
+    if paragraphs and any(q in paragraphs[0] for q in _DOUBLE_QUOTES):
+        violations.append(Issue(
+            "The first paragraph quotes the job post; paraphrase it instead.", "quote_in_opening", paragraphs[0][:120],
+        ))
+    for paragraph in paragraphs:
+        if "\n" not in paragraph and paragraph.endswith((",", ":")) and not is_signoff_line(paragraph):
+            violations.append(Issue(
+                f'One-line paragraph ends in "{paragraph[-1]}": "{paragraph[:80]}"', "dangling_paragraph", paragraph[:80],
+            ))
+    for sentence in _sentences(body):
+        if _HAPPY_TO.match(sentence):
+            violations.append(Issue(
+                f'Sentence starts with "Happy to"; write "I would be happy to ...": "{sentence[:80]}"', "happy_to",
+                sentence[:80],
+            ))
+    if sum(1 for line in letter.splitlines() if is_signoff_line(line)) > 1:
+        violations.append(Issue("The sign-off appears more than once; keep only the closing.", "duplicate_closing"))
+    return violations
+
+
 def check_rules(
     text: str,
     brief: JobBrief,
@@ -230,6 +264,8 @@ def check_rules(
     opening = next(iter(_sentences(body)), "")
     if _STARTS_WITH_I.match(opening):
         violations.append(Issue(f'Letter must not open with "I": "{opening[:80]}"', "starts_with_i", opening[:80]))
+
+    violations.extend(_check_shape(stripped, body))
 
     lowered = body.lower()
     for phrase in BANNED_PHRASES:
