@@ -27,6 +27,7 @@ REPAIR_CODES = (
     "missing_answer", "banned_phrase", "starts_with_i", "salutation", "closing", "length",
     "explicit_ask", "unsupported_claim", "missing_prototype_url", "answer_rules", "too_few_specifics",
     "quote_in_opening", "dangling_paragraph", "happy_to", "duplicate_closing",
+    "exit_caveat", "also_credential", "stack_in_opening",
 )
 
 
@@ -79,7 +80,40 @@ _REQUIRES_QUOTE = re.compile(
 # 'Do not use the phrase "I am excited"': the quoted span must be ABSENT.
 _NEGATED = re.compile(r"\b(do not|don't|dont|never|avoid|without|must not|should not|shouldn't|refrain)\b", re.IGNORECASE)
 _CLAUSE_END = re.compile(r"[.;!?]")
-_ASK_WINDOW = 40  # longest keyword ("codeword") plus ':' / ',' and spacing before a quote
+_ASK_WINDOW = 40
+# Round-2 A/B notes (2026-10-23). An "If this/that ..." conditional in the close gives the
+# client an easy out ("If this sounds like the right fit, ...").
+_EXIT_CAVEAT = re.compile(r"\bif (this|that)\b", re.IGNORECASE)
+# "also" demotes a credential or role: "I am also a technical founder", "I also hold an MBA".
+_ALSO_CREDENTIAL = re.compile(
+    r"\bI(?:\s+am|['’]m|\s+was)\s+also\s+(?:a|an|the|certified|licensed|accredited)\b"
+    r"|\bI\s+also\s+(?:hold|held|have|earned|completed)\s+(?:a|an|the|my)\b"
+    r"|\bI\s+also\s+(?:serve|served|work|worked)\s+as\b",
+)
+# Technologies that must not pile up in the first sentence (stacks change). React, Node
+# and .NET are case-sensitive so "teams react", "each node" and a ".net" domain do not count.
+_STACK_TERMS = {
+    "React": re.compile(r"\bReact\b"),
+    "Next.js": re.compile(r"\bNext\.?js\b", re.IGNORECASE),
+    "TypeScript": re.compile(r"\bTypeScript\b", re.IGNORECASE),
+    "Supabase": re.compile(r"\bSupabase\b", re.IGNORECASE),
+    "Node": re.compile(r"\bNode(?:\.js)?\b"),
+    "Python": re.compile(r"\bPython\b", re.IGNORECASE),
+    ".NET": re.compile(r"\.NET\b"),
+    "C#": re.compile(r"\bC#", re.IGNORECASE),
+    "Postgres": re.compile(r"\bPostgres(?:QL)?\b", re.IGNORECASE),
+    "SQL Server": re.compile(r"\bSQL Server\b", re.IGNORECASE),
+    "Azure": re.compile(r"\bAzure\b", re.IGNORECASE),
+    "AWS": re.compile(r"\bAWS\b", re.IGNORECASE),
+    "GCP": re.compile(r"\bGCP\b", re.IGNORECASE),
+    "Flutter": re.compile(r"\bFlutter\b", re.IGNORECASE),
+    "Vue": re.compile(r"\bVue(?:\.js)?\b", re.IGNORECASE),
+    "Django": re.compile(r"\bDjango\b", re.IGNORECASE),
+    "Laravel": re.compile(r"\bLaravel\b", re.IGNORECASE),
+    "Claude": re.compile(r"\bClaude\b", re.IGNORECASE),
+    "OpenAI": re.compile(r"\bOpenAI\b", re.IGNORECASE),
+}
+STACK_IN_OPENING_MAX = 2  # longest keyword ("codeword") plus ':' / ',' and spacing before a quote
 ANSWER_SENTENCES = (2, 5)
 
 CLAIMS_SCHEMA: dict = {
@@ -239,6 +273,33 @@ def _check_shape(letter: str, body: str) -> list[Issue]:
     return violations
 
 
+def _check_round2(body: str) -> list[Issue]:
+    """Chris's round-2 A/B notes: no escape-hatch conditional in the close, no "also" on a
+    credential, and no stack list in the first sentence."""
+    violations: list[Issue] = []
+    paragraphs = [p.strip() for p in _PARAGRAPH_SPLIT.split(body) if p.strip()]
+    if paragraphs:
+        for sentence in _sentences(paragraphs[-1]):
+            if _EXIT_CAVEAT.search(sentence):
+                violations.append(Issue(
+                    f'The closing paragraph hedges with a conditional; keep the invitation without it: "{sentence[:80]}"',
+                    "exit_caveat", sentence[:120],
+                ))
+    match = _ALSO_CREDENTIAL.search(body)
+    if match:
+        violations.append(Issue(
+            f'"also" demotes a credential; state it plainly: "{match.group(0)}"', "also_credential", match.group(0),
+        ))
+    opening = next(iter(_sentences(body)), "")
+    named = [label for label, pattern in _STACK_TERMS.items() if pattern.search(opening)]
+    if len(named) > STACK_IN_OPENING_MAX:
+        violations.append(Issue(
+            f"The first sentence leads with the stack ({', '.join(named)}); open on the problem instead.",
+            "stack_in_opening", opening[:120],
+        ))
+    return violations
+
+
 def check_rules(
     text: str,
     brief: JobBrief,
@@ -266,6 +327,7 @@ def check_rules(
         violations.append(Issue(f'Letter must not open with "I": "{opening[:80]}"', "starts_with_i", opening[:80]))
 
     violations.extend(_check_shape(stripped, body))
+    violations.extend(_check_round2(body))
 
     lowered = body.lower()
     for phrase in BANNED_PHRASES:
