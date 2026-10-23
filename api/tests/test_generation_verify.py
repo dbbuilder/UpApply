@@ -41,6 +41,8 @@ def test_expected_closing_variants():
     assert expected_closing(None) == "Warm regards,"
     assert expected_closing("Chris") == "Warm regards,\nChris"
     assert expected_closing("Warm regards,\nChris T.") == "Warm regards,\nChris T."
+    assert expected_closing("Regards,") == "Regards,"
+    assert expected_closing("Best regards,\nChris") == "Best regards,\nChris"
 
 
 def test_missing_closing_is_flagged():
@@ -286,3 +288,64 @@ def test_issue_survives_copy_and_pickle():
     for clone in (copy.copy(issue), copy.deepcopy([issue])[0], pickle.loads(pickle.dumps(issue))):
         assert isinstance(clone, Issue)
         assert (str(clone), clone.code, clone.detail) == ("Letter must end with closing.", "closing", "detail")
+
+
+def _codes(violations):
+    return {v.code for v in violations}
+
+
+@pytest.mark.parametrize("opening", [
+    'You asked for "zero downtime" on the cutover.',
+    "You asked for “zero downtime” on the cutover.",
+])
+def test_quote_in_opening_is_flagged(opening):
+    assert "quote_in_opening" in _codes(check_rules(_letter(extra="", closing="Warm regards,").replace(
+        SENTENCE, opening, 1), _brief(), None))
+
+
+def test_quote_after_the_first_paragraph_is_not_flagged():
+    letter = _letter(extra='\n\nThe phrase "zero downtime" sets the bar.')
+    assert "quote_in_opening" not in _codes(check_rules(letter, _brief(), None))
+
+
+@pytest.mark.parametrize("dangling", ["Here is how I would start:", "Three things stand out,"])
+def test_one_line_paragraph_ending_in_comma_or_colon_is_flagged(dangling):
+    letter = _letter(extra=f"\n\n{dangling}\n\nThe rollback comes first.")
+    assert "dangling_paragraph" in _codes(check_rules(letter, _brief(), None))
+
+
+def test_complete_paragraphs_and_the_signoff_are_not_dangling():
+    assert "dangling_paragraph" not in _codes(check_rules(_letter(), _brief(), None))
+    lead_in_list = _letter(extra="\n\nHere is how I would start:\n- profile the slow queries")
+    assert "dangling_paragraph" not in _codes(check_rules(lead_in_list, _brief(), None))
+    # A missing closing leaves the sign-off in the body; it is not a dangling paragraph.
+    assert "dangling_paragraph" not in _codes(check_rules(_letter(closing="Best regards,"), _brief(), None))
+
+
+def test_happy_to_sentence_is_flagged():
+    letter = _letter(extra=" Happy to jump on a quick call at no cost or obligation.")
+    assert "happy_to" in _codes(check_rules(letter, _brief(), None))
+
+
+def test_i_would_be_happy_to_is_not_flagged():
+    letter = _letter(extra=" I would be happy to jump on a quick call at no cost or obligation.")
+    assert "happy_to" not in _codes(check_rules(letter, _brief(), None))
+
+
+def test_happy_to_in_a_screening_answer_is_flagged():
+    answers = [{"question": "Availability?", "answer": "Twenty hours a week are open. Happy to start Monday."}]
+    assert "happy_to" in _codes(check_answer_rules(answers))
+    answers = [{"question": "Availability?", "answer": "Twenty hours a week are open. I would be happy to start Monday."}]
+    assert "happy_to" not in _codes(check_answer_rules(answers))
+
+
+def test_duplicate_closing_is_flagged():
+    letter = _letter(closing="Warm regards,\n\nWarm regards,")
+    assert "duplicate_closing" in _codes(check_rules(letter, _brief(), None))
+    letter = _letter(closing="Warm regards,\nRegards,")
+    assert "duplicate_closing" in _codes(check_rules(letter, _brief(), "Regards,"))
+
+
+def test_single_closing_is_not_duplicate():
+    assert "duplicate_closing" not in _codes(check_rules(_letter(closing="Warm regards,\nChris"), _brief(), "Chris"))
+    assert check_rules(_letter(closing="Regards,"), _brief(), "Regards,") == []

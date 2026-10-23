@@ -32,6 +32,7 @@ BANNED_PHRASES = [
 
 
 GENERIC_SIGNOFFS = ("sincerely", "best regards", "regards", "best", "thank you", "thanks")
+CLOSING_SIGNOFFS = ("warm regards", "kind regards") + GENERIC_SIGNOFFS
 SIGNOFF_WINDOW = 5  # sign-off + name, title, company, contact; a constant, so still linear
 
 
@@ -59,6 +60,24 @@ def strip_trailing_signoff(
         if rest is not None and accept(rest, lines[i + 1:]):
             return "\n".join(lines[:i]).rstrip()
     return "\n".join(lines)
+
+
+def is_signoff_line(line: str) -> bool:
+    """A line that is only a sign-off phrase, with an optional comma ("Warm regards,", "Regards")."""
+    return _signoff_rest(line, CLOSING_SIGNOFFS) in ("", ",")
+
+
+def split_trailing_signoffs(text: str) -> tuple[str, Optional[str]]:
+    """Drop every trailing bare sign-off line (a model-written "Warm regards," possibly
+    repeated); return the body and the last sign-off line dropped, if any."""
+    lines = text.rstrip().split("\n")
+    signoff = None
+    while len(lines) > 1 and is_signoff_line(lines[-1]):
+        signoff = signoff or lines[-1].strip()
+        lines.pop()
+        while lines and not lines[-1].strip():
+            lines.pop()
+    return "\n".join(lines).rstrip(), signoff
 
 
 def _word_chars_only(rest: str, following: List[str]) -> bool:
@@ -147,10 +166,11 @@ def build_system_prompt(profile: UserProfile, include_call_offer: bool = True) -
         always_include_block = f"\n\nPER-USER CREDENTIAL REQUIREMENTS — these are specific to this user, always include when relevant:\n{bullet_lines}"
 
     call_offer_step = (
-        "No-cost call offer — one sentence offering a free, no-commitment call to discuss the project\n"
-        '   (e.g. "Happy to jump on a quick call at no cost or obligation to talk through your requirements.")'
+        "Close with one short, inviting paragraph that is not specific (no agenda, dates, deliverables or detailed topics) "
+        "and offers the call in one sentence:\n"
+        '   "I would be happy to jump on a quick call at no cost or obligation to talk through your approach."'
         if include_call_offer
-        else "Skip the call offer — go straight to the close"
+        else "Skip the call offer — close with one short, inviting paragraph that is not specific"
     )
 
     parts.append(f"""
@@ -166,6 +186,9 @@ SENTENCE RULES (violations are a hard failure):
 - The prohibition is ONLY on the letter's opening word
 - NEVER open the letter with "Hello", "Hi", "Dear", or any salutation — start immediately with content
 - ALWAYS end the letter with exactly: "Warm regards,"
+- NEVER open with a quote from the posting — no quotation marks in the first paragraph; paraphrase the client in your own words
+- NEVER write a one-line paragraph that ends in a comma or colon (such as a lead-in to a list) — fold it into a full sentence
+- NEVER start a sentence with "Happy to" — write "I would be happy to ..."
 
 JOB PRIORITY — match the proposal emphasis AND tone to the engagement type:
 1. CTO / Technical Leadership / Senior Review — fractional CTO, architecture review, technical advisor, code audit
@@ -370,7 +393,8 @@ def build_user_prompt(
                 break
 
     call_offer_reminder = (
-        "Before the close, include one sentence offering a free, no-commitment call to discuss their project. "
+        "In the closing paragraph, offer the call as \"I would be happy to jump on a quick call at no cost or obligation ...\" "
+        "and keep that paragraph inviting, not specific. "
         if include_call_offer
         else ""
     )
@@ -431,14 +455,22 @@ def append_prototype_url(content: str, url: Optional[str]) -> str:
         f"to deliver, I created a prototype of this project at {url.strip()}. "
         "Please consider it as you review my application and how well I fit your needs."
     )
-    return f"{content}\n\n{sentence}"
+    # Keep the sign-off last: the sentence goes above a model-written "Warm regards,".
+    body, signoff = split_trailing_signoffs(content)
+    letter = f"{body}\n\n{sentence}"
+    return f"{letter}\n\n{signoff}" if signoff else letter
 
 
 def append_closing(content: str, closing: Optional[str]) -> str:
-    """Append user's preferred closing to cover letter if provided."""
-    if not closing:
-        return content
-    return f"{content}\n\n{closing}"
+    """End the letter with one sign-off: any model-written sign-off lines are dropped and the
+    user's preferred closing is appended once. A closing that is only a name keeps the
+    model's sign-off above it."""
+    body, signoff = split_trailing_signoffs(content)
+    closing = (closing or "").strip()
+    if closing and not is_signoff_line(closing.split("\n")[0]):
+        closing = f"{signoff}\n\n{closing}" if signoff else closing
+    closing = closing or signoff
+    return f"{body}\n\n{closing}" if closing else body
 
 
 @retry(

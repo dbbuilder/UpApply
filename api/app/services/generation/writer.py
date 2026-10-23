@@ -81,10 +81,13 @@ def build_writer_system(profile) -> str:
 
 HOW TO WRITE
 - The voice samples are the primary style guide: match their rhythm, sentence length, directness and vocabulary. Never copy their sentences or reuse their structure.
-- Open on the client's problem in the client's own words; use the mirror phrases where they fit naturally.
+- INTRO (the most important paragraph): open with a sharp, specific observation about the client's problem or domain in {name}'s own words: the hidden hard part, or the way this kind of work usually fails. Start the first sentence with a noun phrase or a gerund ("Messy legacy databases have a recognizable fingerprint...", "Taking a product from prototype to market is where most startups stall..."), never with "I" and never with an imperative verb. Then connect that observation to why {name} fits.
+- Never quote the job post. Paraphrase the client's wording instead of quoting it; mirror phrases may be echoed only as unquoted paraphrase where they fit naturally.
 - Prove fit with the evidence facts that answer the client's needs, using their names, numbers and outcomes exactly as stated.
+- Write credentials in the first person: "My MBA ..." rather than "The MBA ...".
 - Make one concrete "here's how I'd start" move specific to this job.
-- Then stop. There is no template: vary the shape, opening and paragraphing from letter to letter.
+- CLOSING: end the body with one short, inviting paragraph that is not specific: no agenda, dates, deliverables or detailed topics. When the CALL OFFER instruction asks for a call, offer it there as "I would be happy to jump on a quick call at no cost or obligation ..."; never write a sentence starting "Happy to".
+- Then stop. There is no template beyond the intro and closing: vary the shape and paragraphing of the middle from letter to letter.
 - Honour every explicit ask the client made of applicants' replies (a word to start with, a detail to mention) exactly, unless it conflicts with the rules here.
 
 NO FACT, NO CLAIM
@@ -94,6 +97,9 @@ NO FACT, NO CLAIM
 HARD RULES (violations are failures)
 - The first word of the letter must not be "I" (including I'm, I've, I'd, I'll); open on the client's problem instead. Later sentences may start with "I" where it reads naturally.
 - No salutation. Never start with Hello, Hi, Hey, Dear, Greetings or a Subject line; start with content.
+- No quotation marks in the first paragraph.
+- Every paragraph is complete sentences. Never write a one-sentence paragraph that ends in a comma or a colon (such as a lead-in to a list); fold a lead-in into a full sentence. The sign-off is added automatically and is exempt.
+- Never start a sentence with "Happy to"; write "I would be happy to ..." instead.
 - Do not write a sign-off, closing line or signature. The closing is added automatically.
 - No placeholders such as [Client Name].
 - Never use these phrases:
@@ -102,7 +108,7 @@ HARD RULES (violations are failures)
 SCREENING ANSWERS
 - Answer every question, in order, copying each question text exactly into the question field.
 - 2-5 sentences each. Draw on the same evidence as the letter, but prefer a different fact than the one the letter leans on when another fits.
-- Same voice. The salutation, placeholder and banned-phrase rules apply to answers too, and the first word of each answer must not be "I".""")
+- Same voice. The salutation, placeholder, banned-phrase and "Happy to" rules apply to answers too, and the first word of each answer must not be "I".""")
     return "\n\n".join(parts)
 
 
@@ -152,6 +158,10 @@ REPAIR_INSTRUCTIONS = {
     "missing_prototype_url": "Include the URL from the <prototype_url> block, written exactly.",
     "answer_rules": 'Keep each screening answer to 2-5 sentences, with no salutation, no banned phrase and a first word other than "I".',
     "too_few_specifics": "Use at least two evidence facts that answer the client's needs, stated exactly, and list their ids in fact_ids_used.",
+    "quote_in_opening": "Do not quote the job post: remove every quotation mark from the first paragraph and paraphrase in your own words.",
+    "dangling_paragraph": "Never leave a one-line paragraph ending in a comma or colon; fold it into a full sentence.",
+    "happy_to": 'Never start a sentence with "Happy to"; write "I would be happy to ..." instead.',
+    "duplicate_closing": "Do not write a sign-off or closing line; the closing is added automatically, once.",
 }
 
 
@@ -198,11 +208,11 @@ def build_writer_user_prompt(
     ]
     if include_call_offer:
         parts.append(
-            "CALL OFFER: somewhere natural near the end, offer a free, no-commitment call, "
-            "in your own words, in one sentence."
+            "CALL OFFER: in the closing paragraph, offer a quick call in one sentence worded "
+            '"I would be happy to jump on a quick call at no cost or obligation ...".'
         )
     else:
-        parts.append("CALL OFFER: Do not offer a call.")
+        parts.append("CALL OFFER: Do not offer a call; keep the closing paragraph short and inviting.")
     if prototype_url and prototype_url.strip():
         parts.append(
             "PROTOTYPE: a working prototype for this job is live at the URL below. "

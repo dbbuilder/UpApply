@@ -296,3 +296,45 @@ def test_clean_removes_four_line_signature_block():
     """Sign-off + name + title + company: the old regex stripped it, the window must too."""
     raw = "Body text.\n\nBest regards\nChris Therriault\nFounder\nServiceVision LLC"
     assert clean_cover_letter(raw) == "Body text."
+
+
+
+# ── single sign-off (Chris's A/B feedback) ───────────────────────────────────
+
+@pytest.mark.parametrize("draft", [
+    "Body.\n\nWarm regards,",
+    "Body.\n\nWarm regards,\n\nWarm regards,",
+    "Body.\n\nBest regards,",
+])
+def test_append_closing_leaves_the_preferred_closing_exactly_once(draft):
+    letter = append_closing(clean_cover_letter(draft), "Regards,")
+    assert letter == "Body.\n\nRegards,"
+    letter = append_closing(clean_cover_letter(draft), "Warm regards,\nChris")
+    assert letter == "Body.\n\nWarm regards,\nChris"
+    assert letter.count("Warm regards,") == 1
+
+
+def test_append_closing_name_only_keeps_one_model_signoff():
+    letter = append_closing("Body.\n\nWarm regards,\n\nWarm regards,", "Chris")
+    assert letter == "Body.\n\nWarm regards,\n\nChris"
+
+
+def test_append_closing_without_preferred_closing_dedupes_signoff():
+    assert append_closing("Body.\n\nWarm regards,\nWarm regards,", None) == "Body.\n\nWarm regards,"
+
+
+def test_append_prototype_url_goes_above_the_signoff():
+    letter = append_prototype_url("Body.\n\nWarm regards,", "https://demo.example.com")
+    assert letter.endswith("https://demo.example.com. Please consider it as you review my application "
+                           "and how well I fit your needs.\n\nWarm regards,")
+    assert append_closing(letter, "Regards,").count("regards,") == 0
+    assert append_closing(letter, "Regards,").endswith("your needs.\n\nRegards,")
+
+
+def test_system_prompt_carries_ab_feedback_rules():
+    prompt = build_system_prompt(_mock_profile())
+    assert "I would be happy to jump on a quick call at no cost or obligation" in prompt
+    assert "Happy to jump on" not in prompt
+    assert "NEVER open with a quote from the posting" in prompt
+    assert "one-line paragraph that ends in a comma or colon" in prompt
+    assert "not specific" in prompt

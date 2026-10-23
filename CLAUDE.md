@@ -180,12 +180,13 @@ The legacy pipeline in `api/app/services/cover_letter.py` is corpus-trained and 
 3. Claude claude-sonnet-4-6 generation (model: `legacy_cover_letter_model` setting)
 4. `clean_cover_letter()` — strips salutations, generic sign-offs (preserves "Warm regards,"), placeholders
 5. `append_prototype_url()` — appends demo URL sentence if provided
-6. `append_closing()` — appends user's `preferred_closing`
+6. `append_closing()` — drops trailing model sign-offs, then appends user's `preferred_closing` once
 
 **Key prompt rules (hard failures if violated):**
 - The first word of the letter must not be "I" (nor I'm, I've, I'd, I'll); later sentences may start with "I". Same for the first word of each screening answer (v2)
 - No salutation opening (Hello/Hi/Dear/Subject)
-- Always ends with "Warm regards,"
+- Ends with the user's preferred closing exactly once (`append_closing()` drops model-written sign-offs first)
+- Never opens with a quote from the posting; no one-line paragraph ending in a comma or colon; call offer worded "I would be happy to jump on a quick call at no cost or obligation ..." (never "Happy to ...")
 - 23 banned phrases that signal generic AI writing
 - Length: 300–450 words
 

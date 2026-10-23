@@ -97,7 +97,7 @@ async def test_writer_user_prompt_carries_job_evidence_voice_and_options():
     assert "Consolidated the distributed SQL estate." in user
     assert VOICE.cover_letter_text in user and "outcome: hired" in user
     assert "200-350 words" in user
-    assert "free, no-commitment call" in user
+    assert "I would be happy to jump on a quick call at no cost or obligation" in user
     assert "https://demo.example.com" in user
     assert "fixed-fee discovery" in user
     assert "1. Describe a similar migration." in user
@@ -273,3 +273,33 @@ async def test_writer_output_restores_fenced_ampersand():
         draft = await write_application(PROFILE, BRIEF, EVIDENCE, True, None, None)
     assert "＆" not in draft.cover_letter and "R&D budget and P&L" in draft.cover_letter
     assert [a["answer"] for a in draft.screening_answers] == ["M&A carve-out.", "Q&A calls weekly."]
+
+
+def test_writer_and_refine_systems_carry_ab_feedback_rules():
+    from app.services.generation.refine import _system_prompt
+
+    for system in (build_writer_system(PROFILE), _system_prompt(PROFILE)):
+        assert "INTRO (the most important paragraph)" in system
+        assert "noun phrase or a gerund" in system
+        assert "Never quote the job post" in system
+        assert "No quotation marks in the first paragraph." in system
+        assert "one-sentence paragraph that ends in a comma or a colon" in system
+        assert "CLOSING: end the body with one short, inviting paragraph that is not specific" in system
+        assert '"I would be happy to jump on a quick call at no cost or obligation ..."' in system
+        assert 'Never start a sentence with "Happy to"' in system
+        assert '"My MBA ..." rather than "The MBA ..."' in system
+        assert "in the client's own words" not in system
+
+
+def test_every_repair_code_has_an_instruction():
+    from app.services.generation.verify import REPAIR_CODES
+    from app.services.generation.writer import REPAIR_INSTRUCTIONS
+    assert set(REPAIR_CODES) == set(REPAIR_INSTRUCTIONS)
+
+
+def test_finalize_letter_keeps_a_signoff_style_preferred_closing_once():
+    from app.services.generation.writer import finalize_letter
+    letter = finalize_letter("Body.\n\nWarm regards,", "Regards,")
+    assert letter == "Body.\n\nRegards,"
+    assert "Warm regards" not in letter
+    assert finalize_letter("Body.\n\nWarm regards,\n\nWarm regards,", "Regards,\nChris") == "Body.\n\nRegards,\nChris"
