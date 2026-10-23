@@ -89,8 +89,8 @@ COMMIT;
    Doppler, `read -s UPAPPLY_PASSWORD && export UPAPPLY_PASSWORD` in the same shell works too
    (or omit it and the script prompts):
    ```bash
-   api/venv/bin/python scripts/ingest_chatgpt_facts.py --dry-run          # counts, no API calls
-   doppler run --project upapply --config dev -- api/venv/bin/python scripts/ingest_chatgpt_facts.py \
+   api/venv/bin/python scripts/ingest_chatgpt_facts.py working/chatgpt-export --dry-run   # counts, no API calls
+   doppler run --project upapply --config dev -- api/venv/bin/python scripts/ingest_chatgpt_facts.py working/chatgpt-export \
        --email chris@servicevision.net --source signed --limit 50        # trial, then drop --limit
    ```
 3. **Upwork proposals**: load the extension (≥1.0.18), open Upwork → Proposals, then sidebar

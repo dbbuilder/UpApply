@@ -104,16 +104,18 @@ doppler run --project upapply --config prd -- npm run build
 ### Testing
 
 ```bash
-# API - test DB: Postgres 16 + pgvector in Docker on port 55499 (one-time create, then `docker start`)
-docker run -d --name upapply-test-pg -p 55499:5432 \
-  -e POSTGRES_USER=upapply -e POSTGRES_PASSWORD=upapply -e POSTGRES_DB=upapply_test pgvector/pgvector:pg16
+# API - test DB: Postgres 16 + pgvector in Docker on port 55499
+# One-time setup only (creates and starts the container):
+#   docker run -d --name upapply-test-pg -p 55499:5432 \
+#     -e POSTGRES_USER=upapply -e POSTGRES_PASSWORD=upapply -e POSTGRES_DB=upapply_test pgvector/pgvector:pg16
+# Every later session:
 docker start upapply-test-pg
 
 # API - full suite (tests skip, not fail, when the DB is unreachable — check the skipped count)
-cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q
+(cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q)
 
 # Extension - unit tests (Vitest) and type check
-cd extension && npx vitest run && npm run type-check
+(cd extension && npx vitest run && npm run type-check)
 ```
 
 ## Database Setup

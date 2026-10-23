@@ -23,7 +23,7 @@ The v2 engine is built, merged and live behind `generation_v2` (off). Facts are 
 - Never push, open/merge PRs, call the production API, or touch the Render Postgres ipAllowList; commit locally on `feat/mdg-3-loop` only
 - Never commit the uncommitted extension version bump (extension/package.json, package-lock.json, public/manifest.json) or anything under `working/` / `docs/evals/`
 - Never flip `generation_v2`, never open or summarise `docs/evals/*/key.json` (the A/B answer key)
-- Tests: `docker start upapply-test-pg`, then `cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q` (644 passing at 64afe8a; a large skipped count means the DB is down) and `cd extension && npx vitest run && npm run type-check` (56 passing)
+- Tests: `docker start upapply-test-pg`, then `cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q` (644 passing at 64afe8a; a large skipped count means the DB is down) and `cd extension && npx vitest run && npm run type-check` (60 passing)
 
 ## Steps
 
