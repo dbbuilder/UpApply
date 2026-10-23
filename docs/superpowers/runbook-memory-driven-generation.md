@@ -73,28 +73,71 @@ COMMIT;
 
 ## 4. Load the knowledge base
 1. **Bio facts** (auto-approved, trusted): `POST /api/v1/facts/from-memories` — repeat until `remaining` is 0.
-2. **ChatGPT export**: unzip the fresh export to `working/chatgpt-export/`, then
+2. **ChatGPT export**: unzip only the conversation files to `working/chatgpt-export/` (gitignored):
+   `unzip -oq <export>.zip 'conversations*.json' -d working/chatgpt-export`.
+   By default (`--source signed`) the script sends only the **final message signed "Chris" /
+   "Chris Therriault"** in each conversation, as `chatgpt_signed_letter`: letters sent under the
+   freelancer's name, so their claims are endorsed; the first user message (usually the job post)
+   is context only. The 2026-10 export: **315 signed letters of 5,148 conversations**.
+   `--source work` sends the user's own turns from work conversations (cover letter in the title
+   or any message, plus career titles: 1,266 conversations → 1,286 items); `--source all` (alias
+   `--all`) sends everything. Personal, medical, family and how-to chats never leave the machine
+   in the default or work modes. Store the password once in
+   Doppler (`doppler secrets set UPAPPLY_PASSWORD --project upapply --config dev`; it prompts),
+   then trial a batch before the full run (re-runs skip conversations already ingested). The Doppler
+   CLI must be logged into the workplace that holds `upapply` (`doppler projects` lists it); without
+   Doppler, `read -s UPAPPLY_PASSWORD && export UPAPPLY_PASSWORD` in the same shell works too
+   (or omit it and the script prompts):
    ```bash
-   python scripts/ingest_chatgpt_facts.py --dry-run            # parse + counts, no API calls
-   UPAPPLY_PASSWORD='...' python scripts/ingest_chatgpt_facts.py --email chris@servicevision.net
+   api/venv/bin/python scripts/ingest_chatgpt_facts.py working/chatgpt-export --dry-run   # counts, no API calls
+   doppler run --project upapply --config dev -- api/venv/bin/python scripts/ingest_chatgpt_facts.py working/chatgpt-export \
+       --email chris@servicevision.net --source signed --limit 50        # trial, then drop --limit
    ```
-3. **Upwork proposals**: load the extension, open Upwork → Proposals (active + archived) and run the
-   proposal import so each detail page is scraped (full letter, answers, job text, status).
-   Then `POST /api/v1/facts/from-proposals` until `remaining` is 0.
-4. **Contracts** (optional): `POST /api/v1/facts/from-contracts` (client quotes always go to review).
+3. **Upwork proposals**: load the extension (≥1.0.18), open Upwork → Proposals, then sidebar
+   **Sync → Import → Proposals → Run** and keep the sidebar open. Each detail page is scraped for the
+   full letter, screening answers, job text and status.
+   - Upwork's proposal pages are **Nuxt 3**: `window.__NUXT__` is `{}` and the data lives in
+     `<script id="__NUXT_DATA__">` (an index-referenced payload). The extension decodes it
+     (`reviveNuxtPayload` / `proposalFromNuxtData` in `extension/src/lib/proposal-scrape.ts`) from
+     `vuex['proposal-details'].proposalDetailsV3Response`; the rendered page is the fallback.
+   - Pacing: 6–10 s between pages; on Upwork's "There was an error loading this page" toast it
+     backs off 30/60/120 s and stops after 3 throttled proposals in a row (run again later).
+   - It saves every 10 proposals, works in ~4-minute chunks the sidebar resumes automatically,
+     reads the proposal lists once per run, and skips proposals already stored complete
+     (letter ≥300 + job text ≥200 chars) — re-runs are safe and pick up where they stopped.
+   - Statuses arrive as Upwork's numeric codes ('7' = active submitted); most outcomes stay
+     unknown until those are mapped.
+   Then `POST /api/v1/facts/from-proposals` until `remaining` is 0 (10 proposals per call;
+   2026-10: 166 proposals → 1,362 candidates).
+4. **Contracts** (optional): `POST /api/v1/facts/from-contracts` until `remaining` is 0 (client
+   quotes always go to review). The Won Contracts import stores titles and dates, not client
+   feedback text, so this yields only weak role/project records today.
 5. **Review**: extension → Me → Facts. Approve/edit/reject candidates. Target 80–200 approved.
 
 ## 5. Build the golden set (read-only)
+Steps 5 and 6 read the production database directly, and Render's Postgres refuses external
+connections (empty `ipAllowList`). Open it **temporarily** for this Mac's IP, and clear it again
+straight after step 6 (the Render API key is in the Keychain as `cc:render-22eb83`, the external
+DB URL as `cc:db-5c2ea0`):
 ```bash
-cd api && doppler run --project upapply --config prd -- \
-  ./venv/bin/python ../scripts/eval_generation.py build-golden --email chris@servicevision.net
+IP=$(curl -s https://api.ipify.org); R=$(security find-generic-password -s cc:render-22eb83 -w)
+curl -X PATCH -H "Authorization: Bearer $R" -H "Content-Type: application/json" \
+  -d "{\"ipAllowList\":[{\"cidrBlock\":\"$IP/32\",\"description\":\"temp: UpApply eval\"}]}" \
+  https://api.render.com/v1/postgres/dpg-d5hnlqer433s73bskf8g-a
+# ... steps 5 and 6 ...
+curl -X PATCH -H "Authorization: Bearer $R" -H "Content-Type: application/json" \
+  -d '{"ipAllowList":[]}' https://api.render.com/v1/postgres/dpg-d5hnlqer433s73bskf8g-a
+```
+```bash
+cd api && doppler run --project upapply --config prd -- env DATABASE_URL="$(security find-generic-password -s cc:db-5c2ea0 -w)" \
+  ./venv/bin/python ../scripts/eval_generation.py build-golden --email chris@servicevision.net --out ../docs/evals/golden.json
 ```
 Needs ≥15 eligible jobs (letters you wrote/edited with the job post captured); it warns otherwise —
 scrape more proposal details first.
 
 ## 6. Blind A/B (commits nothing; ≈$0.10/job)
 ```bash
-cd api && doppler run --project upapply --config prd -- \
+cd api && doppler run --project upapply --config prd -- env DATABASE_URL="$(security find-generic-password -s cc:db-5c2ea0 -w)" \
   ./venv/bin/python ../scripts/eval_generation.py generate \
   --email chris@servicevision.net --golden ../docs/evals/golden.json
 ```

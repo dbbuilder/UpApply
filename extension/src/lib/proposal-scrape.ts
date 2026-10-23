@@ -161,3 +161,21 @@ export function proposalFromNuxtData(raw: string | null | undefined): ProposalFi
   return v3 ? proposalFieldsFromV3(v3) : null;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
+
+/**
+ * Status to store for a scraped proposal. The list page's text is human-readable and carries
+ * real outcome signals ("responded", "interviewed"); Upwork's detail-page status is an opaque
+ * numeric code the API cannot map, so it is only a last resort. "submitted" is the list's
+ * default, so an archived row says "archived" instead.
+ */
+export function pickProposalStatus(
+  listStatus: string | null | undefined,
+  detailStatus: string | null | undefined,
+  archived: boolean,
+): string {
+  const list = (listStatus ?? '').trim().toLowerCase();
+  if (list && list !== 'submitted') return list;
+  if (archived) return 'archived';
+  if (list) return list;
+  return (detailStatus ?? '').trim() || 'submitted';
+}

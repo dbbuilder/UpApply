@@ -104,12 +104,18 @@ doppler run --project upapply --config prd -- npm run build
 ### Testing
 
 ```bash
-# API - check imports work
-cd api && source venv/bin/activate
-python -c "from app.main import app; print('OK')"
+# API - test DB: Postgres 16 + pgvector in Docker on port 55499
+# One-time setup only (creates and starts the container):
+#   docker run -d --name upapply-test-pg -p 55499:5432 \
+#     -e POSTGRES_USER=upapply -e POSTGRES_PASSWORD=upapply -e POSTGRES_DB=upapply_test pgvector/pgvector:pg16
+# Every later session:
+docker start upapply-test-pg
 
-# Extension - type check
-cd extension && npm run type-check
+# API - full suite (tests skip, not fail, when the DB is unreachable — check the skipped count)
+(cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q)
+
+# Extension - unit tests (Vitest) and type check
+(cd extension && npx vitest run && npm run type-check)
 ```
 
 ## Database Setup
@@ -200,7 +206,7 @@ Each job type maps to a credential anchor in `profile.proposal_anchors`:
 Two types of memories feed cover letter generation:
 
 **Bio/Achievement memories** — curated JSON, seeded via `scripts/import_chatgpt_corpus.py --bio-only`:
-- Format: `scripts/chris_bio_memories.json` (9 entries for Chris)
+- Format: `scripts/chris_bio_memories.json` (14 entries for Chris)
 - Importance scores 0.9–1.0 so they always surface in top-N search
 
 **Past proposal memories** — extracted from ChatGPT export, seeded via `scripts/import_chatgpt_corpus.py --proposals-only`:
@@ -246,8 +252,10 @@ Located in `scripts/`:
 |--------|---------|
 | `import_chatgpt_corpus.py` | Extract past proposals + bio memories from ChatGPT export and bulk-import to UpApply API |
 | `seed_proposal_anchors.py` | SET `proposal_anchors` JSONB on a user's profile via API PUT |
-| `chris_bio_memories.json` | Chris Therriault's 9 canonical bio/achievement memories |
+| `chris_bio_memories.json` | Chris Therriault's 14 canonical bio/achievement memories |
 | `chris_proposal_anchors.json` | Chris's job-type credential routing config (cto/saas/sql/cloud/ai/fullstack + always_include) |
+| `ingest_chatgpt_facts.py` | v2: send ChatGPT export conversations to `/facts/ingest` as fact candidates. Default `--source signed`: only the final message signed "Chris" / "Chris Therriault" in each conversation, sent as `chatgpt_signed_letter` (the first user message, usually the job post, travels as context only). `--source work`: the user's own turns from work conversations (cover letter in the title or any message, plus career titles); `--source all` (alias `--all`): every conversation. `--dry-run` makes no API calls, `--limit N` caps conversations |
+| `eval_generation.py` | v2 rollout gate: `build-golden` (golden jobs from scraped proposals, read-only), `generate` (blind A/B packet, legacy vs v2), `score` (pass ≥75%) |
 
 **Usage (avoid shell `!` in passwords — use Python sys.argv injection):**
 ```python

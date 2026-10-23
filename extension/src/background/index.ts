@@ -8,7 +8,7 @@ import { logger } from '../lib/logger';
 import { apiClient } from '../lib/api-client';
 import {
   MAX_CONSECUTIVE_THROTTLED, SAVE_BATCH_SIZE, THROTTLE_PAGE_TEXT,
-  completeProposalIds, isThrottledRead, randomDetailDelayMs, takeBatch, throttleBackoffMs, RUN_BUDGET_MS, LIST_CACHE_TTL_MS, proposalFromNuxtData } from '../lib/proposal-scrape';
+  completeProposalIds, isThrottledRead, randomDetailDelayMs, takeBatch, throttleBackoffMs, RUN_BUDGET_MS, LIST_CACHE_TTL_MS, pickProposalStatus, proposalFromNuxtData } from '../lib/proposal-scrape';
 
 // A generated draft stays linked to its job's apply page for a day (Submit-click capture).
 const ACTIVE_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -989,7 +989,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 coverLetter,
                 bidAmount: nuxtBidAmount ? parseFloat(nuxtBidAmount) : null,
                 bidType: null,
-                status: nuxtStatus || (proposal._isArchived ? 'archived' : (proposal.status || 'submitted')),
+                status: pickProposalStatus(proposal.status, nuxtStatus, !!proposal._isArchived),
                 submittedAt: proposal.submittedAt,
                 wasHired,
                 screeningAnswers: nuxtAnswers.length ? nuxtAnswers : domAnswers,
