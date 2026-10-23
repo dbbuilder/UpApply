@@ -49,6 +49,37 @@ def golden_exclusions(job: dict) -> list[str]:
     return list(dict.fromkeys(str(i) for i in ids if i))
 
 
+# Facts whose provenance is the golden job's own proposal (first source or any merged source).
+GOLDEN_FACTS_DELETE = (
+    "DELETE FROM facts WHERE user_id = :uid AND (source_ref = ANY(:ids) OR EXISTS ("
+    "SELECT 1 FROM jsonb_array_elements(sources) s WHERE s->>'source_ref' = ANY(:ids)))"
+)
+
+
+def _snippets(job: dict) -> list[str]:
+    """Distinctive fragments of the golden job's own letter and post (for matching memories)."""
+    out = []
+    for text in (job.get("chris_letter"), job.get("description")):
+        t = " ".join((text or "").split())
+        if len(t) >= 120:
+            out.append(t[40:160])
+    return out
+
+
+def drop_golden_examples(job: dict, past: list[dict], memories: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Remove the golden job's own proposal from the legacy pipeline's past-proposal examples
+    and any memory that contains its letter or post, so neither side sees the answer key."""
+    ids = set(golden_exclusions(job))
+    snippets = _snippets(job)
+    kept_past = [p for p in past if str(p.get("id")) not in ids]
+
+    def leaks(m: dict) -> bool:
+        body = " ".join(((m.get("title") or "") + " " + (m.get("content") or "")).split())
+        return any(s in body for s in snippets)
+
+    return kept_past, [m for m in memories if not leaks(m)]
+
+
 def assign_sides(job_ids: list[str], seed: int) -> dict[str, dict[str, str]]:
     """Randomly place the new letter on side A or B for each job (reproducible by seed)."""
     rng = random.Random(seed)
@@ -204,7 +235,7 @@ async def build_golden(email: str, out: Path, n: int) -> None:
 
 
 async def _generate_one(email: str, job: dict) -> tuple[str, object]:
-    from sqlalchemy import select
+    from sqlalchemy import select, text
 
     from app.core.database import async_session_maker
     from app.models.user import User, UserProfile
@@ -224,11 +255,15 @@ async def _generate_one(email: str, job: dict) -> tuple[str, object]:
             db=db, user_id=user.id, job_description=job["description"], job_skills=skills,
             limit=3, successful_only=False,
         )
+        past, memories = drop_golden_examples(job, past, analysis.relevant_memories)
         old = await generate_cover_letter(
             job_title=job["title"], job_description=job["description"], job_skills=skills, budget=None,
             skill_matches=analysis.skill_matches, missing_skills=analysis.missing_skills,
-            relevant_memories=analysis.relevant_memories, profile=profile, past_proposals=past,
+            relevant_memories=memories, profile=profile, past_proposals=past,
         )
+        # Facts extracted from the golden job's own proposal would hand v2 the answer key;
+        # this session is never committed, so the delete only hides them for this job.
+        await db.execute(text(GOLDEN_FACTS_DELETE), {"uid": user.id, "ids": golden_exclusions(job)})
         new = await generate_application(
             db=db, user=user, profile=profile, title=job["title"], description=job["description"],
             skills=skills, questions=job.get("questions") or [], credit_usage=False,

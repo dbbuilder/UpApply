@@ -3,6 +3,9 @@ import csv
 import importlib.util
 from pathlib import Path
 
+import pytest
+from sqlalchemy import select, text
+
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "eval_generation.py"
 spec = importlib.util.spec_from_file_location("eval_generation", SCRIPT)
 eval_generation = importlib.util.module_from_spec(spec)
@@ -166,3 +169,58 @@ def test_select_golden_emits_harness_format_with_exclusion_ids_and_questions():
         "chris_letter": row["cover_letter_text"].strip(), "outcome": "replied",
     }
     assert eval_generation.golden_exclusions(g)  # harness will exclude its own letter
+
+
+LETTER = ("Taking a physical product from finished invention to actual commercial business is where most "
+          "hardware startups stall, and the founder needs manufacturing relationships and channel strategy.")
+POST = ("I have a physical electronic technology device that now needs to be manufactured, marketed and sold. "
+        "I need a consultant who can connect me with the right people to get startup support.")
+
+
+def test_drop_golden_examples_removes_the_jobs_own_proposal_and_leaking_memories():
+    job = {"id": "p-1", "upwork_proposal_id": "up-1", "chris_letter": LETTER, "description": POST}
+    past = [{"id": "p-1", "cover_letter_text": LETTER}, {"id": "p-2", "cover_letter_text": "other"}]
+    memories = [
+        {"title": "Past Proposal: Startup", "content": "JOB POSTING: " + POST + " PROPOSAL WRITTEN: x"},
+        {"title": "Past Proposal: letter", "content": "PROPOSAL WRITTEN: " + LETTER},
+        {"title": "Bio", "content": "Led a 160-server Azure migration."},
+    ]
+    kept_past, kept_memories = eval_generation.drop_golden_examples(job, past, memories)
+    assert [p["id"] for p in kept_past] == ["p-2"]
+    assert [m["title"] for m in kept_memories] == ["Bio"]
+
+
+def test_drop_golden_examples_keeps_everything_when_nothing_leaks():
+    job = {"id": "p-9", "chris_letter": LETTER, "description": POST}
+    past = [{"id": "p-2"}]
+    memories = [{"title": "Bio", "content": "Led a 160-server Azure migration."}]
+    assert eval_generation.drop_golden_examples(job, past, memories) == (past, memories)
+
+
+
+@pytest.mark.asyncio
+async def test_golden_facts_delete_hides_facts_sourced_from_the_golden_proposal(client):
+    from app.models.fact import Fact
+    from app.models.user import User
+    from tests.conftest import TestSessionLocal
+
+    async with TestSessionLocal() as s:
+        u = User(email="eval-golden@example.com", hashed_password="x")
+        s.add(u)
+        await s.flush()
+
+        def mk(st, ref, sources):
+            return Fact(user_id=u.id, kind="project", statement=st, status="approved",
+                        source_type="upwork_proposal", source_ref=ref, sources=sources)
+
+        s.add_all([
+            mk("own", "p-1", [{"source_type": "upwork_proposal", "source_ref": "p-1"}]),
+            mk("merged", "p-7", [{"source_type": "upwork_proposal", "source_ref": "p-7"},
+                                 {"source_type": "upwork_proposal", "source_ref": "up-1"}]),
+            mk("other", "p-8", [{"source_type": "upwork_proposal", "source_ref": "p-8"}]),
+        ])
+        await s.commit()
+        await s.execute(text(eval_generation.GOLDEN_FACTS_DELETE), {"uid": u.id, "ids": ["p-1", "up-1"]})
+        left = sorted((await s.execute(select(Fact.statement).where(Fact.user_id == u.id))).scalars())
+        await s.rollback()
+    assert left == ["other"]
