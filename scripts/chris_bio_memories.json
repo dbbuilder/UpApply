@@ -111,7 +111,7 @@
   },
   {
     "title": "Migrated 160-server datacenter to Azure hybrid cloud",
-    "content": "Led the migration of a 160-server on-premises datacenter for a vocational-education and retail SaaS platform (now also serving K-12) to Azure hybrid cloud. Migration included: SQL Server databases to Azure SQL, VB.NET APIs rewritten in C# ASP.NET Core deployed to Azure Container Apps (Linux), 300+ static web apps migrated to Azure Static Web Apps, Azure Front Door and API Gateway for security and routing, Azure VPN for private SQL access, Azure Key Vault for all secrets management, and Azure Functions for data ingestion pipelines. This is a signature enterprise achievement referenced in cloud/Azure proposals.",
+    "content": "Led the migration of a 160-server on-premises datacenter for the SaaS platform behind SchoolVision (vocational education, now also serving K-12) and FranchiseVision (retail) to Azure hybrid cloud. Migration included: SQL Server databases to Azure SQL, VB.NET APIs rewritten in C# ASP.NET Core deployed to Azure Container Apps (Linux), 300+ static web apps migrated to Azure Static Web Apps, Azure Front Door and API Gateway for security and routing, Azure VPN for private SQL access, Azure Key Vault for all secrets management, and Azure Functions for data ingestion pipelines. This is a signature enterprise achievement referenced in cloud/Azure proposals.",
     "category": "achievement",
     "skills_demonstrated": [
       "Azure",
@@ -137,7 +137,7 @@
   },
   {
     "title": "SaaS company founded 2001 \u2014 25+ years enterprise software",
-    "content": "President & CEO of an S-Corporation SaaS company founded in June 2001 in Washington State. Over 25 years, built multiple SaaS products from founding to scale and exit — including enterprise remote access, AI knowledge bases, cloud cost optimization, medical spa analytics, fire safety compliance, and vocational-education and retail management. Core expertise: enterprise data architecture, compliance technology, multi-tenant SaaS platforms, and database-driven solutions. MBA credential. Professional email: chris@servicevision.net.",
+    "content": "President & CEO of an S-Corporation SaaS company founded in June 2001 in Washington State. Over 25 years, built multiple SaaS products from founding to scale and exit — including enterprise remote access, AI knowledge bases, cloud cost optimization, medical spa analytics, fire safety compliance, vocational education (SchoolVision) and retail (FranchiseVision). Core expertise: enterprise data architecture, compliance technology, multi-tenant SaaS platforms, and database-driven solutions. MBA credential. Professional email: chris@servicevision.net.",
     "category": "achievement",
     "skills_demonstrated": [
       "SQL Server",
@@ -157,8 +157,8 @@
     "importance_score": 1.0
   },
   {
-    "title": "Vocational-education and retail SaaS platform \u2014 20+ years operating, 3,000 clients",
-    "content": "Built and own a SaaS platform grown on vocational education and retail, now also serving K-12, operating for 20+ years. Serves 3,000+ corporate clients each with their own SQL Server database. Features: student information system, attendance tracking, cafeteria/lunch POS, FERPA compliance. Architecture: Azure SQL, Azure App Service, Azure Front Door, Azure API Gateway, Azure Key Vault, Azure Static Web Apps, Azure VPN.",
+    "title": "SchoolVision + FranchiseVision SaaS platform \u2014 20+ years operating, 3,000 clients",
+    "content": "Built and own a SaaS platform with two halves, SchoolVision (vocational education, now also serving K-12) and FranchiseVision (retail), operating for 20+ years. Serves 3,000+ corporate clients each with their own SQL Server database. Features: student information system, attendance tracking, cafeteria/lunch POS, FERPA compliance. Architecture: Azure SQL, Azure App Service, Azure Front Door, Azure API Gateway, Azure Key Vault, Azure Static Web Apps, Azure VPN.",
     "category": "project",
     "skills_demonstrated": [
       "SQL Server",

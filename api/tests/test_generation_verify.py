@@ -349,3 +349,110 @@ def test_duplicate_closing_is_flagged():
 def test_single_closing_is_not_duplicate():
     assert "duplicate_closing" not in _codes(check_rules(_letter(closing="Warm regards,\nChris"), _brief(), "Chris"))
     assert check_rules(_letter(closing="Regards,"), _brief(), "Regards,") == []
+
+
+# Round-2 A/B notes (2026-10-23): exit caveats, "also" on credentials, stack in the opening.
+CALL = "I would be happy to jump on a quick call at no cost or obligation."
+
+
+@pytest.mark.parametrize("caveat", [
+    "If this sounds like the right fit, I would be happy to jump on a quick call at no cost or obligation.",
+    "If this looks like a fit on your side, let's talk.",
+    "If this sounds like the right kind of ownership, I would be glad to talk.",
+    "If this approach sounds useful, I would be happy to walk through it.",
+    "If this way of thinking matches yours, let's talk.",
+    "If that works for you, I would be happy to jump on a quick call.",
+])
+def test_exit_caveat_in_the_closing_paragraph_is_flagged(caveat):
+    letter = _letter(extra=f"\n\n{caveat}")
+    assert "exit_caveat" in _codes(check_rules(letter, _brief(), None))
+
+
+def test_plain_invitation_and_earlier_conditionals_are_not_exit_caveats():
+    assert "exit_caveat" not in _codes(check_rules(_letter(extra=f"\n\n{CALL}"), _brief(), None))
+    earlier = _letter(extra=f"\n\nIf this migration slips, the rollback still holds.\n\n{CALL}")
+    assert "exit_caveat" not in _codes(check_rules(earlier, _brief(), None))
+
+
+@pytest.mark.parametrize("sentence", [
+    "I am also a technical founder who took a SaaS business to a sale.",
+    "I'm also a certified architect.",
+    "I also hold an MBA.",
+    "I also served as CTO for a regulated platform.",
+])
+def test_also_on_a_credential_is_flagged(sentence):
+    letter = _letter(extra=f" {sentence}")
+    assert "also_credential" in _codes(check_rules(letter, _brief(), None))
+
+
+def test_credentials_without_also_and_other_alsos_are_not_flagged():
+    letter = _letter(extra=" I am a technical founder. I hold an MBA. The rollback also covers the reporting jobs.")
+    assert "also_credential" not in _codes(check_rules(letter, _brief(), None))
+
+
+def test_stack_list_in_the_first_sentence_is_flagged():
+    letter = _letter().replace(
+        SENTENCE, "TypeScript + Next.js + Supabase with Claude integration is a solid base for this MVP.", 1,
+    )
+    issues = [v for v in check_rules(letter, _brief(), None) if v.code == "stack_in_opening"]
+    assert issues and "TypeScript" in issues[0] and "Supabase" in issues[0]
+
+
+def test_two_technologies_or_a_later_stack_list_are_not_flagged():
+    two = _letter().replace(
+        SENTENCE, "Legacy .NET Framework applications backed by SQL Server rarely break where the ticket says.", 1,
+    )
+    assert "stack_in_opening" not in _codes(check_rules(two, _brief(), None))
+    later = _letter(extra=" The build would use React, Node, Postgres and AWS.")
+    assert "stack_in_opening" not in _codes(check_rules(later, _brief(), None))
+    lowercase = _letter().replace(SENTENCE, "Teams react when each node on servicevision.net in python fails.", 1)
+    assert "stack_in_opening" not in _codes(check_rules(lowercase, _brief(), None))
+
+
+@pytest.mark.asyncio
+async def test_check_claims_ignores_evidence_the_draft_left_out():
+    """The auditor sometimes reports evidence the draft omitted; omission is allowed."""
+    draft = SimpleNamespace(cover_letter="Built FireProofApp.com for hospital inspections.", screening_answers=[])
+    call = AsyncMock(return_value={"unsupported_claims": [
+        {"claim": "Designed and built Remote2Me", "reason": "in evidence but not mentioned in draft"},
+    ]})
+    with patch("app.services.generation.verify.structured_call", call):
+        assert await check_claims(draft, Evidence(facts=[FACT])) == []
+
+
+@pytest.mark.asyncio
+async def test_check_claims_keeps_a_real_span_despite_case_quotes_and_fencing():
+    draft = SimpleNamespace(cover_letter="My R&D team cut costs 70% at “Acme”.", screening_answers=[])
+    call = AsyncMock(return_value={"unsupported_claims": [
+        {"claim": 'my R＆D team cut costs 70% at "Acme"', "reason": "no fact"},
+    ]})
+    with patch("app.services.generation.verify.structured_call", call):
+        [issue] = await check_claims(draft, Evidence(facts=[FACT]))
+    assert issue.code == "unsupported_claim"
+
+
+def test_claims_prompt_says_omission_is_not_a_problem():
+    from app.services.generation.verify import CLAIMS_SYSTEM
+    assert "do not report evidence the draft omits or understates" in CLAIMS_SYSTEM
+
+
+@pytest.mark.parametrize("sentence,flag", [
+    ("I am also a technical founder who sold a SaaS company.", True),
+    ("I also hold an MBA.", True),
+    ("I'm also a certified Azure architect.", True),
+    ("I also have a migration plan ready for week one.", False),
+    ("I am also a fan of incremental rollouts.", False),
+])
+def test_also_credential_needs_a_credential_or_role_word(sentence, flag):
+    from app.services.generation.verify import _ALSO_CREDENTIAL
+    assert bool(_ALSO_CREDENTIAL.search(sentence)) is flag
+
+
+@pytest.mark.asyncio
+async def test_check_claims_ignores_spans_that_only_appear_in_a_screening_question():
+    draft = SimpleNamespace(cover_letter="Body.", screening_answers=[
+        {"question": "Do you hold an AWS Solutions Architect certification?", "answer": "Not that one; Azure is my focus."}])
+    call = AsyncMock(return_value={"unsupported_claims": [
+        {"claim": "AWS Solutions Architect certification", "reason": "omitted"}]})
+    with patch("app.services.generation.verify.structured_call", call):
+        assert await check_claims(draft, Evidence(facts=[FACT])) == []

@@ -17,7 +17,7 @@ DIRTY = "I have done this before. " + CLEAN
 BRIEF = JobBrief(needs=["n"], job_types=[], client_signals={"complexity": "standard"},
                  mirror_phrases=[], explicit_asks=[], questions=[], title="T", description="D")
 FACT = SimpleNamespace(id="fact-1", statement="s", kind="project", detail=None)
-USER = SimpleNamespace(id="u1")
+USER = SimpleNamespace(id="u1", email="u1@example.com")
 PROFILE = SimpleNamespace(preferred_closing=None, proposal_anchors={"always_include": []})
 
 

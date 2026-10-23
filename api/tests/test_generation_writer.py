@@ -303,3 +303,63 @@ def test_finalize_letter_keeps_a_signoff_style_preferred_closing_once():
     assert letter == "Body.\n\nRegards,"
     assert "Warm regards" not in letter
     assert finalize_letter("Body.\n\nWarm regards,\n\nWarm regards,", "Regards,\nChris") == "Body.\n\nRegards,\nChris"
+
+
+# Voice kit (api/app/voice/): persona, sales register and call offer come from the vendored bundle.
+KIT_EMAIL = "chris@servicevision.net"
+DEFAULT_OFFER = '"I would be happy to jump on a quick call at no cost or obligation ..."'
+
+
+def test_writer_system_carries_the_voice_kit_for_a_mapped_user():
+    from app.services.generation.refine import _system_prompt
+    from app.services.generation.voice import load_voice
+
+    voice = load_voice(KIT_EMAIL)
+    persona_line = next(line for line in voice["persona"].splitlines() if line.startswith("A technical founder"))
+    register_line = next(line for line in voice["registers"]["sales-proposal"].splitlines() if line.startswith("Upwork"))
+    for system in (build_writer_system(PROFILE, KIT_EMAIL), _system_prompt(PROFILE, KIT_EMAIL)):
+        assert "VOICE (Chris Therriault's voice kit" in system
+        assert persona_line in system
+        assert register_line in system
+        assert "# ServiceVision house style" in system
+        assert "Do not attach \"also\" to core credentials" in system  # a soft rule
+        assert "## Openings" in system and "## Counter-examples" in system
+        assert "## Closings" not in system
+        # The existing rule sections stay.
+        assert "NO FACT, NO CLAIM" in system and "HARD RULES (violations are failures)" in system
+    assert build_writer_system(PROFILE, KIT_EMAIL) == build_writer_system(PROFILE, KIT_EMAIL.upper())  # stable
+    assert len(build_writer_system(PROFILE, KIT_EMAIL)) < 6000 * 4  # ~6k tokens
+
+
+def test_writer_system_without_a_kit_is_unchanged():
+    plain = build_writer_system(PROFILE)
+    assert build_writer_system(PROFILE, "someone@example.com") == plain
+    assert "VOICE (" not in plain and "VOICE DEFAULTS" not in plain
+    assert DEFAULT_OFFER in plain
+
+
+def test_kit_call_offer_replaces_the_built_in_wording():
+    from app.services.generation.writer import build_writer_user_prompt
+
+    voice = {"persona": "Persona text.", "registers": {}, "rules": {"closing": {"call_offer": "Let's find time to talk"}}}
+    with patch("app.services.generation.writer.load_voice", return_value=voice):
+        system = build_writer_system(PROFILE, KIT_EMAIL)
+        user = build_writer_user_prompt(PROFILE, BRIEF, EVIDENCE, True, None, None, None, KIT_EMAIL)
+    assert '"Let\'s find time to talk ..."' in system and DEFAULT_OFFER not in system
+    assert '"Let\'s find time to talk ..."' in user
+    assert "Persona text." in system
+    plain_user = build_writer_user_prompt(PROFILE, BRIEF, EVIDENCE, True, None, None, None)
+    assert DEFAULT_OFFER in plain_user
+
+
+@pytest.mark.asyncio
+async def test_write_application_uses_the_kit_for_the_given_email():
+    call = AsyncMock(return_value=dict(MODEL_JSON))
+    with patch("app.services.generation.writer.structured_call", call):
+        await write_application(PROFILE, BRIEF, EVIDENCE, True, None, None, email=KIT_EMAIL)
+    assert call.call_args.kwargs["system"][0]["text"] == build_writer_system(PROFILE, KIT_EMAIL)
+
+
+def test_writer_system_steers_evidence_to_the_client_domain():
+    for email in (None, KIT_EMAIL):
+        assert "Choose the evidence that matches this client's domain" in build_writer_system(PROFILE, email)

@@ -109,14 +109,16 @@ async def generate_application(
         db, user.id, brief, profile.proposal_anchors, exclude_proposal_ids=exclude_proposal_ids
     )
 
-    draft = await write_application(profile, brief, evidence, include_call_offer, prototype_url, extra_points)
+    draft = await write_application(
+        profile, brief, evidence, include_call_offer, prototype_url, extra_points, email=user.email
+    )
     warnings = await _verify(draft, brief, evidence, profile, prototype_url, answers_only)
 
     repairable = [w for w in warnings if w != CLAIM_CHECK_SKIPPED]
     if repairable:
         draft = await write_application(
             profile, brief, evidence, include_call_offer, prototype_url, extra_points,
-            repair_notes=[repair_note(w) for w in repairable],
+            repair_notes=[repair_note(w) for w in repairable], email=user.email,
         )
         warnings = await _verify(draft, brief, evidence, profile, prototype_url, answers_only)
 

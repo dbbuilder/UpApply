@@ -1344,6 +1344,7 @@ async def refine_cover_letter_endpoint(
         outcome = await refine_application(
             db, current_user.id, profile, brief,
             Evidence(facts=facts, voice_samples=voice), current, history, message,
+            email=current_user.email,
         )
     except RefineError as exc:
         await db.rollback()
