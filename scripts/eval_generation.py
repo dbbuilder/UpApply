@@ -283,6 +283,7 @@ async def _generate_one(email: str, job: dict) -> tuple[str, object]:
     return old, new
 
 
+JOB_ATTEMPTS = 2
 SAMENESS_NGRAM = 4
 SAMENESS_MIN_SHARE = 0.15  # a phrase in 15%+ of a batch's openings (or closes) reads as a formula
 
@@ -317,10 +318,28 @@ def batch_sameness(letters: list[str], ignore: tuple[str, ...] = ()) -> list[str
 
 
 async def generate(email: str, golden: Path, out_dir: Path, seed: int) -> None:
+    from sqlalchemy.exc import DBAPIError
+
     jobs = json.loads(golden.read_text())
     outputs, new_meta = {}, {}
+    # Each finished job is saved, so a dropped connection costs one job and a rerun resumes.
+    partial = out_dir / "partial"
+    partial.mkdir(parents=True, exist_ok=True)
     for job in jobs:
-        old, new = await _generate_one(email, job)
+        saved = partial / f"{job['id']}.json"
+        if saved.exists():
+            done = json.loads(saved.read_text())
+            outputs[job["id"]], new_meta[job["id"]] = done["output"], done["meta"]
+            print(f"resumed {job['id']}")
+            continue
+        for attempt in range(JOB_ATTEMPTS):
+            try:
+                old, new = await _generate_one(email, job)
+                break
+            except (OSError, DBAPIError) as exc:
+                if attempt == JOB_ATTEMPTS - 1:
+                    raise
+                print(f"retrying {job['id']} after {type(exc).__name__}")
         outputs[job["id"]] = {"old": old, "new": new.draft.cover_letter}
         new_meta[job["id"]] = {
             "warnings": new.warnings,
@@ -328,6 +347,7 @@ async def generate(email: str, golden: Path, out_dir: Path, seed: int) -> None:
             "screening_answers": new.draft.screening_answers,
             "evidence": [{"id": str(f.id), "statement": f.statement} for f in new.evidence.facts],
         }
+        saved.write_text(json.dumps({"output": outputs[job["id"]], "meta": new_meta[job["id"]]}, indent=2))
         print(f"generated {job['id']} ({len(new.draft.fact_ids_used)} facts, {len(new.warnings)} warnings)")
 
     from app.services.generation.voice import load_voice
