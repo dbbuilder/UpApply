@@ -26,7 +26,7 @@ ANCHOR_MIN_SIMILARITY = 0.75
 # product in the client's own domain reaches the writer even when no single need names it. The whole
 # post and the title are too diffuse: generic SaaS facts outrank the on-domain ones (round 4 probe).
 DOMAIN_FACTS = 2
-DOMAIN_MIN_SIMILARITY = 0.45
+DOMAIN_MIN_SIMILARITY = 0.35  # on-domain facts scored 0.40-0.50 against a 2-5 word domain (round 4 probe)
 VOICE_SAMPLE_LIMIT = 3
 VOICE_AUTHORS = ("chris", "chris_edited_ai")
 OUTCOME_BOOST = {"hired": 0.15, "interviewed": 0.10, "replied": 0.08, "viewed": 0.02}
