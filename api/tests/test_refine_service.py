@@ -120,7 +120,8 @@ async def test_tool_loop_returns_revised_draft_and_found_facts():
     assert search.await_args.kwargs["limit"] == 5
     # Deviation from the plan: the real check_rules also takes the screening answers (as the orchestrator passes).
     rules.assert_called_once_with(
-        REVISED["cover_letter"], rules.call_args.args[1], "Chris", result.draft.screening_answers
+        REVISED["cover_letter"], rules.call_args.args[1], "Chris", result.draft.screening_answers,
+        None,  # no email, so no voice kit
     )
     claim_evidence = claims.await_args.args[1]
     assert {str(f.id) for f in claim_evidence.facts} == {EVIDENCE_FACT_ID, FOUND_FACT_ID}

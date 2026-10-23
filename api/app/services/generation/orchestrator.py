@@ -17,6 +17,7 @@ from app.services.generation.verify import (
     check_rules,
     repair_note,
 )
+from app.services.generation.voice import load_voice
 from app.services.generation.writer import Draft, write_application
 
 NO_FACTS_WARNING = "No approved facts matched this job, so the draft has no verified specifics."
@@ -40,13 +41,14 @@ async def _verify(
     profile,
     prototype_url: Optional[str],
     answers_only: bool = False,
+    voice: Optional[dict] = None,
 ) -> list[str]:
     if answers_only:
         # The letter is discarded: only the answers are checked, and only they are audited.
         warnings = check_answer_rules(draft.screening_answers)
         audited = draft.model_copy(update={"cover_letter": ""})
     else:
-        warnings = check_rules(draft.cover_letter, brief, profile.preferred_closing, draft.screening_answers)
+        warnings = check_rules(draft.cover_letter, brief, profile.preferred_closing, draft.screening_answers, voice)
         if prototype_url and prototype_url.strip() and prototype_url.strip() not in draft.cover_letter:
             warnings.append(Issue(
                 f"Prototype URL {prototype_url.strip()} is missing from the letter.", "missing_prototype_url"
@@ -112,7 +114,8 @@ async def generate_application(
     draft = await write_application(
         profile, brief, evidence, include_call_offer, prototype_url, extra_points, email=user.email
     )
-    warnings = await _verify(draft, brief, evidence, profile, prototype_url, answers_only)
+    voice = load_voice(user.email)
+    warnings = await _verify(draft, brief, evidence, profile, prototype_url, answers_only, voice)
 
     repairable = [w for w in warnings if w != CLAIM_CHECK_SKIPPED]
     if repairable:
@@ -120,7 +123,7 @@ async def generate_application(
             profile, brief, evidence, include_call_offer, prototype_url, extra_points,
             repair_notes=[repair_note(w) for w in repairable], email=user.email,
         )
-        warnings = await _verify(draft, brief, evidence, profile, prototype_url, answers_only)
+        warnings = await _verify(draft, brief, evidence, profile, prototype_url, answers_only, voice)
 
     claims_verified = CLAIM_CHECK_SKIPPED not in warnings
     warnings.extend(evidence.warnings)

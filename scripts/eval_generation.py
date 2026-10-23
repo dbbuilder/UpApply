@@ -31,7 +31,9 @@ import asyncio
 import csv
 import json
 import random
+import re
 import sys
+from collections import Counter
 from datetime import date
 from pathlib import Path
 
@@ -234,7 +236,7 @@ async def build_golden(email: str, out: Path, n: int) -> None:
         print("WARNING: fewer than 15 eligible jobs — scrape more proposal details first (spec §4.2)")
 
 
-async def _generate_one(email: str, job: dict) -> tuple[str, object]:
+async def _generate_one(email: str, job: dict) -> tuple[str, object, list[dict]]:
     from sqlalchemy import select, text
 
     from app.core.database import async_session_maker
@@ -277,22 +279,88 @@ async def _generate_one(email: str, job: dict) -> tuple[str, object]:
                 f"{job['id']}: its own submitted letter was retrieved as a voice sample; "
                 "add its proposal_id / upwork_proposal_id to the golden file"
             )
+        # Read before the rollback expires the rows.
+        evidence = [{"id": str(f.id), "statement": f.statement} for f in new.evidence.facts]
         await db.rollback()
-    return old, new
+    return old, new, evidence
+
+
+JOB_ATTEMPTS = 2
+SAMENESS_NGRAM = 4
+SAMENESS_MIN_SHARE = 0.15  # a phrase in 15%+ of a batch's openings (or closes) reads as a formula
+
+
+def batch_sameness(letters: list[str], ignore: tuple[str, ...] = ()) -> list[str]:
+    """Four-word phrases that recur in the opening or closing paragraph of many letters in one
+    batch. One letter never shows it, but a judge reading twenty does (round 3). `ignore` holds
+    fixed wording that is meant to repeat, such as the call offer."""
+    from app.services.cover_letter import is_signoff_line
+
+    floor = max(3, round(len(letters) * SAMENESS_MIN_SHARE))
+    found = []
+    for part, index in (("opening", 0), ("close", -1)):
+        counts: Counter = Counter()
+        for letter in letters:
+            paras = [
+                p.strip() for p in re.split(r"\n\s*\n", letter)
+                if len(p.split()) >= 4 and not is_signoff_line(p.strip().splitlines()[0])
+            ]
+            if not paras:
+                continue
+            para = paras[index].lower()
+            for fixed in ignore:
+                para = para.replace(fixed.lower(), " | ")
+            grams = set()
+            for chunk in para.split("|"):
+                words = re.findall(r"[a-z0-9']+", chunk)
+                grams.update(" ".join(words[i:i + SAMENESS_NGRAM]) for i in range(len(words) - SAMENESS_NGRAM + 1))
+            counts.update(grams)
+        found += [f'{part}: "{gram}" in {n} letters' for gram, n in counts.most_common() if n >= floor]
+    return found
 
 
 async def generate(email: str, golden: Path, out_dir: Path, seed: int) -> None:
+    from sqlalchemy.exc import DBAPIError
+
     jobs = json.loads(golden.read_text())
     outputs, new_meta = {}, {}
+    # Each finished job is saved, so a dropped connection costs one job and a rerun resumes.
+    partial = out_dir / "partial"
+    partial.mkdir(parents=True, exist_ok=True)
     for job in jobs:
-        old, new = await _generate_one(email, job)
+        saved = partial / f"{job['id']}.json"
+        if saved.exists():
+            done = json.loads(saved.read_text())
+            outputs[job["id"]], new_meta[job["id"]] = done["output"], done["meta"]
+            print(f"resumed {job['id']}")
+            continue
+        for attempt in range(JOB_ATTEMPTS):
+            try:
+                old, new, evidence = await _generate_one(email, job)
+                break
+            except (OSError, DBAPIError) as exc:
+                if attempt == JOB_ATTEMPTS - 1:
+                    raise
+                print(f"retrying {job['id']} after {type(exc).__name__}")
         outputs[job["id"]] = {"old": old, "new": new.draft.cover_letter}
         new_meta[job["id"]] = {
             "warnings": new.warnings,
             "fact_ids_used": new.draft.fact_ids_used,
             "screening_answers": new.draft.screening_answers,
+            "evidence": evidence,
         }
+        saved.write_text(json.dumps({"output": outputs[job["id"]], "meta": new_meta[job["id"]]}, indent=2))
         print(f"generated {job['id']} ({len(new.draft.fact_ids_used)} facts, {len(new.warnings)} warnings)")
+
+    from app.services.generation.voice import load_voice
+    from app.services.generation.writer import call_offer_wording
+
+    offer = call_offer_wording(load_voice(email))
+    sameness = {
+        side: batch_sameness([o[side] for o in outputs.values()], ignore=(offer,)) for side in ("old", "new")
+    }
+    for side, found in sameness.items():
+        print(f"{side} sameness: {len(found)} repeated phrase(s)" + "".join(f"\n  {f}" for f in found[:10]))
 
     job_ids = [job["id"] for job in jobs]
     sides = assign_sides(job_ids, seed)
@@ -300,7 +368,9 @@ async def generate(email: str, golden: Path, out_dir: Path, seed: int) -> None:
     (out_dir / "pairs.md").write_text(render_pairs_markdown(jobs, outputs, sides))
     write_score_sheet(out_dir / "scores.csv", job_ids)
     (out_dir / "key.json").write_text(
-        json.dumps({"seed": seed, "sides": sides, "new_meta": new_meta, "outputs": outputs}, indent=2)
+        json.dumps(
+            {"seed": seed, "sides": sides, "new_meta": new_meta, "outputs": outputs, "sameness": sameness}, indent=2
+        )
     )
     print(f"wrote {out_dir}/pairs.md, scores.csv, key.json")
 

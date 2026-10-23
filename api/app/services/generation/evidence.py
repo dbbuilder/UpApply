@@ -22,6 +22,11 @@ MIN_FACTS = 4
 MAX_FACTS = 8
 FILL_MIN_SCORE = 0.55
 ANCHOR_MIN_SIMILARITY = 0.75
+# Domain search: the facts closest to the brief's domain phrase ("fire safety inspections"), so a
+# product in the client's own domain reaches the writer even when no single need names it. The whole
+# post and the title are too diffuse: generic SaaS facts outrank the on-domain ones (round 4 probe).
+DOMAIN_FACTS = 2
+DOMAIN_MIN_SIMILARITY = 0.35  # on-domain facts scored 0.40-0.50 against a 2-5 word domain (round 4 probe)
 VOICE_SAMPLE_LIMIT = 3
 VOICE_AUTHORS = ("chris", "chris_edited_ai")
 OUTCOME_BOOST = {"hired": 0.15, "interviewed": 0.10, "replied": 0.08, "viewed": 0.02}
@@ -148,7 +153,8 @@ async def select_evidence(
     anchors: Optional[dict],
     exclude_proposal_ids: Optional[list[str]] = None,
 ) -> Evidence:
-    """Per-need fact retrieval + rerank, always-include floor, and 2-3 voice samples."""
+    """Per-need fact retrieval + rerank, always-include floor, whole-job domain facts, and 2-3
+    voice samples."""
     needs = [n for n in brief.needs if n.strip()]
     always = [a for a in ((anchors or {}).get("always_include") or []) if isinstance(a, str) and a.strip()]
     # Job<->job: same text shape Phase 1 (Task 1.8) and Phase 3 (Task 3.4) embed into
@@ -181,16 +187,24 @@ async def select_evidence(
             facts.append(hits[0][0])
             seen.add(str(hits[0][0].id))
 
-    # Embedded on its own: if the job-text embedding still fails it costs only the voice
-    # samples (with a warning), never the facts.
+    # Embedded on its own: if the job-text embedding still fails it costs only the domain facts
+    # and voice samples (with a warning), never the per-need facts.
     voice: list[Proposal] = []
     warnings: list[str] = []
     if voice_query:
         try:
-            voice_vector = (await generate_embeddings_batch([voice_query]))[0]
+            domain_text = _clip_for_embedding(brief.domain.strip())
+            job_vectors = await generate_embeddings_batch([voice_query, domain_text] if domain_text else [voice_query])
+            job_vector = job_vectors[0]
+            domain_vector = job_vectors[1] if domain_text else None
         except Exception as exc:
             logger.warning("Voice-sample query embedding failed: %s", type(exc).__name__)
             warnings.append(VOICE_UNAVAILABLE_WARNING)
         else:
-            voice = await _find_voice_samples(db, user_id, voice_vector, exclude_ids=exclude_proposal_ids)
+            domain = await search_facts(db, user_id, domain_vector, limit=DOMAIN_FACTS) if domain_vector else []
+            for fact, similarity in domain:
+                if similarity >= DOMAIN_MIN_SIMILARITY and str(fact.id) not in seen:
+                    facts.append(fact)
+                    seen.add(str(fact.id))
+            voice = await _find_voice_samples(db, user_id, job_vector, exclude_ids=exclude_proposal_ids)
     return Evidence(facts=facts, voice_samples=voice, warnings=warnings)

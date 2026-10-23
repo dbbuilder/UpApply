@@ -146,7 +146,7 @@ async def test_select_evidence_raises_when_needs_embeddings_fail():
 async def test_select_evidence_clips_every_embedding_input():
     brief = JobBrief(
         needs=["n" * 100_000], job_types=[], client_signals={}, mirror_phrases=[],
-        explicit_asks=[], questions=[], title="T", description="x" * 100_000,
+        explicit_asks=[], questions=[], title="T", description="x" * 100_000, domain="d" * 100_000,
     )
     embed = AsyncMock(side_effect=lambda texts: [[1.0] for _ in texts])
     with patch.object(ev, "generate_embeddings_batch", embed), \
@@ -154,7 +154,7 @@ async def test_select_evidence_clips_every_embedding_input():
          patch.object(ev, "_find_voice_samples", AsyncMock(return_value=[])):
         await select_evidence(None, "u1", brief, {"always_include": ["a" * 100_000]})
     sent = [t for call in embed.call_args_list for t in call.args[0]]
-    assert len(sent) == 3
+    assert len(sent) == 4  # need, anchor, job text, domain
     assert all(len(t.encode("utf-8")) <= ev.EMBED_MAX_BYTES for t in sent)
     assert ev.EMBED_MAX_BYTES <= 8_191
 
@@ -288,3 +288,46 @@ def test_format_facts_keeps_every_fact_at_maximum_field_sizes():
     ]
     out = format_facts(facts)
     assert all(f'"id": "f{i}"' in out for i in range(ev.MAX_FACTS))
+
+
+@pytest.mark.asyncio
+async def test_select_evidence_skips_weak_domain_match():
+    a, weak = _fact("a"), _fact("weak")
+    brief = JobBrief(
+        needs=["need one"], job_types=[], client_signals={}, mirror_phrases=[],
+        explicit_asks=[], questions=[], title="Inspection app", description="Maintain our Flutter app",
+        domain="fire safety inspections",
+    )
+
+    async def fake_search(db, user_id, query_embedding, limit=8, status="approved"):
+        return {1.0: [(a, 0.9)], 2.0: [(weak, ev.DOMAIN_MIN_SIMILARITY - 0.01)]}[query_embedding[0]][:limit]
+
+    embed = AsyncMock(side_effect=[[[1.0]], [[3.0], [2.0]]])
+    with patch.object(ev, "generate_embeddings_batch", embed), \
+         patch.object(ev, "search_facts", AsyncMock(side_effect=fake_search)), \
+         patch.object(ev, "_find_voice_samples", AsyncMock(return_value=[])):
+        result = await select_evidence(None, "u1", brief, None)
+    assert [f.id for f in result.facts] == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_select_evidence_adds_on_domain_facts_from_the_brief_domain():
+    a, domain, generic, weak = _fact("a"), _fact("fireproof"), _fact("generic"), _fact("weak")
+    brief = JobBrief(
+        needs=["long-term maintenance"], job_types=[], client_signals={}, mirror_phrases=[],
+        explicit_asks=[], questions=[], title="SaaS Inspection Platform", description="Maintain our Flutter app",
+        domain="fire safety inspections",
+    )
+    results = {1.0: [(a, 0.9)], 3.0: [(generic, 0.6)], 2.0: [(domain, 0.62), (a, 0.6), (weak, 0.3)]}
+
+    async def fake_search(db, user_id, query_embedding, limit=8, status="approved"):
+        return results[query_embedding[0]][:limit]
+
+    find_voice = AsyncMock(return_value=[])
+    with patch.object(ev, "generate_embeddings_batch", AsyncMock(side_effect=[[[1.0]], [[3.0], [2.0]]])), \
+         patch.object(ev, "search_facts", AsyncMock(side_effect=fake_search)), \
+         patch.object(ev, "_find_voice_samples", find_voice):
+        result = await select_evidence(None, "u1", brief, None)
+    # The domain's nearest fact is added; "a" is already in and "weak" is past DOMAIN_FACTS.
+    assert [f.id for f in result.facts] == ["a", "fireproof"]
+    assert find_voice.call_args.args[2] == [3.0]  # voice samples still use the whole job text
