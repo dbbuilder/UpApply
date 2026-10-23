@@ -407,3 +407,30 @@ def test_two_technologies_or_a_later_stack_list_are_not_flagged():
     assert "stack_in_opening" not in _codes(check_rules(later, _brief(), None))
     lowercase = _letter().replace(SENTENCE, "Teams react when each node on servicevision.net in python fails.", 1)
     assert "stack_in_opening" not in _codes(check_rules(lowercase, _brief(), None))
+
+
+@pytest.mark.asyncio
+async def test_check_claims_ignores_evidence_the_draft_left_out():
+    """The auditor sometimes reports evidence the draft omitted; omission is allowed."""
+    draft = SimpleNamespace(cover_letter="Built FireProofApp.com for hospital inspections.", screening_answers=[])
+    call = AsyncMock(return_value={"unsupported_claims": [
+        {"claim": "Designed and built Remote2Me", "reason": "in evidence but not mentioned in draft"},
+    ]})
+    with patch("app.services.generation.verify.structured_call", call):
+        assert await check_claims(draft, Evidence(facts=[FACT])) == []
+
+
+@pytest.mark.asyncio
+async def test_check_claims_keeps_a_real_span_despite_case_quotes_and_fencing():
+    draft = SimpleNamespace(cover_letter="My R&D team cut costs 70% at “Acme”.", screening_answers=[])
+    call = AsyncMock(return_value={"unsupported_claims": [
+        {"claim": 'my R＆D team cut costs 70% at "Acme"', "reason": "no fact"},
+    ]})
+    with patch("app.services.generation.verify.structured_call", call):
+        [issue] = await check_claims(draft, Evidence(facts=[FACT]))
+    assert issue.code == "unsupported_claim"
+
+
+def test_claims_prompt_says_omission_is_not_a_problem():
+    from app.services.generation.verify import CLAIMS_SYSTEM
+    assert "do not report evidence the draft omits or understates" in CLAIMS_SYSTEM

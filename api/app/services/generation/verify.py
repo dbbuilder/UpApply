@@ -141,7 +141,9 @@ A claim is any specific statement about the writer's own past: a number or metri
 
 Not claims: statements of approach or intent ("would start by profiling the slowest queries"), general professional opinions, and anything that restates the client's own job post.
 
-Return every unsupported claim, quoting the shortest exact span from the draft, with a one-line reason. Return an empty list when everything is supported."""
+Audit only what the draft says. Leaving evidence out, mentioning fewer details than the evidence, or describing something more briefly is never a problem: do not report evidence the draft omits or understates.
+
+Return every unsupported claim, quoting the shortest exact span copied from the draft (not from the evidence), with a one-line reason. Return an empty list when everything is supported."""
 
 
 def length_band(brief: JobBrief) -> tuple[int, int]:
@@ -379,8 +381,19 @@ async def check_claims(draft: "Draft", evidence: Evidence) -> list[str]:
     except Exception as exc:
         logger.warning("Claim check failed: %s", type(exc).__name__)
         return [CLAIM_CHECK_SKIPPED]
+    # A flagged claim must quote the draft. Spans that are not in the draft are the checker
+    # reporting evidence the draft left out, which is allowed (and pushing it back in adds detail).
+    drafted = _norm_span(f"{draft.cover_letter}\n{answers}")
     return [
         Issue(f"Unsupported claim: {item['claim']} ({item['reason']})", "unsupported_claim",
               f"{item['claim']} ({item['reason']})")
         for item in data.get("unsupported_claims", [])
+        if _norm_span(item.get("claim", "")) and _norm_span(item.get("claim", "")) in drafted
     ]
+
+
+def _norm_span(text: str) -> str:
+    """Case-, quote- and whitespace-insensitive form for matching a quoted span to the draft."""
+    text = restore_fenced(text)
+    text = text.replace("\u2019", "'").replace("\u2018", "'").replace("\u201c", '"').replace("\u201d", '"')
+    return " ".join(text.lower().strip(" .;:\"'").split())

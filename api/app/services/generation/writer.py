@@ -84,7 +84,7 @@ def _exemplar_sections(text: str) -> str:
 
 
 def _voice_section(voice: dict, name: str) -> str:
-    """The kit's house style, persona, sales register, soft rules and chosen exemplar sections."""
+    """The kit's house style, persona, sales register, hard and soft rules, and chosen exemplar sections."""
     rules = voice.get("rules") or {}
     soft = "\n".join(
         f"- {rule['rule']}" for rule in rules.get("soft") or []
@@ -98,6 +98,9 @@ def _voice_section(voice: dict, name: str) -> str:
         voice.get("persona", "").strip(),
         ((voice.get("registers") or {}).get(VOICE_REGISTER) or "").strip(),
     ]
+    hard = "\n".join(f"- {rule['rule']}" for rule in rules.get("hard") or [] if rule.get("rule"))
+    if hard:
+        parts.append(f"VOICE MUST-FOLLOW RULES\n{hard}")
     if soft:
         parts.append(f"VOICE DEFAULTS\n{soft}")
     exemplars = _exemplar_sections((voice.get("exemplars") or {}).get("sales", ""))
