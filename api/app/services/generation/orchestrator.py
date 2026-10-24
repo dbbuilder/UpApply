@@ -12,6 +12,7 @@ from app.services.generation.verify import (
     CLAIM_CHECK_SKIPPED,
     Issue,
     check_answer_rules,
+    check_answer_voice,
     check_specifics,
     check_claims,
     check_rules,
@@ -45,7 +46,7 @@ async def _verify(
 ) -> list[str]:
     if answers_only:
         # The letter is discarded: only the answers are checked, and only they are audited.
-        warnings = check_answer_rules(draft.screening_answers)
+        warnings = check_answer_rules(draft.screening_answers) + check_answer_voice(draft.screening_answers, voice)
         audited = draft.model_copy(update={"cover_letter": ""})
     else:
         warnings = check_rules(draft.cover_letter, brief, profile.preferred_closing, draft.screening_answers, voice)
