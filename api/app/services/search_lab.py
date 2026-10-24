@@ -123,7 +123,7 @@ Rules:
         model=settings.default_model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.4,
-        max_tokens=800,
+        max_completion_tokens=800,
     )
 
     raw = response.choices[0].message.content or ""
@@ -214,7 +214,7 @@ Output EXACTLY this JSON format, one object per line, nothing else:
         model=settings.default_model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.4,
-        max_tokens=900,
+        max_completion_tokens=900,
     )
 
     raw = response.choices[0].message.content or ""

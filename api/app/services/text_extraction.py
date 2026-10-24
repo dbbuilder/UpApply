@@ -84,7 +84,7 @@ async def extract_text_from_image(file_bytes: bytes, content_type: str = "image/
                     ],
                 }
             ],
-            max_tokens=4000,
+            max_completion_tokens=4000,
         )
 
         return response.choices[0].message.content.strip()

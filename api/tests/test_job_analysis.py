@@ -268,3 +268,29 @@ def test_concerns_missing_skills():
         [], ["Java", "Go"], [], profile, None
     )
     assert any("missing" in c.lower() for c in concerns)
+
+
+# --- score_job_with_llm ---
+
+@pytest.mark.asyncio
+async def test_score_job_with_llm_sends_max_completion_tokens():
+    """GPT-5 models reject max_tokens; the scoring call must send max_completion_tokens."""
+    from unittest.mock import AsyncMock, patch
+    from app.core.config import settings
+    from app.services.job_analysis import score_job_with_llm
+
+    response = MagicMock()
+    response.choices = [MagicMock(message=MagicMock(content='{"score": 72, "reason": "Good fit"}'))]
+    client = MagicMock()
+    client.chat.completions.create = AsyncMock(return_value=response)
+    profile = MagicMock(skills=[{"name": "Python"}], bio="", career_goals="")
+
+    with patch.object(settings, "openai_api_key", "sk-test"), \
+            patch("openai.AsyncOpenAI", return_value=client):
+        score, reason = await score_job_with_llm("FastAPI dev", "Build an API", profile, [])
+
+    assert (score, reason) == (72, "Good fit")
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["model"] == settings.scoring_model
+    assert kwargs["max_completion_tokens"] == 80
+    assert "max_tokens" not in kwargs

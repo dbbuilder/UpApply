@@ -293,7 +293,7 @@ RULES:
         model=settings.default_model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.7,
-        max_tokens=400,
+        max_completion_tokens=400,
     )
     raw = response.choices[0].message.content or ""
     lines = [line.strip().strip('"').strip("'") for line in raw.splitlines()]
