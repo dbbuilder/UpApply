@@ -316,11 +316,11 @@ _DASHES = ("\u2014", "\u2013")
 _EMOJI = re.compile(
     "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF\U00002190-\U000021FF\u2B50\u2705\u26A0\u20E3]"  # \u20E3: the keycap in "1\ufe0f\u20e3"
 )
-# A verb of seeing directly on "your"/"the" material ("review your codebase", "share the repo"),
+# A verb of seeing directly on "your"/"the" material ("review your codebase", "a review of the repo"),
 # or a code review/audit that is not a compound like "code review habit".
 _SEES_CLIENT_MATERIAL = re.compile(
     r"\b(?:share|sharing|shared|access to|review|reviewing|look at|looking at|read through|walk me through|audit|"
-    r"inspect|inspecting|examine|go through|dig into)\W+(?:your|the)"
+    r"inspect|inspecting|examine|go through|dig into)\W+(?:of\W+)?(?:your|the)"
     r"(?:\W+\w+){0,2}?\W+(?:repo|repos|repository|repositories|codebase|code base|source code|code|documents|"
     r"documentation|files|data|database|schema)\b"
     r"|\bcode (?:review|audit)s?\b(?!\W+(?:habit|culture|process|practice|standard|skill|tool)s?\b)",

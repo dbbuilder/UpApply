@@ -585,3 +585,9 @@ def test_abbreviation_inside_the_offer_is_not_text_after_it(close):
 ])
 def test_close_after_a_reworded_offer_is_flagged(close):
     assert "close_after_offer" in _codes(check_rules(_letter(extra=f"\n\n{close}"), _brief(), None, voice=KIT))
+
+
+@pytest.mark.parametrize("phrase", ["A focused review of the codebase comes first.", "A short review of the Replit codebase helps."])
+def test_nda_offer_covers_a_review_of_the_codebase(phrase):
+    letter = _letter(extra=f" {phrase}\n\n{OFFER} after that.")
+    assert "nda_offer" in _codes(check_rules(letter, _brief(), None, voice=KIT))
