@@ -720,7 +720,7 @@ Return a JSON object with a "milestones" array. Each milestone has:
             {"role": "user", "content": user_prompt},
         ],
         response_format={"type": "json_object"},
-        max_tokens=400,
+        max_completion_tokens=400,
         temperature=0,
     )
 

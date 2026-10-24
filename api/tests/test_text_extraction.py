@@ -84,7 +84,7 @@ async def test_extract_image_calls_openai_and_returns_text():
     assert result == "Extracted OCR text"
     mock_client.chat.completions.create.assert_awaited_once()
     call_kwargs = mock_client.chat.completions.create.call_args.kwargs
-    assert call_kwargs["max_tokens"] == 4000
+    assert call_kwargs["max_completion_tokens"] == 4000
 
 
 @pytest.mark.asyncio

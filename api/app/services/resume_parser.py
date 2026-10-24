@@ -80,7 +80,7 @@ async def parse_resume(resume_text: str) -> Dict[str, Any]:
             },
         ],
         response_format={"type": "json_object"},
-        max_tokens=4000,
+        max_completion_tokens=4000,
         temperature=0.3,
     )
 

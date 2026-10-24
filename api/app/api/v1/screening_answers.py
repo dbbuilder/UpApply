@@ -378,7 +378,7 @@ Write the answer now:"""
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        max_tokens=400,
+        max_completion_tokens=400,
         temperature=0.7,
     )
     answer = (response.choices[0].message.content or "").strip()
