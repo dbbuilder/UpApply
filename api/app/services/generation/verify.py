@@ -316,17 +316,46 @@ _DASHES = ("\u2014", "\u2013")
 _EMOJI = re.compile(
     "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF\U00002190-\U000021FF\u2B50\u2705\u26A0\u20E3]"  # \u20E3: the keycap in "1\ufe0f\u20e3"
 )
+# A verb of seeing directly on "your"/"the" material ("review your codebase", "share the repo"),
+# or a code review/audit that is not a compound like "code review habit".
 _SEES_CLIENT_MATERIAL = re.compile(
     r"\b(?:share|sharing|shared|access to|review|reviewing|look at|looking at|read through|walk me through|audit|"
-    r"inspect|inspecting|examine|go through|dig into)\b"
-    r"(?:\W+\w+){0,5}?\W+(?:repo|repos|repository|repositories|codebase|code base|source code|code|documents|"
+    r"inspect|inspecting|examine|go through|dig into)\W+(?:your|the)"
+    r"(?:\W+\w+){0,2}?\W+(?:repo|repos|repository|repositories|codebase|code base|source code|code|documents|"
     r"documentation|files|data|database|schema)\b"
-    r"|\bcode (?:review|audit)\b",
+    r"|\bcode (?:review|audit)s?\b(?!\W+(?:habit|culture|process|practice|standard|skill|tool)s?\b)",
     re.IGNORECASE,
 )
-_NDA = re.compile(r"\bNDA\b|non-disclosure", re.IGNORECASE)
+_NDA = re.compile(r"\bNDAs?\b|non-disclosure", re.IGNORECASE)
+_URL = re.compile(
+    r"https?://\S+|\bwww\.\S+|\b[\w-]+(?:\.[\w-]+)*\.(?:com|io|net|org|ai|dev|app|co)\b\S*", re.IGNORECASE
+)
+# Split the offer tail into sentences only at a capital, and never after "e.g." / "U.S.".
+_OFFER_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])(?<!\.[A-Za-z]\.)\s+(?=[\"'\u201c(]?[A-Z0-9])|\n\s*\n")
+# A reworded call offer ("happy to jump on a quick call to talk it through").
+_LOOSE_OFFER = re.compile(
+    r"\b(?:I would be |I'd be |I am |I'm )?(?:happy|glad) to (?:jump|hop|get) on a (?:quick |short |brief )?call\b",
+    re.IGNORECASE,
+)
 DEFAULT_OFFER_STEM = "I would be happy to jump on a quick call"
 OFFER_SENTENCE_MAX_WORDS = 30
+
+
+def _names_something(text: str, match: re.Match) -> bool:
+    """A tell-word that is part of a name: joined to an extension ("Underscore.js"), capitalised
+    mid-sentence ("Synergy SIS") or followed by another capitalised word ("Foster Farms")."""
+    rest = text[match.end():]
+    if re.match(r"\.\w", rest):
+        return True
+    if not match.group(0)[0].isupper():
+        return False
+    before = text[:match.start()].rstrip(" \t\"'\u201c\u2018(")
+    return bool(before and before[-1] not in ".!?:\n") or bool(re.match(r"\s+[A-Z]", rest))
+
+
+def check_answer_voice(answers: list[dict], voice: Optional[dict]) -> list[Issue]:
+    """The voice kit's de-AI bans for screening answers on their own (answers-only generation)."""
+    return _check_voice_kit("", answers, voice) if voice else []
 
 
 def _check_voice_kit(body: str, answers: list[dict], voice: dict) -> list[Issue]:
@@ -347,11 +376,14 @@ def _check_voice_kit(body: str, answers: list[dict], voice: dict) -> list[Issue]
     emoji = _EMOJI.search(joined)
     if emoji:
         violations.append(Issue("Emoji or decorative glyph used; use plain words.", "emoji", emoji.group(0)))
-    lowered = joined.lower()
+    plain = _URL.sub(lambda m: " " * len(m.group(0)), joined)
     for exc in exceptions:
-        lowered = lowered.replace(exc, " " * len(exc))
-    tells = [w for w in de_ai.get("words") or [] if re.search(r"\b" + re.escape(w.lower()) + r"\b", lowered)]
-    tells += [p for p in de_ai.get("phrases") or [] if p.lower() in lowered]
+        plain = re.sub(re.escape(exc), lambda m: " " * len(m.group(0)), plain, flags=re.IGNORECASE)
+    tells = [w for w in de_ai.get("words") or [] if any(
+        not _names_something(plain, m) for m in re.finditer(r"\b" + re.escape(w) + r"\b", plain, re.IGNORECASE)
+    )]
+    lowered = plain.lower()
+    tells += [p for p in de_ai.get("phrases") or [] if re.search(r"\b" + re.escape(p.lower()) + r"\b", lowered)]
     if tells:
         violations.append(Issue(
             f"Words that read as machine-written: {', '.join(tells)}.", "tell_word", ", ".join(tells),
@@ -365,10 +397,12 @@ def _check_voice_kit(body: str, answers: list[dict], voice: dict) -> list[Issue]
             ))
 
     offer = (((rules.get("closing") or {}).get("call_offer")) or DEFAULT_OFFER_STEM).strip().rstrip(".\u2026 ")
-    if offer.lower() in body.lower():
+    starts = [m.start() for m in re.finditer(re.escape(offer), body, re.IGNORECASE)]
+    starts += [m.start() for m in _LOOSE_OFFER.finditer(body)]
+    if starts:
         # From the last offer to the end of the body, so a paragraph after the offer counts too.
-        tail = body[body.lower().rindex(offer.lower()):].strip()
-        sentence, *rest = re.split(r"(?<=[.!?])\s+", tail, maxsplit=1)
+        tail = body[max(starts):].strip()
+        sentence, *rest = _OFFER_SENTENCE_SPLIT.split(tail, maxsplit=1)
         after = rest[0] if rest else ""
         if after.strip() or len(sentence.split()) > OFFER_SENTENCE_MAX_WORDS:
             violations.append(Issue(

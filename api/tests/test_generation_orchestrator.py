@@ -333,3 +333,26 @@ async def test_specifics_minimum_is_capped_by_available_evidence_and_ignores_unk
     result, write, _ = await _run([_draft(CLEAN, ("ghost",)), _draft(CLEAN, ("ghost",))],
                                   evidence=Evidence(facts=[FACT, FACT2]))
     assert any(getattr(w, "code", None) == "too_few_specifics" for w in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_answers_only_runs_the_voice_kit_checks():
+    """PR #25 review: the screening-answers endpoint must get the kit's de-AI checks too."""
+    bad = Draft(cover_letter="x", screening_answers=[
+        {"question": "Q?", "answer": "The cutover ran in waves \u2014 at DBBuilder. Each wave had a robust rollback."}
+    ], fact_ids_used=[])
+    good = Draft(cover_letter="x", screening_answers=[{"question": "Q?", "answer": GOOD_ANSWER}], fact_ids_used=[])
+    kit = {"de_ai": {"hard": {"words": ["robust"]}}, "rules": {"avoid_names": [{"name": "DBBuilder"}]}}
+    with patch.object(orch, "build_job_brief", AsyncMock(return_value=BRIEF)), \
+         patch.object(orch, "select_evidence", AsyncMock(return_value=Evidence(facts=[FACT]))), \
+         patch.object(orch, "write_application", AsyncMock(side_effect=[bad, good])) as write, \
+         patch.object(orch, "check_claims", AsyncMock(return_value=[])), \
+         patch.object(orch, "load_voice", return_value=kit):
+        result = await generate_application(
+            db=AsyncMock(), user=USER, profile=PROFILE, title="T", description="D", skills=[],
+            questions=["Q?"], credit_usage=False, answers_only=True,
+        )
+    assert write.call_count == 2
+    codes = {n.code for n in write.call_args_list[1].kwargs["repair_notes"]}
+    assert {"dash", "tell_word", "company_name"} <= codes
+    assert result.warnings == []

@@ -523,3 +523,65 @@ def test_close_after_offer_catches_a_paragraph_after_the_offer():
 def test_nda_offer_covers_other_ways_of_seeing_their_code(phrase):
     letter = _letter(extra=f" {phrase}\n\n{OFFER} after that.")
     assert "nda_offer" in _codes(check_rules(letter, _brief(), None, voice=KIT))
+
+
+# PR #25 review: false positives and misses in the voice-kit checks.
+@pytest.mark.parametrize("sentence", [
+    "Your field techs need access to their inspection data offline.",
+    "The two systems share data through a nightly sync.",
+    "You want a team with a strong code review habit.",
+    "A secure portal where clients share files with their accountant is the goal.",
+    "Parents get access to attendance data in real time.",
+    "Please share your vision for how the data model should evolve.",
+])
+def test_nda_offer_ignores_product_descriptions_and_compounds(sentence):
+    letter = _letter(extra=f" {sentence}\n\n{OFFER} to talk it through.")
+    assert "nda_offer" not in _codes(check_rules(letter, _brief(), None, voice=KIT))
+
+
+def test_nda_offer_accepts_plural_ndas():
+    letter = _letter(extra=f" I would review your codebase first. I routinely sign NDAs before any review.\n\n{OFFER}.")
+    assert "nda_offer" not in _codes(check_rules(letter, _brief(), None, voice=KIT))
+
+
+@pytest.mark.parametrize("sentence", [
+    "Anyone who understands as much about payroll as you do knows the stakes.",
+    "A team that understands ASP.NET WebForms is rare.",
+    "Nothing else in the world offers that reach.",
+])
+def test_tell_phrases_need_word_boundaries(sentence):
+    letter = _letter(extra=f" {sentence}\n\n{OFFER} to talk it through.")
+    assert "tell_word" not in _codes(check_rules(letter, _brief(), None, voice=KIT))
+
+
+@pytest.mark.parametrize("sentence", [
+    "Syncing rosters from Synergy SIS is the hard part.",
+    "The front end still uses Underscore.js helpers.",
+    "Foster Farms needs the same reports.",
+    "The demo is at https://elevate-crm.servicevision.io today.",
+])
+def test_tell_words_skip_names_and_urls(sentence):
+    letter = _letter(extra=f" {sentence}\n\n{OFFER} to talk it through.")
+    assert "tell_word" not in _codes(check_rules(letter, _brief(), None, voice=KIT))
+
+
+def test_tell_words_still_flag_a_sentence_opening():
+    letter = _letter(extra=f" Moreover, the rollout held.\n\n{OFFER} to talk it through.")
+    assert "tell_word" in _codes(check_rules(letter, _brief(), None, voice=KIT))
+
+
+@pytest.mark.parametrize("close", [
+    f"{OFFER} to walk through options, e.g. hosting.",
+    f"{OFFER} to talk through the U.S. launch.",
+    f"{OFFER} to talk through options, i.e. a phased rollout.",
+])
+def test_abbreviation_inside_the_offer_is_not_text_after_it(close):
+    assert "close_after_offer" not in _codes(check_rules(_letter(extra=f"\n\n{close}"), _brief(), None, voice=KIT))
+
+
+@pytest.mark.parametrize("close", [
+    "I would be happy to jump on a quick call to talk it through. In the meantime, here is my plan for phase two.",
+    "I would be happy to jump on a quick call, at no cost or obligation, to talk it through. Also, here is more.",
+])
+def test_close_after_a_reworded_offer_is_flagged(close):
+    assert "close_after_offer" in _codes(check_rules(_letter(extra=f"\n\n{close}"), _brief(), None, voice=KIT))
