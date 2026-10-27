@@ -307,9 +307,11 @@ DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/upapply
 OPENAI_API_KEY=sk-...
 SECRET_KEY=your-secret-key
 CORS_ORIGINS=["chrome-extension://*", "https://www.upwork.com"]
-DEFAULT_MODEL=gpt-4o
+DEFAULT_MODEL=gpt-5.4-nano
+SCORING_MODEL=gpt-5.4-nano
 EMBEDDING_MODEL=text-embedding-3-small
 ```
+`DEFAULT_MODEL` and `SCORING_MODEL` are GPT-5 family models: their calls pass `max_completion_tokens`, never `max_tokens` (needs `openai>=1.45.0`). gpt-4.1-nano is retired.
 
 ### Extension (.env)
 ```
