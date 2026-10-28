@@ -613,3 +613,15 @@ def test_opening_must_be_one_or_two_sentences():
 def test_technology_never_in_the_close():
     letter = f"{SENTENCE}\n\n" + _letter(sentences=16, extra=f"\n\n{OFFER} to walk through the React and Supabase setup.")
     assert "tech_in_close" in _codes(check_rules(letter, _brief(), None, voice=KIT))
+
+
+@pytest.mark.asyncio
+async def test_claims_the_checker_itself_calls_supported_are_dropped():
+    draft = SimpleNamespace(cover_letter="I have led SaaS work for more than 20 years.", screening_answers=[])
+    call = AsyncMock(return_value={"unsupported_claims": [
+        {"claim": "for more than 20 years", "reason": "evidence says 20+ years; same claim", "verdict": "supported"},
+        {"claim": "led SaaS work", "reason": "no fact", "verdict": "unsupported"},
+    ]})
+    with patch("app.services.generation.verify.structured_call", call):
+        issues = await check_claims(draft, Evidence(facts=[SimpleNamespace(id="f", kind="k", statement="s", detail=None)]))
+    assert [i.code for i in issues] == ["unsupported_claim"] and "led SaaS work" in issues[0]
