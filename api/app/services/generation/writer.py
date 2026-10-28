@@ -285,13 +285,15 @@ def build_writer_user_prompt(
     if include_call_offer:
         offer = (
             "CALL OFFER: in the closing paragraph, offer a quick call in one short sentence worded "
-            f'"{call_offer_wording(voice)} ...", and end the letter on it.'
+            f'"{call_offer_wording(voice)} ...", and end the letter on it. Fit the words after the offer to this '
+            'job ("to talk through the rollout", "to hear where the platform stands"); do not fall back on one '
+            'stock phrase such as "to get moving" from letter to letter.'
         )
         if nda:
             offer += (
-                f' {nda_when}end that same sentence with ", {nda}." (for example "{call_offer_wording(voice)} to get '
-                f'moving, {nda}.") and, if it offers a review, make the call the next step after that review. '
-                'Never write "glad to sign an NDA" and never give the NDA its own sentence.'
+                f' {nda_when}end that same sentence with ", {nda}." (shape: "{call_offer_wording(voice)} to <a few '
+                f'words fitted to this job>, {nda}.") and, if it offers a review, make the call the next step after '
+                'that review. Never write "glad to sign an NDA" and never give the NDA its own sentence.'
             )
         parts.append(offer)
     else:
