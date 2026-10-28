@@ -285,7 +285,7 @@ async def _generate_one(email: str, job: dict) -> tuple[str, object, list[dict]]
     return old, new, evidence
 
 
-JOB_ATTEMPTS = 2
+JOB_ATTEMPTS = 3
 SAMENESS_NGRAM = 4
 SAMENESS_MIN_SHARE = 0.15  # a phrase in 15%+ of a batch's openings (or closes) reads as a formula
 
@@ -322,6 +322,8 @@ def batch_sameness(letters: list[str], ignore: tuple[str, ...] = ()) -> list[str
 async def generate(email: str, golden: Path, out_dir: Path, seed: int) -> None:
     from sqlalchemy.exc import DBAPIError
 
+    from app.services.llm import LLMError
+
     jobs = json.loads(golden.read_text())
     outputs, new_meta = {}, {}
     # Each finished job is saved, so a dropped connection costs one job and a rerun resumes.
@@ -338,7 +340,7 @@ async def generate(email: str, golden: Path, out_dir: Path, seed: int) -> None:
             try:
                 old, new, evidence = await _generate_one(email, job)
                 break
-            except (OSError, DBAPIError) as exc:
+            except (OSError, DBAPIError, LLMError) as exc:  # LLMError: the AI proxy 504s on long writer calls
                 if attempt == JOB_ATTEMPTS - 1:
                     raise
                 print(f"retrying {job['id']} after {type(exc).__name__}")
