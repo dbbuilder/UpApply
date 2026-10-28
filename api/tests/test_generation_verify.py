@@ -466,7 +466,7 @@ OFFER = "I would be happy to jump on a quick call at no cost or obligation"
 
 
 def test_vendored_kit_carries_round_3_rules():
-    assert KIT["kit_version"].startswith("v0.4.0")
+    assert KIT["kit_version"].startswith("v0.5.0")
     assert KIT["de_ai"]["hard"]["dashes"] and KIT["rules"]["avoid_names"][0]["name"] == "DBBuilder"
 
 
@@ -510,7 +510,7 @@ def test_nda_offer_needed_when_their_code_comes_up():
     no_nda = _letter(extra=f" If you share the repo, I will review it first.\n\n{OFFER} after that review.")
     assert "nda_offer" in _codes(check_rules(no_nda, _brief(), None, voice=KIT))
     with_nda = _letter(
-        extra=f" If you share the repo, I will review it first.\n\n{OFFER} after that review, and am happy to sign an NDA in advance."
+        extra=f" If you share the repo, I will review it first.\n\n{OFFER} after that review, and would be willing to sign an NDA in advance."
     )
     assert "nda_offer" not in _codes(check_rules(with_nda, _brief(), None, voice=KIT))
 
@@ -598,7 +598,7 @@ def test_glad_to_sign_is_never_allowed():
     letter = f"{SENTENCE}\n\n" + _letter(sentences=16, extra=f"\n\nI am glad to sign an NDA. {OFFER}.")
     assert "glad_to_sign" in _codes(check_rules(letter, _brief(), None, voice=KIT))
     clause = f"{SENTENCE}\n\n" + _letter(
-        sentences=16, extra=f" I would review your codebase first.\n\n{OFFER} to get moving, and am happy to sign an NDA in advance."
+        sentences=16, extra=f" I would review your codebase first.\n\n{OFFER} to get moving, and would be willing to sign an NDA in advance."
     )
     codes = _codes(check_rules(clause, _brief(), None, voice=KIT))
     assert not codes & {"glad_to_sign", "nda_offer", "close_after_offer"}
@@ -625,3 +625,11 @@ async def test_claims_the_checker_itself_calls_supported_are_dropped():
     with patch("app.services.generation.verify.structured_call", call):
         issues = await check_claims(draft, Evidence(facts=[SimpleNamespace(id="f", kind="k", statement="s", detail=None)]))
     assert [i.code for i in issues] == ["unsupported_claim"] and "led SaaS work" in issues[0]
+
+
+def test_no_live_or_die_anywhere_and_one_happy_in_the_close():
+    die = f"{SENTENCE}\n\n" + _letter(sentences=16, extra=f" Rollouts live or die on the cutover.\n\n{OFFER} to talk it through.")
+    assert "morbid_words" in _codes(check_rules(die, _brief(), None, voice=KIT))
+    happy = f"{SENTENCE}\n\n" + _letter(
+        sentences=16, extra=f" I would review your codebase first.\n\n{OFFER} to talk it through, and am happy to sign an NDA in advance.")
+    assert "double_happy" in _codes(check_rules(happy, _brief(), None, voice=KIT))
