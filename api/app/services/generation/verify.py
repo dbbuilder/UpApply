@@ -29,7 +29,7 @@ REPAIR_CODES = (
     "quote_in_opening", "dangling_paragraph", "happy_to", "duplicate_closing",
     "exit_caveat", "also_credential", "stack_in_opening",
     "dash", "emoji", "tell_word", "company_name", "close_after_offer", "nda_offer",
-    "glad_to_sign", "short_opening", "tech_in_close",
+    "glad_to_sign", "short_opening", "tech_in_close", "morbid_words", "double_happy",
 )
 
 
@@ -343,11 +343,12 @@ _LOOSE_OFFER = re.compile(
     re.IGNORECASE,
 )
 DEFAULT_OFFER_STEM = "I would be happy to jump on a quick call"
-OFFER_SENTENCE_MAX_WORDS = 36  # the offer plus ", and am happy to sign an NDA in advance"
+OFFER_SENTENCE_MAX_WORDS = 38  # the offer plus ", and would be willing to sign an NDA in advance"
 # Round 4: Chris's picks open with one sentence of about 50 words.
 OPENING_MAX_SENTENCES = 2
 OPENING_MAX_WORDS = 70
 _GLAD_TO_SIGN = re.compile(r"\bglad to sign\b", re.IGNORECASE)
+_MORBID = re.compile(r"\b(?:die|dies|dying|dead|death|deadly|kill|kills|killing|killer|fatal|doom|doomed)\b", re.IGNORECASE)
 
 
 def _names_something(text: str, match: re.Match) -> bool:
@@ -442,6 +443,18 @@ def _check_voice_kit(body: str, answers: list[dict], voice: dict) -> list[Issue]
                 f"The first paragraph runs {len(sentences)} sentences and {words} words; keep it to one or two "
                 "sentences that reach the matching experience quickly.", "short_opening", paragraphs[0][:200],
             ))
+    if "no_morbid_words" in ids:
+        match = _MORBID.search(joined)
+        if match:
+            violations.append(Issue(
+                f'No live-or-die rhetoric or morbid words ("{match.group(0)}"); say what success depends on instead.',
+                "morbid_words", match.group(0),
+            ))
+    if "single_happy_in_close" in ids and paragraphs and len(re.findall(r"\bhappy\b", paragraphs[-1], re.IGNORECASE)) > 1:
+        violations.append(Issue(
+            '"happy" appears twice in the closing paragraph; keep it in the call offer and say "willing" elsewhere.',
+            "double_happy", paragraphs[-1][:200],
+        ))
     if "no_tech_in_close" in ids and len(paragraphs) > 1:
         named = [label for label, pattern in _STACK_TERMS.items() if pattern.search(paragraphs[-1])]
         if named:
