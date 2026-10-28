@@ -466,7 +466,7 @@ OFFER = "I would be happy to jump on a quick call at no cost or obligation"
 
 
 def test_vendored_kit_carries_round_3_rules():
-    assert KIT["kit_version"].startswith("v0.3.0")
+    assert KIT["kit_version"].startswith("v0.4.0")
     assert KIT["de_ai"]["hard"]["dashes"] and KIT["rules"]["avoid_names"][0]["name"] == "DBBuilder"
 
 
@@ -477,7 +477,8 @@ def test_voice_kit_checks_are_off_without_a_kit():
 
 
 def test_clean_letter_passes_the_kit_checks():
-    assert check_rules(_letter(extra=f"\n\n{OFFER} to talk it through."), _brief(), None, voice=KIT) == []
+    letter = f"{SENTENCE}\n\n" + _letter(sentences=16, extra=f"\n\n{OFFER} to talk it through.")
+    assert check_rules(letter, _brief(), None, voice=KIT) == []
 
 
 @pytest.mark.parametrize("extra,code", [
@@ -509,13 +510,13 @@ def test_nda_offer_needed_when_their_code_comes_up():
     no_nda = _letter(extra=f" If you share the repo, I will review it first.\n\n{OFFER} after that review.")
     assert "nda_offer" in _codes(check_rules(no_nda, _brief(), None, voice=KIT))
     with_nda = _letter(
-        extra=f" If you share the repo, I will review it first, and I am glad to sign an NDA.\n\n{OFFER} after that review."
+        extra=f" If you share the repo, I will review it first.\n\n{OFFER} after that review, and am happy to sign an NDA in advance."
     )
     assert "nda_offer" not in _codes(check_rules(with_nda, _brief(), None, voice=KIT))
 
 
 def test_close_after_offer_catches_a_paragraph_after_the_offer():
-    letter = _letter(extra=f"\n\n{OFFER} to talk it through.\n\nI am glad to sign an NDA as well.")
+    letter = _letter(extra=f"\n\n{OFFER} to talk it through.\n\nI am willing to sign an NDA as well.")
     assert "close_after_offer" in _codes(check_rules(letter, _brief(), None, voice=KIT))
 
 
@@ -591,3 +592,24 @@ def test_close_after_a_reworded_offer_is_flagged(close):
 def test_nda_offer_covers_a_review_of_the_codebase(phrase):
     letter = _letter(extra=f" {phrase}\n\n{OFFER} after that.")
     assert "nda_offer" in _codes(check_rules(letter, _brief(), None, voice=KIT))
+
+
+def test_glad_to_sign_is_never_allowed():
+    letter = f"{SENTENCE}\n\n" + _letter(sentences=16, extra=f"\n\nI am glad to sign an NDA. {OFFER}.")
+    assert "glad_to_sign" in _codes(check_rules(letter, _brief(), None, voice=KIT))
+    clause = f"{SENTENCE}\n\n" + _letter(
+        sentences=16, extra=f" I would review your codebase first.\n\n{OFFER} to get moving, and am happy to sign an NDA in advance."
+    )
+    codes = _codes(check_rules(clause, _brief(), None, voice=KIT))
+    assert not codes & {"glad_to_sign", "nda_offer", "close_after_offer"}
+
+
+def test_opening_must_be_one_or_two_sentences():
+    long_open = _letter(extra=f"\n\n{OFFER} to talk it through.")  # one 17-sentence paragraph
+    assert "short_opening" in _codes(check_rules(long_open, _brief(), None, voice=KIT))
+    assert "short_opening" not in _codes(check_rules(long_open, _brief(), None))  # kit users only
+
+
+def test_technology_never_in_the_close():
+    letter = f"{SENTENCE}\n\n" + _letter(sentences=16, extra=f"\n\n{OFFER} to walk through the React and Supabase setup.")
+    assert "tech_in_close" in _codes(check_rules(letter, _brief(), None, voice=KIT))

@@ -9,7 +9,7 @@
       "signoff": "Regards,",
       "signature": null,
       "call_offer": "I would be happy to jump on a quick call at no cost or obligation",
-      "nda_offer": "I am glad to sign an NDA"
+      "nda_clause": "and am happy to sign an NDA in advance"
     },
     "avoid_names": [
       {
@@ -74,6 +74,27 @@
         "evidence": "2026-10-23 round 3 (\"clean call to action -- no em dash and details that follow\")"
       },
       {
+        "id": "no_glad_to_sign",
+        "rule": "Never write \"glad to sign an NDA\". The NDA offer is a clause of the call-offer sentence: \"..., and am happy to sign an NDA in advance\" (or \"willing to sign\").",
+        "evidence": "2026-10-28 round 4 (\"\\\"I am glad to sign an NDA\\\" is bad\"; \"just \\\"I would be willing\\\" or similar\")"
+      },
+      {
+        "id": "short_opening",
+        "rule": "The opening paragraph is one or two sentences and reaches his matching history quickly. No dashed clauses in the first sentence.",
+        "registers": [
+          "sales-proposal"
+        ],
+        "evidence": "2026-10-28 round 4 (\"first paragraph is too long and takes to many sentences to get to the personal connection\"; \"no need for em dashed clauses in first sentence\")"
+      },
+      {
+        "id": "no_tech_in_close",
+        "rule": "Technology names never appear in the last paragraph.",
+        "registers": [
+          "sales-proposal"
+        ],
+        "evidence": "2026-10-28 round 4 (\"tech should not be in the last paragraph\")"
+      },
+      {
         "id": "no_facts_without_source",
         "rule": "Every specific about Chris (numbers, clients, products, credentials, durations) comes from the facts store.",
         "evidence": "house style; UpApply verify.py"
@@ -133,12 +154,12 @@
       },
       {
         "id": "offer_nda",
-        "rule": "Whenever the letter talks about seeing the client's code, repo, data or documents, say he is glad to sign an NDA. If he offers to review something they share, the call is the explicit next step after that review.",
-        "evidence": "2026-10-23 round 3 (\"RULE: include our willingness to sign an NDA anytime we're talking abotu their code or documents\")"
+        "rule": "Whenever the letter talks about seeing the client's code, repo, data or documents, or the work involves sensitive data, the call-offer sentence ends with the NDA clause (\"..., and am happy to sign an NDA in advance\"). If he offers to review something they share, the call is the explicit next step after that review.",
+        "evidence": "2026-10-23 round 3 (\"RULE: include our willingness to sign an NDA anytime we're talking abotu their code or documents\"); 2026-10-28 round 4 (\"closign paragraph needs include NDA offer since it is sensitive data\")"
       },
       {
         "id": "reassure_early",
-        "rule": "By the end of the opening paragraph the reader knows why his experience makes him safe to hire for this; the proof that follows builds on that.",
+        "rule": "By the end of the one- or two-sentence opening the reader knows why his experience makes him safe to hire for this; the proof that follows builds on that.",
         "registers": [
           "sales-proposal"
         ],
@@ -161,6 +182,46 @@
         "evidence": "2026-10-23 round 3 (\"Start from the business know-how ...\"; \"works from business to tech\")"
       },
       {
+        "id": "name_their_product",
+        "rule": "When the post names the client's product or project, use that name in the opening sentence.",
+        "registers": [
+          "sales-proposal"
+        ],
+        "evidence": "2026-10-28 round 4 (\"When its named, we need to use the name in the opening sentence\")"
+      },
+      {
+        "id": "no_morbid_opening",
+        "rule": "No morbid or violent words (die, dead, death, kill, fatal) in the opening paragraph.",
+        "registers": [
+          "sales-proposal"
+        ],
+        "evidence": "2026-10-28 round 4 (\"B includes \\\"Die\\\" whcih should never be in intro paragraphs\")"
+      },
+      {
+        "id": "tech_midletter",
+        "rule": "Technology belongs mid-letter, woven into the narrative; never leading the first sentence or in the close.",
+        "registers": [
+          "sales-proposal"
+        ],
+        "evidence": "2026-10-28 round 4 (\"tech should be mid-applicaiton; nto the first sentence\"; \"melds tech in better into the narrative rather than leading\")"
+      },
+      {
+        "id": "answer_post_questions",
+        "rule": "When the post asks applicants questions in its body, answer each one briefly in the letter.",
+        "registers": [
+          "sales-proposal"
+        ],
+        "evidence": "2026-10-28 round 4 (\"Included answers to questions\")"
+      },
+      {
+        "id": "plain_close",
+        "rule": "The close is one plain sentence or two, not ornate or stacked with clauses.",
+        "registers": [
+          "sales-proposal"
+        ],
+        "evidence": "2026-10-28 round 4 (\"B's is too ornate in clauses\"; \"closing paragraph is cleaner for a call to action\")"
+      },
+      {
         "id": "vary_openings",
         "rule": "Do not reuse one opening formula from letter to letter (for example \"X rarely fails where you would expect\"). Openings can be a compliment, the hidden hard part, the outcome they want, or the matching experience framed as an insight.",
         "registers": [
@@ -180,7 +241,7 @@
       },
       {
         "id": "compliment_welcome",
-        "rule": "A genuine compliment about the client's idea is a good opening move.",
+        "rule": "A genuine compliment about the client's idea is a good opening move. Keep it wholly positive; never a left-handed compliment that ends less positive than it began.",
         "registers": [
           "sales-proposal"
         ],
@@ -192,6 +253,7 @@
       "I am writing to express",
       "delve",
       "leverage synergies",
+      "glad to sign an NDA",
       "in today's fast-paced"
     ]
   },
@@ -199,7 +261,7 @@
     "formal-business": "# Register: formal business : PROVISIONAL\n\nPartner and investor letters, contract cover notes, board and shareholder updates, formal email.\n**Provisional**: derived from the persona, not yet judged on real samples. Validate with a few\nblind pairs before an agent relies on it.\n\n## Defaults\n- Same senior-peer stance as sales, with less persuasion and more precision. State the point in\n  the first paragraph; supporting detail follows.\n- Full sentences and complete paragraphs; headings only for documents longer than a page.\n- Decisions and asks are explicit and dated (\"We need X by Y\"), never buried in a closing.\n- Numbers and commitments come only from the facts store or the source document, quoted exactly.\n- No compensation in prose unless the document is a term sheet, quote or schedule.\n- Close with the next step and owner; sign-off \"Regards,\" then the name when a signature is needed.\n\n## Open questions for Chris\n- Salutation: \"Hi <name>,\" vs none (sales letters use none).\n- How much warmth in investor/shareholder updates vs partner notes.\n",
     "marketing": "# Register: marketing: PROVISIONAL\n\nSite copy, LinkedIn and blog posts, case studies, product pages.\n**Provisional**: derived from the persona and sales evidence; not yet judged on marketing samples.\n\n## Defaults\n- Open on the reader's problem with the same insight-first move as proposals; the product comes\n  second, as the answer.\n- Case studies: the situation, then what usually goes wrong, then what was built, then the\n  measured outcome (from the facts store), then one line on why it matters to a reader like this one.\n- Concrete over superlative; no unverifiable \"best\", \"leading\", \"revolutionary\".\n- Short paragraphs, scannable subheads; bullets allowed (unlike letters).\n- Products by real name and domain; \"MVP\", not \"prototype\".\n- Calls to action invite without pressure, matching his proposal closings.\n\n## Open questions for Chris\n- First person (\"I built …\") vs company voice (\"ServiceVision built …\") per channel.\n- Tone on LinkedIn vs site copy.\n",
     "operations": "# Register: operations: PROVISIONAL\n\nSOPs, runbooks, operations manuals, internal process docs.\n**Provisional**: drawn from how his technical docs read (runbooks, NEXT.md contracts), not yet\njudged as a register.\n\n## Defaults\n- Purpose first: one sentence on what the procedure achieves and when to use it.\n- Numbered steps for sequences; each step one action with its expected result or check.\n- Exact commands, paths and names; no paraphrase where precision matters.\n- State guardrails and irreversible steps explicitly, before the step.\n- \"Done when\" checks a new person can verify without asking.\n- Plain, imperative voice (\"Run …\", \"Confirm …\"); the first-word-\"I\" rule does not apply here.\n\n## Open questions for Chris\n- Audience default: new hire vs contractor vs agent.\n",
-    "sales-proposal": "# Register: sales proposal\n\nUpwork proposals, cover letters, RFP responses and screening answers. **Evidence-backed**: blind A/B rounds (2026-10-22, 2026-10-23, 2026-10-23 round 3) plus 358 revision requests and 315 openings mined from his signed ChatGPT letters.\n\n## Shape (about 300 to 450 words; screening answers 2 to 5 sentences)\n1. **Opening paragraph, the one that matters most.** Two or three sentences. A sharp observation about the client's problem or domain: where this kind of work usually fails, the part that is harder than it looks, the outcome they are after, or a genuine compliment on the idea. Start with a noun phrase or gerund. No quotes, no stack names, no resume lines. Vary the form from letter to letter; never one formula. When the post asks a business question, start from the business. End the paragraph with the reassurance: why his experience makes him safe to hire for exactly this.\n2. **Proof paragraph(s).** Two or three relevant pieces of evidence from the facts store, chosen for this reader. If one of his products sits in the client's own domain, it leads. Credentials in first person (\"My MBA …\"). Products by real name; skip ones that don't fit the domain. Never the company's legal name: \"my global SaaS company\". Short paragraphs; a short list is fine for steps or deliverables.\n3. **Approach.** Advisory: the questions he would settle first and the judgment he brings, with clear readiness to fill in details once he knows their situation. Not a pre-chosen solution.\n4. **Closing paragraph.** Short and inviting, not specific, no conditional exit, ending on the call offer: \"I would be happy to jump on a quick call at no cost or obligation …\". Nothing after it. If he offers to review their code or documents, one sentence before the offer says so and that he is glad to sign an NDA, and the call follows the review.\n5. **Sign-off.** \"Regards,\" once.\n\n## Do / don't (from his notes)\n| Do | Don't |\n|---|---|\n| \"Legacy .NET Framework applications backed by SQL Server rarely break where the ticket says they did.\" | \"Twenty-five years of .NET and SQL Server …\" as the opener |\n| \"Flight Memory is a smart concept: pilots need a frictionless way to capture …\" (compliment + insight) | \"Most startup CTOs get hired to build, and then spend …\" (blames the role) |\n| \"I would be happy to jump on a quick call at no cost or obligation …\" | \"If this sounds like the right fit, I would be happy …\" / \"Happy to jump on …\" |\n| Choose FireProofApp / AestheticIQ for healthcare | UpApply for a healthcare job; edtech framing for retail work |\n| Paraphrase the post | Repeat \"lrs05.bak at 54 MB\" from the post |\n| \"I am a technical founder …\" | \"I am also a technical founder …\" |\n| \"my global SaaS company\" | \"DBBuilder, Inc.\" |\n| AI work in general when the post names one tool but means AI | Building the letter around the one tool the post named |\n| A close that ends on the call offer | \"…obligation to talk through your approach, including which tools make sense…\" (details after the offer) |\n\n## Screening answers\nAnswer every question, in order, in the same voice. Lead with the direct answer, then one concrete example from the facts store. Prefer a different fact than the letter leans on.\n\n## Scorecard (stage 3 of `../../pipeline/`; each criterion 1 to 5)\n| # | Criterion | Bar | Meets bar when |\n|---|---|:--:|---|\n| 1 | Opening insight | ≥4 | First paragraph is an observation about the reader's problem, in his words, noun or gerund start, no quote, no stack, no resume line, not the same formula as his recent letters |\n| 1b | Reassurance | ≥4 | By the end of the opening the reader knows why his experience makes him safe to hire; the most on-domain product leads the proof |\n| 2 | Relevance of proof | ≥4 | Every product and fact cited fits this reader's domain; nothing off-topic |\n| 3 | Advisory stance | ≥4 | Judgment and questions over a pre-chosen solution; readiness to fill in details shown |\n| 4 | Generosity to the reader | =5 | No blame on the reader's role, team or industry; a compliment where genuine |\n| 5 | Every specific sourced | =5 | Each number, name, product and credential maps to an approved fact |\n| 6 | Inviting close | ≥4 | Short last paragraph ending on the call offer, nothing after it, no conditional exit; NDA offered when their code or documents come up |\n| 7 | Sounds like him | ≥4 | Plain, conversational, succinct; no AI cadence; passes `tools/check.py --writer chris --letter` |\n\nConverge only when every bar is met, the proof stage has zero blockers and the checker reports zero hard hits.\n\nSee `../exemplars/sales.md` for passages he chose and why.\n"
+    "sales-proposal": "# Register: sales proposal\n\nUpwork proposals, cover letters, RFP responses and screening answers. **Evidence-backed**: blind A/B rounds (2026-10-22, 2026-10-23, 2026-10-23 round 3, 2026-10-28 round 4) plus 358 revision requests and 315 openings mined from his signed ChatGPT letters.\n\n## Shape (about 300 to 450 words; screening answers 2 to 5 sentences)\n1. **Opening paragraph, the one that matters most.** One or two sentences (his picks run about 50 words). A sharp observation about the client's problem or domain, the outcome they are after, or a wholly positive compliment on the idea, then straight to his matching history: why his experience makes him safe to hire for exactly this. If the post names their product or project, use that name in the first sentence. Start with a noun phrase or gerund. No quotes, no stack names, no dashed clauses, no resume lines, no morbid words (die, dead, kill). Vary the form from letter to letter; never one formula. When the post asks a business question, start from the business.\n2. **Proof paragraph(s).** Two or three relevant pieces of evidence from the facts store, chosen for this reader. If one of his products sits in the client's own domain, it leads. Credentials in first person (\"My MBA …\"). Products by real name; skip ones that don't fit the domain. Never the company's legal name: \"my global SaaS company\". Short paragraphs; a short list is fine for steps or deliverables.\n3. **Approach.** Advisory: the questions he would settle first and the judgment he brings, with clear readiness to fill in details once he knows their situation. Not a pre-chosen solution. Technology is woven in here, mid-letter. If the post asks applicants questions, answer each briefly.\n4. **Closing paragraph.** Short, plain and inviting, not specific, no conditional exit, no technology, ending on the call offer: \"I would be happy to jump on a quick call at no cost or obligation …\". Nothing after it. When their code, documents or sensitive data come up, the NDA is a clause of that same sentence: \"I would be happy to jump on a quick call at no cost or obligation to get moving, and am happy to sign an NDA in advance.\" Never \"glad to sign an NDA\".\n5. **Sign-off.** \"Regards,\" once.\n\n## Do / don't (from his notes)\n| Do | Don't |\n|---|---|\n| \"Legacy .NET Framework applications backed by SQL Server rarely break where the ticket says they did.\" | \"Twenty-five years of .NET and SQL Server …\" as the opener |\n| \"Flight Memory is a smart concept: pilots need a frictionless way to capture …\" (compliment + insight) | \"Most startup CTOs get hired to build, and then spend …\" (blames the role) |\n| \"I would be happy to jump on a quick call at no cost or obligation …\" | \"If this sounds like the right fit, I would be happy …\" / \"Happy to jump on …\" |\n| Choose FireProofApp / AestheticIQ for healthcare | UpApply for a healthcare job; edtech framing for retail work |\n| Paraphrase the post | Repeat \"lrs05.bak at 54 MB\" from the post |\n| \"I am a technical founder …\" | \"I am also a technical founder …\" |\n| \"my global SaaS company\" | \"DBBuilder, Inc.\" |\n| AI work in general when the post names one tool but means AI | Building the letter around the one tool the post named |\n| \"…to get moving, and am happy to sign an NDA in advance.\" | \"I am glad to sign an NDA.\" as its own sentence |\n| \"Flight Memory is a smart concept: …\" (their product named first) | \"A second brain for preflight is a smart idea …\" |\n| A wholly positive compliment | A compliment that turns (\"…is a smart investment, and it usually means the team outgrew …\") |\n| A close that ends on the call offer | \"…obligation to talk through your approach, including which tools make sense…\" (details after the offer) |\n\n## Screening answers\nAnswer every question, in order, in the same voice. Lead with the direct answer, then one concrete example from the facts store. Prefer a different fact than the letter leans on.\n\n## Scorecard (stage 3 of `../../pipeline/`; each criterion 1 to 5)\n| # | Criterion | Bar | Meets bar when |\n|---|---|:--:|---|\n| 1 | Opening insight | ≥4 | First paragraph is one or two sentences: an observation about the reader's problem in his words (their product named if the post names it), noun or gerund start, no quote, no stack, no dashed clause, no resume line, not the same formula as his recent letters |\n| 1b | Reassurance | ≥4 | By the end of the opening the reader knows why his experience makes him safe to hire; the most on-domain product leads the proof |\n| 2 | Relevance of proof | ≥4 | Every product and fact cited fits this reader's domain; nothing off-topic |\n| 3 | Advisory stance | ≥4 | Judgment and questions over a pre-chosen solution; readiness to fill in details shown |\n| 4 | Generosity to the reader | =5 | No blame on the reader's role, team or industry; a compliment where genuine |\n| 5 | Every specific sourced | =5 | Each number, name, product and credential maps to an approved fact |\n| 6 | Inviting close | ≥4 | Short, plain last paragraph ending on the call offer, nothing after it, no conditional exit, no technology; NDA as a clause of the offer when their code, documents or sensitive data come up |\n| 7 | Sounds like him | ≥4 | Plain, conversational, succinct; no AI cadence; passes `tools/check.py --writer chris --letter` |\n\nConverge only when every bar is met, the proof stage has zero blockers and the checker reports zero hard hits.\n\nSee `../exemplars/sales.md` for passages he chose and why.\n"
   },
   "provisional_registers": [
     "formal-business",
@@ -291,5 +353,5 @@
       "quite"
     ]
   },
-  "kit_version": "v0.3.0 (ddf5420836ec)"
+  "kit_version": "v0.4.0 (8eb9751df66f)"
 }

@@ -279,7 +279,7 @@ def test_writer_and_refine_systems_carry_ab_feedback_rules():
     from app.services.generation.refine import _system_prompt
 
     for system in (build_writer_system(PROFILE), _system_prompt(PROFILE)):
-        assert "INTRO (the most important paragraph, two or three sentences)" in system
+        assert "INTRO (the most important paragraph, one or two sentences, about 50 words)" in system
         assert "Do not fall back on one formula" in system
         assert "it leads the proof" in system
         assert "make it the last sentence of the letter: nothing after it" in system
@@ -287,7 +287,7 @@ def test_writer_and_refine_systems_carry_ab_feedback_rules():
         assert "Never quote the job post" in system
         assert "No quotation marks in the first paragraph." in system
         assert "one-sentence paragraph that ends in a comma or a colon" in system
-        assert "CLOSING: end the body with one short, inviting paragraph that is not specific" in system
+        assert "CLOSING: end the body with one short, plain, inviting paragraph that is not specific" in system
         assert '"I would be happy to jump on a quick call at no cost or obligation ..."' in system
         assert 'Never start a sentence with "Happy to"' in system
         assert '"My MBA ..." rather than "The MBA ..."' in system
@@ -331,7 +331,7 @@ def test_writer_system_carries_the_voice_kit_for_a_mapped_user():
         # The existing rule sections stay.
         assert "NO FACT, NO CLAIM" in system and "HARD RULES (violations are failures)" in system
     assert build_writer_system(PROFILE, KIT_EMAIL) == build_writer_system(PROFILE, KIT_EMAIL.upper())  # stable
-    assert len(build_writer_system(PROFILE, KIT_EMAIL)) < 6000 * 4  # ~6k tokens
+    assert len(build_writer_system(PROFILE, KIT_EMAIL)) < 8000 * 4  # ~8k tokens (cached; kit v0.4.0 is ~6.2k)
 
 
 def test_writer_system_without_a_kit_is_unchanged():

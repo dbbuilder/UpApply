@@ -29,6 +29,7 @@ REPAIR_CODES = (
     "quote_in_opening", "dangling_paragraph", "happy_to", "duplicate_closing",
     "exit_caveat", "also_credential", "stack_in_opening",
     "dash", "emoji", "tell_word", "company_name", "close_after_offer", "nda_offer",
+    "glad_to_sign", "short_opening", "tech_in_close",
 )
 
 
@@ -338,7 +339,11 @@ _LOOSE_OFFER = re.compile(
     re.IGNORECASE,
 )
 DEFAULT_OFFER_STEM = "I would be happy to jump on a quick call"
-OFFER_SENTENCE_MAX_WORDS = 30
+OFFER_SENTENCE_MAX_WORDS = 36  # the offer plus ", and am happy to sign an NDA in advance"
+# Round 4: Chris's picks open with one sentence of about 50 words.
+OPENING_MAX_SENTENCES = 2
+OPENING_MAX_WORDS = 70
+_GLAD_TO_SIGN = re.compile(r"\bglad to sign\b", re.IGNORECASE)
 
 
 def _names_something(text: str, match: re.Match) -> bool:
@@ -414,8 +419,31 @@ def _check_voice_kit(body: str, answers: list[dict], voice: dict) -> list[Issue]
         match = _SEES_CLIENT_MATERIAL.search(body)
         if match and not _NDA.search(body):
             violations.append(Issue(
-                "The letter talks about seeing the client's code or documents; say you are glad to sign an NDA.",
+                "The letter talks about seeing the client's code or documents; offer to sign an NDA in the call-offer sentence.",
                 "nda_offer", match.group(0),
+            ))
+    if "no_glad_to_sign" in ids:
+        match = _GLAD_TO_SIGN.search(joined)
+        if match:
+            violations.append(Issue(
+                'Never write "glad to sign an NDA"; fold the NDA into the call offer ("..., and am happy to sign an NDA in advance").',
+                "glad_to_sign", joined[max(0, match.start() - 40):match.end() + 20],
+            ))
+    paragraphs = [p.strip() for p in _PARAGRAPH_SPLIT.split(body) if p.strip()]
+    if "short_opening" in ids and paragraphs:
+        sentences = [s for s in _sentences(paragraphs[0]) if len(s.split()) >= 4]
+        words = len(paragraphs[0].split())
+        if len(sentences) > OPENING_MAX_SENTENCES or words > OPENING_MAX_WORDS:
+            violations.append(Issue(
+                f"The first paragraph runs {len(sentences)} sentences and {words} words; keep it to one or two "
+                "sentences that reach the matching experience quickly.", "short_opening", paragraphs[0][:200],
+            ))
+    if "no_tech_in_close" in ids and len(paragraphs) > 1:
+        named = [label for label, pattern in _STACK_TERMS.items() if pattern.search(paragraphs[-1])]
+        if named:
+            violations.append(Issue(
+                f"Technology in the closing paragraph ({', '.join(named)}); keep the close plain.",
+                "tech_in_close", ", ".join(named),
             ))
     return violations
 
