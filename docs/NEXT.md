@@ -2,10 +2,10 @@
 
 autopilot: off
 autopilot-max: 10
-built: 2026-10-21T06:05
-branch: feat/mdg-3-loop
-head: 64afe8a
-status: done
+built: 2026-10-29T00:00
+branch: main
+head: 9cbafd9
+status: active
 
 <!--
 Contract for unattended work in this repo. Read by advance-all, the autopilot Stop hook and dispatch-workstreams.
@@ -15,40 +15,39 @@ Contract for unattended work in this repo. Read by advance-all, the autopilot St
 
 ## Goal
 
-The v2 engine is built, merged and live behind `generation_v2` (off). Facts are loaded (265 approved), the proposal history is scraped (194 / 166 complete) and the blind A/B packet is waiting on Chris's judgement. What is left unattended: make the docs match what actually shipped and stop the scraper storing Upwork's opaque numeric status codes, so outcomes can drive the learning loop.
+v2 is live for Chris (round 5 passed 17/20) and the proxy limit is fixed. Finish the rollout per `docs/ROLLOUT-STATUS-2026-10-28.md` §7: job-queue drafts on v2, a success report, then the legacy removal once every active user is on v2.
 
 ## Guardrails
 
 - No database migrations, deploys, secrets or env-var writes (see ~/.config/claude/overnight-defaults.md)
-- Never push, open/merge PRs, call the production API, or touch the Render Postgres ipAllowList; commit locally on `feat/mdg-3-loop` only
-- Never commit the uncommitted extension version bump (extension/package.json, package-lock.json, public/manifest.json) or anything under `working/` / `docs/evals/`
-- Never flip `generation_v2`, never open or summarise `docs/evals/*/key.json` (the A/B answer key)
-- Tests: `docker start upapply-test-pg`, then `cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q` (644 passing at 64afe8a; a large skipped count means the DB is down) and `cd extension && npx vitest run && npm run type-check` (60 passing)
+- Never push, open/merge PRs, call the production API, or touch the Render Postgres ipAllowList; commit locally only
+- Never run a working-tree-wide discard (`git checkout -- .`, `git restore .`, `git reset --hard`, `git clean`, bare `git stash`); `git add` explicit paths only; never commit `working/` or `docs/evals/`
+- Never flip `generation_v2` for anyone, never open `docs/evals/*/key.json`
+- Voice rules live in the kit repo (`~/dev2/sv/writing-style`); change them only from Chris's dated feedback
+- Tests: `docker start upapply-test-pg`, then `(cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q)` (773 passing at 9cbafd9)
 
 ## Steps
 
-- [x] 1. (e7906d3) CLAUDE.md "Corpus & Memory Scripts": the `ingest_chatgpt_facts.py` row still says "Work-only by default"; since #15 the default is `--source signed` (final message signed "Chris"/"Chris Therriault" per conversation, sent as `chatgpt_signed_letter`), with `--source work` / `--source all` (`--all` alias) — Done when: `grep -c 'source signed' CLAUDE.md` ≥ 1, `grep -c 'Work-only by default' CLAUDE.md` returns 0, and `api/venv/bin/python scripts/ingest_chatgpt_facts.py --help` lists `--source`
-- [x] 2. (5085137) Runbook (`docs/superpowers/runbook-memory-driven-generation.md`): record what the rollout actually needed — ingest default `--source signed`; proposal import pacing/chunks and that Upwork pages now carry `<script id="__NUXT_DATA__">` (Nuxt 3) instead of `window.__NUXT__`; `/facts/from-proposals` and `/facts/from-contracts`; build-golden/generate need prod DB access, done by temporarily setting the Render Postgres `ipAllowList` to this Mac's `/32` and clearing it afterwards — Done when: `grep -c '__NUXT_DATA__' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1, `grep -c 'ipAllowList' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1, `grep -c 'source signed' docs/superpowers/runbook-memory-driven-generation.md` ≥ 1
-- [x] 3. (845cc51) Extension: when recording a scraped proposal, prefer the list page's human-readable status text over the detail page's numeric Upwork code (`status: nuxtStatus || …` in `extension/src/background/index.ts`), keeping the numeric code only as a last resort, via a pure helper in `extension/src/lib/proposal-scrape.ts` — Done when: `npx vitest run` passes including a new test for the helper (list text wins; numeric code used only when no list text), and `npm run type-check` is clean
+- [ ] 1. Job-queue drafts on v2: in `api/app/api/v1/job_queue.py` (the `generate_cover_letter` call near line 401), use `generate_application` when the profile has `generation_v2` on, keeping legacy otherwise and storing the same draft fields — Done when: a new test shows a v2 user's queued job is drafted by `generate_application` and a flag-off user's by the legacy generator, and the full suite passes
+- [ ] 2. Success report (Q4 A): `scripts/outcome_report.py` prints reply / interview / hire rates for proposals whose letter came from v2 (cover_letters with v2 traceability columns set) vs the 90 days before `generation_v2` was turned on, from the proposals + outcome_events tables, read-only — Done when: the script has a `--since` flag, a unit test over seeded rows passes, and `--help` documents both groups
 
 ## Decisions pending
 
-- [2026-10-13] Rotate the UpApply password (exposed in commit 3b7affc and in the 2026-10-19 session transcript); revoke the dead Render key still in git history (`rnd_wfmF…`, removed by #14) (user action)
-- [2026-10-21] Judge the blind A/B at https://claude.ai/artifact/D6rGtxxbmnGPBDkihzFzQ9, then say "score the A/B": read `judgments` → fill `docs/evals/2026-10-20/scores.csv` → `eval_generation.py score`; ≥75% of decided pairs → flip `generation_v2` for Chris (user action, then attended session)
-- [2026-10-21] Upwork numeric application status codes ('8' ×97, '2' ×44, '7' ×6, '3', '10') can't be mapped to outcomes yet — only '7' = active submitted is confirmed (saved page source). Needs a few proposal pages with known outcomes to map, or step 3's list-text status on a re-scrape (user to provide pages, or re-run the Proposals import after step 3 ships)
-- [2026-10-21] Won Contracts import stores contract titles/dates but no client feedback text, so no `client_quote` facts exist; capturing feedback gives the strongest evidence type — design needed (A: scrape feedback on contract pages, B: paste testimonials manually as facts)
-- [2026-10-21] `scripts/sync-doppler-to-render.sh` pushes every Doppler `prd` value; Doppler and Render had drifted (stale key, wrong `/v1` base URL) — decide the source of truth before the next sync (A: Doppler authoritative, fix it first; B: sync only named keys)
-- [2026-10-21] Unused candidates in the queue: 1,722 from signed ChatGPT letters (pairs/weaker one-offs), 791 weaker proposal claims, 61 low-value, 22 contract records, 142 doubtful unsigned turns — keep (harmless, never reach a letter) or bulk-reject (recommendation: keep until the A/B passes)
+- [2026-10-29] Q11 A needs a real `sk-ant-` key added to Doppler `prd` as `WRITER_ANTHROPIC_API_KEY` (UpApply holds only an AICostCentral virtual key); until then the writer uses the proxy, which now allows 300s (Chris)
+- [2026-10-29] Q5: scraping client feedback needs one saved Upwork page that shows client feedback (contract or profile page source) to map the DOM (Chris to provide)
+- [2026-10-29] Q3: Gus Tello next week needs his account email, approved facts (ChatGPT export or proposals) and, optionally, a `gus/` voice kit before his flag goes on (Chris)
+- [2026-10-29] Q4: re-run the Proposals import in the extension (≥1.0.18) so outcomes arrive as readable statuses before the report means anything (Chris)
+- [2026-10-13] Q12: rotate the UpApply password (commit 3b7affc) and revoke the old Render key in git history (Chris)
+- [2026-10-29] Q13: wire the voice kit into the gtm-bible sales agent next, then marketing (attended session)
 
 ## Log
 
-- [2026-10-20] #17 'I' banned only as first word; extractor skips compensation; 9 compensation facts removed; one-offs 143→62; 198 approved
-- [2026-10-20] #18 throttle-safe scraper (pacing, backoff, chunks, incremental save, skip complete)
-- [2026-10-20] #19 scraper decodes Upwork's Nuxt 3 `__NUXT_DATA__` (window.__NUXT__ gone); 194 proposals, 166 complete
-- [2026-10-20] #20 prod bug: anthropic SDK 1.13 rejects `temperature` → legacy cover letters crashed; moved to extra_body + AST guard test — 7b09267
-- [2026-10-20] /facts/from-proposals: 1,362 candidates → 284 dup rejected → 69 shortlisted → 67 approved; 265 approved total
-- [2026-10-20] Golden set (20 jobs) + blind A/B packet generated via temporary prod DB allowlist (removed after); judging page published
-- [2026-10-21] /facts/from-contracts: 22 weak contract-record candidates, left unused; no client feedback captured
-- [2026-10-21] step 1 done — e7906d3 — CLAUDE.md ingest row: default --source signed, work/all modes; --help lists --source; 644 API tests pass
-- [2026-10-22] step 2 done — 5085137 — runbook: --source signed ingest, Nuxt 3 __NUXT_DATA__ scrape + pacing/chunks, from-proposals/contracts, temporary ipAllowList for build-golden/generate; 644 API tests pass
-- [2026-10-22] step 3 done — 845cc51 — pickProposalStatus: list text (responded/interviewed) > archived > submitted > numeric code; vitest 60/60, type-check clean
+- [2026-10-28] Round 5 passed 17/20; generation_v2 on for Chris; A/B/C follow-up 2/3 to v2
+- [2026-10-28] Kit v0.5.0 / #32: NDA "would be willing to sign", no live-or-die, one "happy" per close
+- [2026-10-28] #33 call-offer wording check; #35 outcome credits the submitted letter; #34 closed (streaming cannot beat the proxy limit)
+- [2026-10-29] AICostCentral #27 deployed: /v1/messages maxDuration 60 → 300; 97s and 113s calls verified
+- [2026-10-29] 20 Vision Companies fact rewrites applied (Q1)
+- [2026-10-29] Doppler made authoritative; full sync to Render (Q8)
+- [2026-10-29] #36 extension 1.0.19 committed (Q9); checkout now on main
+- [2026-10-29] Kit v0.5.1: experience-led openers note (Q10)
+- [2026-10-29] #37 writer retry + optional direct Anthropic route (Q11 A+C)

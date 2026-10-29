@@ -145,6 +145,28 @@ Fill `docs/evals/<date>/scores.csv` (A, B or tie) **without opening `key.json`**
 `./venv/bin/python ../scripts/eval_generation.py score --run-dir ../docs/evals/<date>`.
 Pass = new preferred in ≥75% of pairs, zero unsupported claims.
 
+### Rounds 3-4: running another round
+- **Voice first.** Chris's notes go into the voice kit (`~/dev2/sv/writing-style`, repo
+  `dbbuilder-org/sv-writing-style`): log them verbatim in `chris/feedback-log.md`, change
+  `chris/rules.yaml` / the register, run `python3 tools/build.py chris` and the kit tests, merge and
+  tag. Then vendor it here with `api/venv/bin/python scripts/sync_voice_kit.py` (stamps `kit_version`
+  into `api/app/voice/chris.json`) and open a PR.
+- **New seed every round** (`--seed`, e.g. the date) so A/B sides are reshuffled, and a new
+  `--out-dir` (`docs/evals/<date>-r<n>`).
+- **Resume.** `generate` saves each finished job as `<out-dir>/partial/<job_id>.json` and skips
+  saved jobs on the next run, and retries a job once on a dropped DB connection. After a dropped
+  connection or an AI proxy 504, rerun the same command; delete `partial/` only when the code
+  changed and every job must be regenerated.
+- **Read the generate output before publishing.** It prints the `sameness` report (four-word
+  phrases repeated across 15%+ of a batch's openings or closes, for both sides); the same report and
+  each draft's evidence statements (`new_meta.<job_id>.evidence`) are saved in `key.json`. Use them
+  only for diagnosis, after scoring, never to inform the judging.
+- **Judging page.** Seed the blind page's `review/pairs` doc from `pairs.md` / `key.json` sides
+  (title, job post, the letter actually sent, A, B). claude.ai pages belong to the account that
+  published them and became unreachable when the session switched accounts (rounds 3-4). If the
+  page cannot be read back, Chris fills `scores.csv` from `pairs.md` directly; scoring needs only
+  that file and `key.json`.
+
 ## 7. Flip the flag (only after a pass)
 ```sql
 UPDATE user_profiles SET generation_v2 = true
