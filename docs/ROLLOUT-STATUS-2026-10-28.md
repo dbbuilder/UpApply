@@ -188,7 +188,7 @@ The legacy path is untouched until Phase 3. The runbook (`docs/superpowers/runbo
 | Q8 | A: Doppler authoritative, then sync | **Done.** Four Render-only keys copied into Doppler, full sync run; Render now mirrors Doppler (`DATABASE_URL` stays Render-managed; `CORS_ORIGINS` is unused by the code) |
 | Q9 | A: commit the extension bump | **Done** (#36, 1.0.19); the working checkout now follows `main` |
 | Q10 | Round 3 is right; round 2 disliked the paragraph as a whole | **Done** (kit v0.5.1) |
-| Q11 | A + C | **Root cause fixed:** AICostCentral `/v1/messages` `maxDuration` 60 → 300 (AI-Cost-Central#27, deployed; 97s and 113s calls now complete). **C done** (#37: one retry). **A ready** (#37: `WRITER_ANTHROPIC_API_KEY`), needs a real `sk-ant-` key in Doppler `prd` to take effect |
+| Q11 | A + C | **Root cause fixed:** AICostCentral `/v1/messages` `maxDuration` 60 to 300 (AI-Cost-Central#27, deployed; 97s and 113s calls now complete). **C done** (#37: one retry). **A ready** (#37: `WRITER_ANTHROPIC_API_KEY`), needs a real `sk-ant-` key in Doppler `prd` to take effect |
 | Q12 | Credentials | Chris's action (steps in the reply) |
 | Q13 | A then B-marketing: gtm-bible sales agent, then marketing | Next build after the job-queue port |
 
