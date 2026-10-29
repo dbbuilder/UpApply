@@ -21,6 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.models.cover_letter import CoverLetter
+from app.models.job import Job
 from app.models.job_queue import JobQueueItem
 from app.models.outcome_event import OutcomeEvent
 from app.models.user import User, UserProfile
@@ -352,8 +354,51 @@ async def generate_queue_item_draft(
     return _to_response(item)
 
 
+async def _job_for_queue_item(db: AsyncSession, item: JobQueueItem) -> Job:
+    """The Job row a queue item's v2 cover letter hangs off (matched by user + Upwork URL).
+    Outcome sync finds a proposal's letter through its job, so the draft needs one."""
+    job = (await db.execute(
+        select(Job).where(Job.user_id == item.user_id, Job.upwork_url == item.upwork_url)
+        .order_by(Job.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if job is None:
+        job = Job(
+            user_id=item.user_id, upwork_url=item.upwork_url, title=item.title,
+            description=item.description or "", skills_required=item.skills or [],
+            budget_type=item.budget_type, budget_amount=item.budget_amount,
+            client_info=item.client_info, source="job_queue",
+        )
+        db.add(job)
+        await db.flush()
+    return job
+
+
+async def _draft_with_v2(db: AsyncSession, item: JobQueueItem, user_id: str, profile: UserProfile) -> str:
+    """generation_v2 users: draft with the memory-driven engine and keep a traceable CoverLetter
+    (brief, cited facts, warnings) on the item's job, as /cover-letters/generate does."""
+    from app.core.config import settings
+    from app.services.generation import generate_application
+
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one()
+    job = await _job_for_queue_item(db, item)
+    result = await generate_application(
+        db=db, user=user, profile=profile, title=item.title, description=item.description or "",
+        skills=item.skills or [], questions=[],
+    )
+    content = result.draft.cover_letter
+    db.add(CoverLetter(
+        user_id=user_id, job_id=job.id, content=content, model_used=settings.cover_letter_model,
+        version=1, prompt_version="v2", word_count=len(content.split()),
+        brief=result.brief.model_dump(), fact_ids_used=result.draft.fact_ids_used,
+        voice_sample_ids=[str(p.id) for p in result.evidence.voice_samples],
+        verify_warnings=result.warnings,
+    ))
+    return content
+
+
 async def _generate_draft_background(item_id: str, user_id: str) -> None:
-    """Background task: generate cover letter draft and persist it."""
+    """Background task: generate cover letter draft and persist it (v2 engine when the user's
+    generation_v2 flag is on, the legacy generator otherwise)."""
     from app.core.database import async_session_maker as AsyncSessionLocal
     from app.services.cover_letter import generate_cover_letter
     from app.services.job_analysis import (
@@ -375,6 +420,16 @@ async def _generate_draft_background(item_id: str, user_id: str) -> None:
                 logger.warning("No profile for user %s — cannot generate draft", user_id)
                 item.draft_status = "none"
                 await db.commit()
+                return
+
+            if profile.generation_v2 is True:
+                item.draft_cover_letter = await _draft_with_v2(db, item, user_id, profile)
+                item.draft_status = "ready"
+                item.draft_generated_at = datetime.now(timezone.utc)
+                await _record_outcome(db, user_id, item_id, "proposal_drafted")
+                await record_proposal_drafted(user_id, db)
+                await db.commit()
+                logger.info("v2 draft generated for queue item %s (user %s)", item_id, user_id)
                 return
 
             # Run lightweight analysis to get skill matches + memories
@@ -437,6 +492,21 @@ async def _generate_draft_background(item_id: str, user_id: str) -> None:
 
 # ── POST /api/v1/job-queue/{id}/submit-edit ────────────────────────────────
 
+async def _mark_v2_letter_sent(db: AsyncSession, item: JobQueueItem, final_text: str) -> None:
+    """Record the text actually sent on the item's newest v2 CoverLetter, so an outcome credits
+    the facts of the letter that went out (apply_outcome prefers final_text)."""
+    letter = (await db.execute(
+        select(CoverLetter).join(Job, Job.id == CoverLetter.job_id)
+        .where(CoverLetter.user_id == item.user_id, Job.upwork_url == item.upwork_url,
+               CoverLetter.prompt_version == "v2")
+        .order_by(CoverLetter.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if letter is not None:
+        letter.final_text = final_text
+        letter.was_submitted = True
+        letter.submitted_at = datetime.now(timezone.utc)
+
+
 @router.post("/{item_id}/submit-edit", response_model=DraftSubmitResponse)
 async def submit_edit(
     item_id: str,
@@ -484,6 +554,7 @@ async def submit_edit(
 
     item.draft_status = "sent"
     item.status = "applied"
+    await _mark_v2_letter_sent(db, item, body.final_text)
     await db.flush()
 
     # Contribute anonymized signal for this submission
