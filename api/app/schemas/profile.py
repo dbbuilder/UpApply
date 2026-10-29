@@ -321,3 +321,13 @@ class ProfileOptimizeResponse(BaseModel):
     may_2026_checklist: List[May2026Item]
     cached: bool = False
     cached_at: Optional[str] = None
+
+
+class SetupStatusResponse(BaseModel):
+    """Whether the user is ready for memory-driven generation, and what is missing."""
+
+    ready: bool
+    approved_facts: int
+    voice_samples: int
+    has_profile_basics: bool
+    missing: List[str]

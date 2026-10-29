@@ -22,9 +22,11 @@ from app.schemas.profile import (
     ProfileOptimizeResponse,
     ResumeImportRequest,
     ResumeImportResponse,
+    SetupStatusResponse,
 )
 from app.services.profile_optimizer import optimize_profile
 from app.services.resume_parser import parse_resume
+from app.services.setup_status import setup_status
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -186,6 +188,16 @@ async def import_resume(
         certifications=parsed.get("certifications"),
         extracted_memories=parsed.get("memories", []),
     )
+
+
+@router.get("/setup-status", response_model=SetupStatusResponse)
+async def get_setup_status(
+    current_user: User = Depends(get_current_user),
+    profile: UserProfile = Depends(get_user_profile),
+    db: AsyncSession = Depends(get_db),
+):
+    """Is this user set up for memory-driven generation? Read-only checklist."""
+    return await setup_status(db, current_user.id, profile)
 
 
 @router.post("/complete-setup", response_model=ProfileResponse)
