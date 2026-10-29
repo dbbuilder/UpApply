@@ -176,3 +176,56 @@ UPDATE user_profiles SET generation_v2 = true
 
 ## 8. After 2 weeks on v2
 Remove the legacy generation path and corpus-memory retrieval code (spec §4.3 step 6).
+
+## 9. Measuring and feedback
+
+All three tools below read or write the production database, so open the Render Postgres
+`ipAllowList` for this Mac first and clear it straight after (§5).
+
+### Results report (read-only)
+```bash
+cd api && doppler run --project upapply --config prd -- env DATABASE_URL="$(security find-generic-password -s cc:db-5c2ea0 -w)" \
+  ./venv/bin/python ../scripts/outcome_report.py --email chris@servicevision.net [--since 2026-10-28] [--json]
+```
+- **Groups:** `v2` = proposals whose sent letter (`outcomes.find_sent_letter`, the same link outcome
+  sync uses) was written by the v2 engine, sent on or after `--since` (default: the user's first v2
+  cover letter); `baseline` = every other proposal sent in the 90 days before. Each group is also
+  split by the job's match-score band.
+- **Rates** (viewed, replied, interview, hired) are over decided proposals only. Proposals still at
+  submitted/viewed and younger than 14 days are **pending**; proposals whose stage is **unknown** are
+  listed separately. Neither counts in a denominator. A rate over fewer than 5 proposals prints `n<5`.
+- Median days to first reply comes from the `proposal_stage_events` ledger (real stage changes only).
+
+### Proposal stages
+`app/services/proposal_status.py` maps raw statuses (Upwork numeric codes, list text, sidebar and
+outcome-sync values) to one stage: submitted, viewed, replied, interview, hired, declined, closed or
+unknown. `proposals.stage` follows `status` automatically and every change is appended to
+`proposal_stage_events`; re-imports only move a proposal forward.
+- Only map an Upwork numeric code once its meaning is confirmed (today only `7` = submitted). Add it
+  to `STAGE_ALIASES`; new keys are allowed, but changing what an existing key maps to fails
+  `tests/test_migration_027.py`, because migration 027 backfilled with that map.
+- Re-running the extension's Proposals import (Sync → Import → Proposals) is what turns the
+  `unknown` stages into readable ones.
+
+### Client feedback from the Upwork profile
+Copy one page of the profile's work history (title, rating, dates, the client's quote, "Endorsed by
+client" chips) into a text file, then:
+```bash
+api/venv/bin/python scripts/import_upwork_feedback.py page1.txt --dry-run      # see the candidates
+doppler run --project upapply --config prd -- env DATABASE_URL="$(security find-generic-password -s cc:db-5c2ea0 -w)" \
+  api/venv/bin/python scripts/import_upwork_feedback.py page1.txt --email chris@servicevision.net
+```
+Each quote becomes a `client_quote` candidate (source `client_feedback`), which always waits for
+approval in the extension (Me → Facts). Amounts, rates and hours on the page are dropped; quotes
+Upwork shortens ("See more") are marked; `--include-endorsements` adds jobs that have chips but no
+quote. Re-running a page is safe: the facts service merges near-duplicates.
+
+### New-user checklist (before turning `generation_v2` on)
+1. The user registers through the extension.
+2. Load facts: their Upwork proposals (extension import, then `POST /api/v1/facts/from-proposals`),
+   their ChatGPT export (§4) and client feedback (above); they approve candidates in Me → Facts.
+3. Check `GET /api/v1/profile/setup-status`: `ready` needs at least 25 approved facts, at least one
+   voice sample (a proposal they wrote or edited) and their name and professional title. `missing`
+   lists what is left.
+4. Optional: a voice kit for them in `~/dev2/sv/writing-style` (built from their own A/B feedback).
+5. Turn the flag on for that user only (§7, with their email).

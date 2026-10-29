@@ -2,9 +2,9 @@
 
 autopilot: off
 autopilot-max: 10
-built: 2026-10-29T00:00
+built: 2026-10-29T05:08
 branch: main
-head: 9cbafd9
+head: 6c33caa
 status: active
 
 <!--
@@ -15,7 +15,7 @@ Contract for unattended work in this repo. Read by advance-all, the autopilot St
 
 ## Goal
 
-v2 is live for Chris (round 5 passed 17/20) and the proxy limit is fixed. Finish the rollout per `docs/ROLLOUT-STATUS-2026-10-28.md` §7: job-queue drafts on v2, a success report, then the legacy removal once every active user is on v2.
+v2 is live for Chris, job-queue drafts run on v2, outcomes map to canonical stages with a ledger, and a results report exists. Next: make onboarding a second user (Gus Tello) safe, and document the new measuring and client-feedback tools so the next attended session can run them from the runbook.
 
 ## Guardrails
 
@@ -24,30 +24,33 @@ v2 is live for Chris (round 5 passed 17/20) and the proxy limit is fixed. Finish
 - Never run a working-tree-wide discard (`git checkout -- .`, `git restore .`, `git reset --hard`, `git clean`, bare `git stash`); `git add` explicit paths only; never commit `working/` or `docs/evals/`
 - Never flip `generation_v2` for anyone, never open `docs/evals/*/key.json`
 - Voice rules live in the kit repo (`~/dev2/sv/writing-style`); change them only from Chris's dated feedback
-- Tests: `docker start upapply-test-pg`, then `(cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q)` (773 passing at 9cbafd9)
+- Tests: `docker start upapply-test-pg`, then `(cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q)` (837 passing at 6c33caa). The test DB is shared with other sessions: if a run deadlocks or shows mass errors, rerun once before diagnosing
 
 ## Steps
 
-- [ ] 1. Job-queue drafts on v2: in `api/app/api/v1/job_queue.py` (the `generate_cover_letter` call near line 401), use `generate_application` when the profile has `generation_v2` on, keeping legacy otherwise and storing the same draft fields — Done when: a new test shows a v2 user's queued job is drafted by `generate_application` and a flag-off user's by the legacy generator, and the full suite passes
-- [ ] 2. Success report (Q4 A): `scripts/outcome_report.py` prints reply / interview / hire rates for proposals whose letter came from v2 (cover_letters with v2 traceability columns set) vs the 90 days before `generation_v2` was turned on, from the proposals + outcome_events tables, read-only — Done when: the script has a `--since` flag, a unit test over seeded rows passes, and `--help` documents both groups
+- [x] 1. (cf9fe92) New-user setup check (career-ops idea 8): `GET /api/v1/profile/setup-status` returns `{ready: bool, approved_facts, voice_samples, has_profile_basics, missing: [..]}` for the current user, where ready needs at least 25 approved facts, at least 1 voice sample (a proposal written or edited by the user), and full_name + professional_title set; read-only, no new tables — Done when: tests cover a ready user, a brand-new user (every item listed in `missing`) and a user with facts but no voice samples, and the full suite passes
+- [x] 2. (690604f) Runbook: add a "Measuring and feedback" section to `docs/superpowers/runbook-memory-driven-generation.md` covering `scripts/outcome_report.py` (groups, n<5 rule, pending/unknown, `--since`), the stage map in `app/services/proposal_status.py` (only confirmed Upwork codes, how to add one), `scripts/import_upwork_feedback.py` (copy a profile work-history page, dry run, write, review in Facts), and the new-user checklist (account, facts, setup-status, then the flag) — Done when: `grep -c 'outcome_report'`, `grep -c 'import_upwork_feedback'`, `grep -c 'proposal_status'` and `grep -c 'setup-status'` on the runbook are each ≥ 1
 
 ## Decisions pending
 
-- [2026-10-29] Q11 A needs a real `sk-ant-` key added to Doppler `prd` as `WRITER_ANTHROPIC_API_KEY` (UpApply holds only an AICostCentral virtual key); until then the writer uses the proxy, which now allows 300s (Chris)
-- [2026-10-29] Q5: scraping client feedback needs one saved Upwork page that shows client feedback (contract or profile page source) to map the DOM (Chris to provide)
-- [2026-10-29] Q3: Gus Tello next week needs his account email, approved facts (ChatGPT export or proposals) and, optionally, a `gus/` voice kit before his flag goes on (Chris)
-- [2026-10-29] Q4: re-run the Proposals import in the extension (≥1.0.18) so outcomes arrive as readable statuses before the report means anything (Chris)
-- [2026-10-13] Q12: rotate the UpApply password (commit 3b7affc) and revoke the old Render key in git history (Chris)
+- [2026-10-29] Gus Tello (gustello@gmail.com) has no UpApply account yet: he registers via the extension, then facts are loaded (his Upwork proposals or a ChatGPT export) before his flag goes on; voice kit optional (Chris / Gus)
+- [2026-10-29] Re-run the Proposals import in the extension so the 144 'unknown' proposal stages (numeric Upwork codes) resolve; only code '7' is confirmed (Chris)
+- [2026-10-29] Client feedback: 5 quotes from profile page 1 of 21 are candidates awaiting approval in Me → Facts; paste the other pages (or expand the two shortened quotes) to import more (Chris)
+- [2026-10-29] No v2 letters have been generated in real use yet, so the results report has nothing to compare; it fills in as Chris applies with the engine (Chris)
+- [2026-10-29] Q11 A: the writer's direct Anthropic route needs a real `sk-ant-` key in Doppler `prd` as `WRITER_ANTHROPIC_API_KEY`; optional now that the proxy allows 300s (Chris)
 - [2026-10-29] Q13: wire the voice kit into the gtm-bible sales agent next, then marketing (attended session)
+- [2026-10-29] career-ops ideas not yet built: 4 outside "play the client" reviewer, 5 client legitimacy card, 6 learn rules from draft edits, 7 canonical skip reasons + pre-filter audit (Chris to prioritise)
+- [2026-10-13] Q12: rotate the UpApply password (commit 3b7affc) and revoke the old Render key in git history (Chris)
 
 ## Log
 
-- [2026-10-28] Round 5 passed 17/20; generation_v2 on for Chris; A/B/C follow-up 2/3 to v2
-- [2026-10-28] Kit v0.5.0 / #32: NDA "would be willing to sign", no live-or-die, one "happy" per close
-- [2026-10-28] #33 call-offer wording check; #35 outcome credits the submitted letter; #34 closed (streaming cannot beat the proxy limit)
-- [2026-10-29] AICostCentral #27 deployed: /v1/messages maxDuration 60 → 300; 97s and 113s calls verified
-- [2026-10-29] 20 Vision Companies fact rewrites applied (Q1)
-- [2026-10-29] Doppler made authoritative; full sync to Render (Q8)
-- [2026-10-29] #36 extension 1.0.19 committed (Q9); checkout now on main
-- [2026-10-29] Kit v0.5.1: experience-led openers note (Q10)
 - [2026-10-29] #37 writer retry + optional direct Anthropic route (Q11 A+C)
+- [2026-10-29] #38 rollout status with Chris's decisions; runbook rounds 3-4 and CLAUDE.md model defaults on main
+- [2026-10-29] #39 job-queue drafts on v2 with a traceable CoverLetter; submit-edit records the sent text
+- [2026-10-29] #40 client feedback importer (scripts/import_upwork_feedback.py); 5 candidates from profile page 1
+- [2026-10-29] career-ops studied: 8 ideas ranked; 1-3 approved
+- [2026-10-29] #41 graded client requirements in the brief; missing critical stated requirements trigger the repair; answers from evidence only
+- [2026-10-29] #42 migration 027 canonical proposal stages + stage-change ledger; scripts/outcome_report.py (baseline 17 sent, 5.9% replied)
+- [2026-10-29] Deployed 6c33caa; migration 027 live; no v2 letters in real use yet
+- [2026-10-29] step 1 done — cf9fe92 — GET /api/v1/profile/setup-status (25 approved facts, 1 voice sample, name + title); 841 API tests pass with the DB
+- [2026-10-29] step 2 done — 690604f — runbook §9 Measuring and feedback (outcome_report, proposal_status stage map, import_upwork_feedback, new-user checklist with setup-status); 841 API tests pass with the DB
