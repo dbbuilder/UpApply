@@ -28,7 +28,7 @@ v2 is live for Chris, job-queue drafts run on v2, outcomes map to canonical stag
 
 ## Steps
 
-- [ ] 1. New-user setup check (career-ops idea 8): `GET /api/v1/profile/setup-status` returns `{ready: bool, approved_facts, voice_samples, has_profile_basics, missing: [..]}` for the current user, where ready needs at least 25 approved facts, at least 1 voice sample (a proposal written or edited by the user), and full_name + professional_title set; read-only, no new tables — Done when: tests cover a ready user, a brand-new user (every item listed in `missing`) and a user with facts but no voice samples, and the full suite passes
+- [x] 1. (cf9fe92) New-user setup check (career-ops idea 8): `GET /api/v1/profile/setup-status` returns `{ready: bool, approved_facts, voice_samples, has_profile_basics, missing: [..]}` for the current user, where ready needs at least 25 approved facts, at least 1 voice sample (a proposal written or edited by the user), and full_name + professional_title set; read-only, no new tables — Done when: tests cover a ready user, a brand-new user (every item listed in `missing`) and a user with facts but no voice samples, and the full suite passes
 - [ ] 2. Runbook: add a "Measuring and feedback" section to `docs/superpowers/runbook-memory-driven-generation.md` covering `scripts/outcome_report.py` (groups, n<5 rule, pending/unknown, `--since`), the stage map in `app/services/proposal_status.py` (only confirmed Upwork codes, how to add one), `scripts/import_upwork_feedback.py` (copy a profile work-history page, dry run, write, review in Facts), and the new-user checklist (account, facts, setup-status, then the flag) — Done when: `grep -c 'outcome_report'`, `grep -c 'import_upwork_feedback'`, `grep -c 'proposal_status'` and `grep -c 'setup-status'` on the runbook are each ≥ 1
 
 ## Decisions pending
@@ -44,7 +44,6 @@ v2 is live for Chris, job-queue drafts run on v2, outcomes map to canonical stag
 
 ## Log
 
-- [2026-10-29] #36 extension 1.0.19 committed (Q9); checkout now on main
 - [2026-10-29] Kit v0.5.1: experience-led openers note (Q10)
 - [2026-10-29] #37 writer retry + optional direct Anthropic route (Q11 A+C)
 - [2026-10-29] #38 rollout status with Chris's decisions; runbook rounds 3-4 and CLAUDE.md model defaults on main
@@ -54,3 +53,4 @@ v2 is live for Chris, job-queue drafts run on v2, outcomes map to canonical stag
 - [2026-10-29] #41 graded client requirements in the brief; missing critical stated requirements trigger the repair; answers from evidence only
 - [2026-10-29] #42 migration 027 canonical proposal stages + stage-change ledger; scripts/outcome_report.py (baseline 17 sent, 5.9% replied)
 - [2026-10-29] Deployed 6c33caa; migration 027 live; no v2 letters in real use yet
+- [2026-10-29] step 1 done — cf9fe92 — GET /api/v1/profile/setup-status (25 approved facts, 1 voice sample, name + title); 841 API tests pass with the DB
