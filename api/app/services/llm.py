@@ -4,11 +4,16 @@ Every new LLM call goes through structured_call so tests mock one function.
 Honours Opus 5.5 constraints: no temperature, no thinking param (effort is the
 only depth control), no assistant prefill, no forced tool_choice — the response
 shape comes from output_config.format (JSON-schema structured outputs).
+
+The call streams internally: a long Opus writer call at effort "high" sends no bytes until it
+finishes when made non-streaming, and the AI proxy (ANTHROPIC_BASE_URL) answered such calls
+with 504s. Streaming starts the response at once; the caller still gets one parsed dict.
 """
 import json
 import logging
 from typing import Optional, Union
 
+import httpx2
 from anthropic import APIError, AsyncAnthropic
 
 from app.core.config import settings
@@ -56,15 +61,20 @@ async def structured_call(
         output_config["effort"] = effort
 
     try:
-        response = await get_anthropic_client().messages.create(
+        async with get_anthropic_client().messages.stream(
             model=model,
             max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": user}],
             output_config=output_config,
-        )
+        ) as stream:
+            response = await stream.get_final_message()
     except APIError as exc:
         raise LLMError(f"structured_call API error from {model}: {exc} ({PROXY_HINT})", reason="api_error") from exc
+    except httpx2.HTTPError as exc:
+        # A connection dropped mid-stream surfaces as a raw transport error, not an APIError.
+        logger.warning("structured_call stream interrupted from %s (%s)", model, type(exc).__name__)
+        raise LLMError(f"structured_call stream interrupted from {model}: {type(exc).__name__}", reason="stream_interrupted") from exc
 
     # Usage only — never prompt or output content.
     usage = getattr(response, "usage", None)

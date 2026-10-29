@@ -1,4 +1,5 @@
-"""Every Anthropic messages.create(...) call passes only kwargs the installed SDK accepts.
+"""Every Anthropic messages.create(...) / messages.stream(...) call passes only kwargs the
+installed SDK accepts.
 
 anthropic>=1.13 removed `temperature` (and similar) from messages.create; passing one raises
 TypeError before any request is sent, which silently broke legacy cover letters in prod.
@@ -10,7 +11,8 @@ import pathlib
 import anthropic
 
 APP = pathlib.Path(__file__).resolve().parents[1] / "app"
-ACCEPTED = set(inspect.signature(anthropic.AsyncAnthropic(api_key="x").messages.create).parameters)
+_MESSAGES = anthropic.AsyncAnthropic(api_key="x").messages
+ACCEPTED = {name: set(inspect.signature(getattr(_MESSAGES, name)).parameters) for name in ("create", "stream")}
 
 
 def _anthropic_create_calls():
@@ -20,7 +22,7 @@ def _anthropic_create_calls():
             if (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "create"
+                and node.func.attr in ACCEPTED
                 and isinstance(node.func.value, ast.Attribute)
                 and node.func.value.attr == "messages"
             ):
@@ -28,7 +30,8 @@ def _anthropic_create_calls():
 
 
 def test_messages_create_calls_exist():
-    assert list(_anthropic_create_calls()), "scanner found no Anthropic calls; the test is not looking at the code"
+    found = {node.func.attr for _, node in _anthropic_create_calls()}
+    assert found == {"create", "stream"}, f"scanner found {found}; the test is not looking at the code"
 
 
 def test_messages_create_kwargs_are_accepted_by_the_installed_sdk():
@@ -36,6 +39,6 @@ def test_messages_create_kwargs_are_accepted_by_the_installed_sdk():
         f"{path}:{node.lineno} {kw.arg}"
         for path, node in _anthropic_create_calls()
         for kw in node.keywords
-        if kw.arg is not None and kw.arg not in ACCEPTED
+        if kw.arg is not None and kw.arg not in ACCEPTED[node.func.attr]
     ]
     assert not bad, f"kwargs the Anthropic SDK rejects (use extra_body): {bad}"
