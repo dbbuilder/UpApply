@@ -7,6 +7,7 @@ from app.models.cover_letter import CoverLetter
 from app.models.feedback import Feedback
 from app.models.screening_answer import ScreeningAnswer
 from app.models.proposal import Proposal
+from app.models.proposal_stage_event import ProposalStageEvent
 from app.models.beta_feedback import BetaFeedback
 from app.models.search_query import SearchQuery
 from app.models.job_review import JobReview
@@ -29,6 +30,7 @@ __all__ = [
     "Feedback",
     "ScreeningAnswer",
     "Proposal",
+    "ProposalStageEvent",
     "BetaFeedback",
     "SearchQuery",
     "JobReview",

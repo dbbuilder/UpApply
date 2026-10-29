@@ -5,11 +5,12 @@ from uuid import uuid4
 
 from sqlalchemy import DateTime, String, Text, Numeric, Boolean, func, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from pgvector.sqlalchemy import Vector
 
 from app.core.database import Base
 from app.core.config import settings
+from app.services.proposal_status import UNKNOWN, stage_for
 
 if TYPE_CHECKING:
     from app.models.user import User
@@ -68,7 +69,11 @@ class Proposal(Base):
     # Outcome tracking
     status: Mapped[Optional[str]] = mapped_column(
         String(50), nullable=True
-    )  # submitted, viewed, responded, hired, declined
+    )  # raw: submitted, viewed, responded, hired, declined, Upwork numeric codes...
+    # Canonical stage derived from status (migration 027); see app.services.proposal_status
+    stage: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=UNKNOWN, server_default=UNKNOWN
+    )
     was_hired: Mapped[Optional[bool]] = mapped_column(nullable=True)
     client_responded: Mapped[Optional[bool]] = mapped_column(nullable=True)
     earnings: Mapped[Optional[float]] = mapped_column(Numeric(10, 2), nullable=True)
@@ -114,6 +119,11 @@ class Proposal(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    @validates("status")
+    def _sync_stage(self, _key, value):
+        self.stage = stage_for(value)
+        return value
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="proposals")

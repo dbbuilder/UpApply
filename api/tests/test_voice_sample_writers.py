@@ -58,6 +58,7 @@ async def test_extension_submit_is_chris_edited_ai_with_job_embedding(client: As
     assert p.source == "extension"
     assert p.author == "chris_edited_ai"
     assert p.job_text == "Move 40 SQL servers to Azure"
+    assert (p.status, p.stage) == ("submitted", "submitted")  # counts as sent in the outcome report
     assert p.job_needs_embedding is not None
     assert "Azure SQL migration\n\nMove 40 SQL servers to Azure" in [c.args[0] for c in fake_embed.await_args_list]
 

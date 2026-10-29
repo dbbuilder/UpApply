@@ -38,6 +38,13 @@ def test_unknown_status_ignored_unless_stale():
     assert resolve_outcome("withdrawn-ish", NOW - timedelta(days=2), NOW) is None
 
 
+@pytest.mark.parametrize("raw", ["archived", "7", "8", "active"])
+def test_closed_and_unconfirmed_statuses_are_no_signal(raw):
+    """Keyed off the canonical stage: closed / unknown stages carry no outcome."""
+    assert resolve_outcome(raw, NOW - timedelta(days=2), NOW) is None
+    assert resolve_outcome(raw, NOW - NO_RESPONSE_AFTER, NOW) == "no_response"
+
+
 def test_should_replace_is_monotonic():
     assert should_replace(None, "viewed")
     assert should_replace("no_response", "replied")
