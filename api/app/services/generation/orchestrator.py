@@ -16,6 +16,7 @@ from app.services.generation.verify import (
     check_specifics,
     check_claims,
     check_rules,
+    must_address,
     repair_note,
 )
 from app.services.generation.voice import load_voice
@@ -63,7 +64,9 @@ async def _verify(
         if not item.get("answer"):
             question = str(item.get("question", ""))
             warnings.append(Issue(f'No answer for screening question: "{question}"', "missing_answer", question))
-    warnings.extend(await check_claims(audited, evidence))
+    # Requirements are the letter's job: the answers-only path does not check them.
+    requirements = [] if answers_only else must_address(brief)
+    warnings.extend(await check_claims(audited, evidence, requirements))
     return warnings
 
 

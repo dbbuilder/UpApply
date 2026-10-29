@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.core.config import settings
-from app.services.generation.brief import BRIEF_SCHEMA, BRIEF_SYSTEM, JOB_TYPES, JobBrief, build_job_brief
+from app.services.generation.brief import (
+    BRIEF_SCHEMA, BRIEF_SYSTEM, JOB_TYPES, JobBrief, Requirement, build_job_brief,
+)
 
 MODEL_OUTPUT = {
     "needs": [
@@ -128,3 +130,65 @@ def test_stored_briefs_without_a_domain_still_load():
         needs=["n"], job_types=[], client_signals={}, mirror_phrases=[], explicit_asks=[], questions=[],
     ).model_dump().items() if k != "domain"}
     assert JobBrief.model_validate(stored).domain == ""
+
+
+POST = "We need a zero downtime cutover of 40 databases. Must have SQL Server & Azure experience."
+
+
+@pytest.mark.asyncio
+async def test_requirements_are_graded_and_enforced_in_code():
+    output = dict(MODEL_OUTPUT, requirements=[
+        {"requirement": "SQL Server and Azure experience", "importance": "critical", "tier": "stated",
+         "quote": "must have  SQL Server ＆ Azure experience"},  # case, spacing and fenced '&' still match
+        {"requirement": "Zero downtime", "importance": "critical", "tier": "stated",
+         "quote": "no downtime whatsoever"},  # not in the post: downgraded to inferred, so never critical
+        {"requirement": "Calm under pressure", "importance": "critical", "tier": "inferred", "quote": "40 databases"},
+        {"requirement": "Handles many databases", "importance": "high", "tier": "structural", "quote": "40 databases"},
+        {"requirement": "", "importance": "high", "tier": "stated", "quote": ""},
+        {"requirement": "Bad grade", "importance": "urgent", "tier": "stated", "quote": ""},
+        "not a dict",
+    ])
+    call = AsyncMock(return_value=output)
+    with patch("app.services.generation.brief.structured_call", call):
+        brief = await build_job_brief(title="Azure SQL migration", description=POST, skills=[], questions=[])
+    assert [(r.requirement, r.importance, r.tier, r.quote) for r in brief.requirements] == [
+        ("SQL Server and Azure experience", "critical", "stated", "must have SQL Server & Azure experience"),
+        ("Zero downtime", "high", "inferred", ""),
+        ("Calm under pressure", "high", "inferred", ""),
+        ("Handles many databases", "high", "structural", "40 databases"),
+    ]
+    # Graded from the post alone: the brief call never sees the user's facts.
+    assert "evidence" not in call.call_args.kwargs["user"].lower()
+
+
+@pytest.mark.asyncio
+async def test_requirement_quotes_may_come_from_a_screening_question_and_are_capped_at_eight():
+    output = dict(MODEL_OUTPUT, requirements=[
+        {"requirement": f"r{i}", "importance": "meaningful", "tier": "stated", "quote": "similar migration"}
+        for i in range(10)
+    ])
+    with patch("app.services.generation.brief.structured_call", AsyncMock(return_value=output)):
+        brief = await build_job_brief(
+            title="t", description=POST, skills=[], questions=["Describe a similar migration."]
+        )
+    assert len(brief.requirements) == 8
+    assert all(r.tier == "stated" and r.quote == "similar migration" for r in brief.requirements)
+
+
+@pytest.mark.asyncio
+async def test_brief_without_requirements_from_the_model_has_none():
+    with patch("app.services.generation.brief.structured_call", AsyncMock(return_value=dict(MODEL_OUTPUT))):
+        brief = await build_job_brief(title="t", description="d", skills=[], questions=[])
+    assert brief.requirements == []
+    assert "requirements" in BRIEF_SCHEMA["required"]
+    assert "never critical" in BRIEF_SYSTEM
+
+
+def test_stored_briefs_without_requirements_still_load_and_round_trip():
+    fields = dict(needs=["n"], job_types=[], client_signals={}, mirror_phrases=[], explicit_asks=[], questions=[])
+    stored = {k: v for k, v in JobBrief(**fields).model_dump().items() if k != "requirements"}
+    assert JobBrief.model_validate(stored).requirements == []
+    graded = JobBrief(**fields, requirements=[
+        Requirement(requirement="r", importance="critical", tier="stated", quote="q")
+    ])
+    assert JobBrief.model_validate(graded.model_dump()).requirements[0].importance == "critical"
