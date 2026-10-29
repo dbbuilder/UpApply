@@ -359,6 +359,8 @@ async def write_application(
         schema=WRITER_SCHEMA,
         effort=settings.writer_effort,
         max_tokens=16000,
+        writer=True,
+        api_retries=1,
     )
     letter = finalize_letter(data.get("cover_letter", ""), profile.preferred_closing)
 

@@ -148,3 +148,42 @@ async def test_structured_call_passes_cached_system_blocks_through():
     with patch("app.services.llm.get_anthropic_client", return_value=client):
         assert await structured_call("claude-opus-5-5", blocks, "u", SCHEMA) == {"a": 1}
     assert client.messages.create.call_args.kwargs["system"] == blocks
+
+
+def _api_error():
+    import httpx2
+    from anthropic import APIStatusError
+    request = httpx2.Request("POST", "https://proxy.example.com/v1/messages")
+    return APIStatusError("An error occurred with your deployment", response=httpx2.Response(504, request=request), body=None)
+
+
+@pytest.mark.asyncio
+async def test_writer_retries_once_after_an_api_error():
+    client = _fake_client()
+    client.messages.create.side_effect = [_api_error(), client.messages.create.return_value]
+    with patch("app.services.llm.get_anthropic_client", return_value=client):
+        assert await structured_call("claude-opus-5-5", "s", "u", SCHEMA, writer=True, api_retries=1) == {"a": 1}
+    assert client.messages.create.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_api_error_without_retries_still_raises_llm_error():
+    client = _fake_client()
+    client.messages.create.side_effect = _api_error()
+    with patch("app.services.llm.get_anthropic_client", return_value=client):
+        with pytest.raises(LLMError) as err:
+            await structured_call("claude-opus-5-5", "s", "u", SCHEMA)
+    assert err.value.reason == "api_error" and client.messages.create.await_count == 1
+
+
+def test_writer_client_is_the_shared_client_unless_a_direct_key_is_set(monkeypatch):
+    monkeypatch.setattr(settings, "writer_anthropic_api_key", "")
+    shared = object()
+    with patch("app.services.llm.get_anthropic_client", return_value=shared):
+        assert llm.get_writer_client() is shared
+    monkeypatch.setattr(settings, "writer_anthropic_api_key", "sk-ant-test")
+    monkeypatch.setattr(settings, "writer_anthropic_base_url", "")
+    monkeypatch.setattr(llm, "_writer_client", None)
+    direct = llm.get_writer_client()
+    assert direct is not shared and str(direct.base_url).startswith("https://api.anthropic.com")
+    monkeypatch.setattr(llm, "_writer_client", None)
