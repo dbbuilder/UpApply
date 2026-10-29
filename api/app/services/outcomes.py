@@ -13,20 +13,18 @@ from app.models.cover_letter import CoverLetter
 from app.models.fact import Fact
 from app.models.proposal import Proposal
 from app.services.facts import credit_facts
+from app.services.proposal_status import stage_for
 
 NO_RESPONSE_AFTER = timedelta(days=14)
 POSITIVE_OUTCOMES = frozenset({"replied", "interviewed", "hired"})
 
-# Raw status (extension scraper / client) → canonical outcome. None = no signal yet.
-STATUS_TO_OUTCOME: dict[str, Optional[str]] = {
-    "submitted": None,
+# Canonical stage (app.services.proposal_status) → outcome. None = no signal yet.
+STAGE_TO_OUTCOME: dict[str, Optional[str]] = {
     "viewed": "viewed",
-    "responded": "replied",
     "replied": "replied",
-    "interviewed": "interviewed",
+    "interview": "interviewed",
     "hired": "hired",
     "declined": "declined",
-    "no_response": "no_response",
 }
 
 # Outcomes only move forward; a reply is never overwritten by a later decline.
@@ -55,7 +53,9 @@ def resolve_outcome(
     raw_status: str, submitted_at: Optional[datetime], now: Optional[datetime] = None
 ) -> Optional[str]:
     """Map a raw status to an outcome; silent proposals older than 14 days → no_response."""
-    outcome = STATUS_TO_OUTCOME.get(raw_status.strip().lower())
+    if raw_status.strip().lower() == "no_response":  # a client verdict, not an Upwork stage
+        return "no_response"
+    outcome = STAGE_TO_OUTCOME.get(stage_for(raw_status))
     if outcome is None and submitted_at is not None:
         now = now or datetime.now(timezone.utc)
         if now - submitted_at >= NO_RESPONSE_AFTER:
@@ -65,6 +65,23 @@ def resolve_outcome(
 
 def should_replace(current: Optional[str], new: Optional[str]) -> bool:
     return new in _RANK and new is not None and _RANK[new] > _RANK.get(current, 0)
+
+
+async def find_sent_letter(db: AsyncSession, user_id: str, job_id: Optional[str]) -> Optional[CoverLetter]:
+    """The letter actually sent for a proposal's job: captured on Upwork (final_text), else
+    marked submitted in the sidebar (was_submitted), else the newest draft for the job."""
+    if not job_id:
+        return None
+    return (await db.execute(
+        select(CoverLetter)
+        .where(CoverLetter.user_id == user_id, CoverLetter.job_id == job_id)
+        .order_by(
+            CoverLetter.final_text.is_(None),
+            CoverLetter.was_submitted.is_not(True),
+            CoverLetter.created_at.desc(),
+        )
+        .limit(1)
+    )).scalar_one_or_none()
 
 
 async def apply_outcome(db: AsyncSession, proposal: Proposal, outcome: Optional[str]) -> bool:
@@ -87,18 +104,7 @@ async def apply_outcome(db: AsyncSession, proposal: Proposal, outcome: Optional[
     if proposal.facts_credited_at is not None:
         return False
 
-    # The letter actually sent: captured on Upwork (final_text), else marked submitted in the
-    # sidebar (was_submitted), else the newest draft for the job.
-    letter = (await db.execute(
-        select(CoverLetter)
-        .where(CoverLetter.user_id == proposal.user_id, CoverLetter.job_id == proposal.job_id)
-        .order_by(
-            CoverLetter.final_text.is_(None),
-            CoverLetter.was_submitted.is_not(True),
-            CoverLetter.created_at.desc(),
-        )
-        .limit(1)
-    )).scalar_one_or_none()
+    letter = await find_sent_letter(db, proposal.user_id, proposal.job_id)
     if not letter or not letter.fact_ids_used:
         return False
     # Only approved facts earn win credit; one rejected since the draft was written gets none.

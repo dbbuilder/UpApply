@@ -33,6 +33,7 @@ from app.schemas.proposal import (
     ProposalOutcomeSyncResponse,
 )
 from app.services.outcomes import apply_outcome, parse_submitted_at, resolve_outcome
+from app.services.proposal_status import advance_status
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -346,6 +347,7 @@ async def sync_proposal_outcomes(
         if prop.submitted_at is None:
             prop.submitted_at = parse_submitted_at(item.submitted_at)
         before = prop.outcome
+        advance_status(prop, item.status, "outcome_sync")  # stage moves forward only
         outcome = resolve_outcome(item.status, prop.submitted_at or prop.created_at)
         if await apply_outcome(db, prop, outcome):
             credited += 1
@@ -759,6 +761,7 @@ async def import_proposals_from_upwork(
                     existing.job_needs_embedding = await _job_needs_embedding(job_title, job_text)
                 elif existing.job_needs_embedding is None:
                     existing.job_needs_embedding = await _job_needs_embedding(job_title, existing.job_text)
+                advance_status(existing, status_str, "upwork_import")
                 if outcome:
                     await apply_outcome(db, existing, outcome)  # forward-only; credits facts once
                 continue

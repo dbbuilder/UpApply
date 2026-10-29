@@ -1142,6 +1142,7 @@ async def submit_cover_letter(
                 job_title=job.title,
                 job_skills=job.skills_required or [],
                 was_hired=None,
+                status="submitted",
                 source="extension",
                 author="chris_edited_ai",  # began as an UpApply draft (matches migration 022)
                 job_text=job.description,

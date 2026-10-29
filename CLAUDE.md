@@ -258,6 +258,7 @@ Located in `scripts/`:
 | `chris_proposal_anchors.json` | Chris's job-type credential routing config (cto/saas/sql/cloud/ai/fullstack + always_include) |
 | `ingest_chatgpt_facts.py` | v2: send ChatGPT export conversations to `/facts/ingest` as fact candidates. Default `--source signed`: only the final message signed "Chris" / "Chris Therriault" in each conversation, sent as `chatgpt_signed_letter` (the first user message, usually the job post, travels as context only). `--source work`: the user's own turns from work conversations (cover letter in the title or any message, plus career titles); `--source all` (alias `--all`): every conversation. `--dry-run` makes no API calls, `--limit N` caps conversations |
 | `eval_generation.py` | v2 rollout gate: `build-golden` (golden jobs from scraped proposals, read-only), `generate` (blind A/B packet, legacy vs v2), `score` (pass ≥75%). `generate` also reports phrases repeated across a batch's openings or closes (`batch_sameness`) |
+| `outcome_report.py` | Read-only results report: viewed/replied/interview/hired rates of v2-engine proposals (sent letter `prompt_version='v2'`) vs the 90 days before `--since` (default: first v2 letter), by match-score band; pending (<14 days) and unknown-stage proposals listed separately, rates with n<5 hidden, median days to first reply from the stage ledger. `--email`, `--since`, `--json` |
 
 **Usage (avoid shell `!` in passwords — use Python sys.argv injection):**
 ```python
@@ -298,6 +299,7 @@ exec(open('scripts/import_chatgpt_corpus.py').read())
 | 024 | Refine-thread and submitted-final columns on cover_letters, proposals.facts_credited_at |
 | 025 | Data: relabel Chris's 14 curated bio memories chatgpt_corpus → bio_import |
 | 026 | Add facts.doubtful review flag (marks a candidate doubtful without rejecting it) |
+| 027 | Canonical proposal stages: `proposals.stage` (backfilled from `status` via the alias map in `app/services/proposal_status.py`) + append-only `proposal_stage_events` transition ledger |
 
 ## Environment Variables
 
