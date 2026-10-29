@@ -343,6 +343,11 @@ _LOOSE_OFFER = re.compile(
     re.IGNORECASE,
 )
 DEFAULT_OFFER_STEM = "I would be happy to jump on a quick call"
+# A client ask against calls ("no calls please", "do not schedule a meeting"): the call offer is then not required.
+_NO_CALLS_ASK = re.compile(
+    r"\b(?:no|don't|do not|dont|without|not|avoid)\b[^.!?]{0,30}?\b(?:calls?|meetings?|zoom|phone|video chats?)\b",
+    re.IGNORECASE,
+)
 OFFER_SENTENCE_MAX_WORDS = 38  # the offer plus ", and would be willing to sign an NDA in advance"
 # Round 4: Chris's picks open with one sentence of about 50 words.
 OPENING_MAX_SENTENCES = 2
@@ -412,7 +417,7 @@ def _check_voice_kit(
     offer = (((rules.get("closing") or {}).get("call_offer")) or DEFAULT_OFFER_STEM).strip().rstrip(".\u2026 ")
     starts = [m.start() for m in re.finditer(re.escape(offer), body, re.IGNORECASE)]
     starts += [m.start() for m in _LOOSE_OFFER.finditer(body)]
-    if include_call_offer and offer.lower() not in body.lower():
+    if include_call_offer and " ".join(offer.lower().split()) not in " ".join(body.lower().split()):
         violations.append(Issue(
             f'The call offer is missing or reworded; write it as "{offer} ...".', "call_offer_wording",
             body.strip()[-200:],
@@ -526,6 +531,8 @@ def check_rules(
             violations.append(Issue(f"Explicit ask not honoured: {ask}", "explicit_ask", ask))
 
     violations.extend(check_answer_rules(answers))
+    if include_call_offer and any(_NO_CALLS_ASK.search(ask) for ask in brief.explicit_asks):
+        include_call_offer = False  # the client's own ask wins over the default call offer
     if voice:
         violations.extend(_check_voice_kit(body, answers, voice, include_call_offer))
     return violations

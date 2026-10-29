@@ -660,3 +660,16 @@ def test_no_live_or_die_anywhere_and_one_happy_in_the_close():
     happy = f"{SENTENCE}\n\n" + _letter(
         sentences=16, extra=f" I would review your codebase first.\n\n{OFFER} to talk it through, and am happy to sign an NDA in advance.")
     assert "double_happy" in _codes(check_rules(happy, _brief(), None, voice=KIT))
+
+
+@pytest.mark.parametrize("ask", ["No calls please, reply in writing.", "Do not schedule a meeting; written proposals only."])
+def test_call_offer_not_required_when_the_client_declines_calls(ask):
+    letter = f"{SENTENCE}\n\n" + _letter(sentences=16, extra="\n\nLooking forward to your reply on the written plan.")
+    codes = _codes(check_rules(letter, _brief(asks=[ask]), None, voice=KIT, include_call_offer=True))
+    assert "call_offer_wording" not in codes
+
+
+def test_call_offer_wording_ignores_line_breaks_inside_the_offer():
+    offer = OFFER.replace(" quick call", "\nquick call")
+    letter = f"{SENTENCE}\n\n" + _letter(sentences=16, extra=f"\n\n{offer} to talk it through.")
+    assert "call_offer_wording" not in _codes(check_rules(letter, _brief(), None, voice=KIT, include_call_offer=True))
