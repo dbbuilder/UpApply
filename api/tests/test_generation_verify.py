@@ -520,6 +520,33 @@ def test_close_after_offer_catches_a_paragraph_after_the_offer():
     assert "close_after_offer" in _codes(check_rules(letter, _brief(), None, voice=KIT))
 
 
+# Decision Q6 (A): when the call offer was requested, a kit user's letter must carry the kit's wording.
+def test_requested_call_offer_with_the_kit_wording_passes():
+    letter = f"{SENTENCE}\n\n" + _letter(sentences=16, extra=f"\n\n{OFFER.lower()} to talk it through.")
+    assert "call_offer_wording" not in _codes(check_rules(letter, _brief(), None, voice=KIT, include_call_offer=True))
+
+
+@pytest.mark.parametrize("close", [
+    "",  # no offer at all
+    "\n\nI would be happy to jump on a quick call to talk it through.",  # reworded
+    "\n\nHappy to hop on a call whenever suits you.",
+])
+def test_requested_call_offer_missing_or_reworded_is_flagged(close):
+    letter = _letter(extra=close)
+    assert "call_offer_wording" in _codes(check_rules(letter, _brief(), None, voice=KIT, include_call_offer=True))
+
+
+@pytest.mark.parametrize("include_call_offer", [False, None])
+def test_call_offer_wording_skipped_when_not_requested_or_unknown(include_call_offer):
+    letter = _letter()
+    codes = _codes(check_rules(letter, _brief(), None, voice=KIT, include_call_offer=include_call_offer))
+    assert "call_offer_wording" not in codes
+
+
+def test_call_offer_wording_never_flagged_without_a_kit():
+    assert check_rules(_letter(), _brief(), None, include_call_offer=True) == []
+
+
 @pytest.mark.parametrize("phrase", ["I can inspect your code first.", "A short code review comes first."])
 def test_nda_offer_covers_other_ways_of_seeing_their_code(phrase):
     letter = _letter(extra=f" {phrase}\n\n{OFFER} after that.")

@@ -122,6 +122,7 @@ async def test_tool_loop_returns_revised_draft_and_found_facts():
     rules.assert_called_once_with(
         REVISED["cover_letter"], rules.call_args.args[1], "Chris", result.draft.screening_answers,
         None,  # no email, so no voice kit
+        include_call_offer=None,  # refine cannot know whether the offer was requested
     )
     claim_evidence = claims.await_args.args[1]
     assert {str(f.id) for f in claim_evidence.facts} == {EVIDENCE_FACT_ID, FOUND_FACT_ID}

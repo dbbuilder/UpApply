@@ -230,6 +230,7 @@ REPAIR_INSTRUCTIONS = {
     "tell_word": "Replace the words listed in the repair notes with plain ones; they read as machine-written.",
     "company_name": "Do not name the company listed in the repair notes; use the replacement wording given there.",
     "close_after_offer": "End the letter on a short call-offer sentence: move or cut anything after it and any detail inside it.",
+    "call_offer_wording": "Offer the call with the exact wording from the CALL OFFER instruction, word for word, as the last sentence of the letter.",
     "nda_offer": "The letter talks about seeing the client's code, documents or sensitive data: end the call-offer sentence with the NDA clause from the CALL OFFER instruction.",
     "glad_to_sign": 'Never write "glad to sign an NDA"; the NDA is a clause at the end of the call-offer sentence, worded as in the CALL OFFER instruction.',
     "short_opening": "Cut the first paragraph to one or two sentences that reach the matching experience quickly.",
