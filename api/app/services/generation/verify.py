@@ -28,7 +28,7 @@ REPAIR_CODES = (
     "explicit_ask", "unsupported_claim", "missing_prototype_url", "answer_rules", "too_few_specifics",
     "quote_in_opening", "dangling_paragraph", "happy_to", "duplicate_closing",
     "exit_caveat", "also_credential", "stack_in_opening",
-    "dash", "emoji", "tell_word", "company_name", "close_after_offer", "nda_offer",
+    "dash", "emoji", "tell_word", "company_name", "close_after_offer", "call_offer_wording", "nda_offer",
     "glad_to_sign", "short_opening", "tech_in_close", "morbid_words", "double_happy",
 )
 
@@ -343,6 +343,11 @@ _LOOSE_OFFER = re.compile(
     re.IGNORECASE,
 )
 DEFAULT_OFFER_STEM = "I would be happy to jump on a quick call"
+# A client ask against calls ("no calls please", "do not schedule a meeting"): the call offer is then not required.
+_NO_CALLS_ASK = re.compile(
+    r"\b(?:no|don't|do not|dont|without|not|avoid)\b[^.!?]{0,30}?\b(?:calls?|meetings?|zoom|phone|video chats?)\b",
+    re.IGNORECASE,
+)
 OFFER_SENTENCE_MAX_WORDS = 38  # the offer plus ", and would be willing to sign an NDA in advance"
 # Round 4: Chris's picks open with one sentence of about 50 words.
 OPENING_MAX_SENTENCES = 2
@@ -368,10 +373,13 @@ def check_answer_voice(answers: list[dict], voice: Optional[dict]) -> list[Issue
     return _check_voice_kit("", answers, voice) if voice else []
 
 
-def _check_voice_kit(body: str, answers: list[dict], voice: dict) -> list[Issue]:
+def _check_voice_kit(
+    body: str, answers: list[dict], voice: dict, include_call_offer: Optional[bool] = None
+) -> list[Issue]:
     """The voice kit's de-AI bans and Chris's round-3 notes: no dashes or emojis, no tell-words,
     never the company's legal name, the close ends on the call offer, and an NDA offer whenever
-    the letter talks about seeing the client's code or documents."""
+    the letter talks about seeing the client's code or documents. With `include_call_offer`
+    true, the letter must also carry the kit's exact call-offer wording (None = not known, skip)."""
     violations: list[Issue] = []
     rules = voice.get("rules") or {}
     de_ai = (voice.get("de_ai") or {}).get("hard") or {}
@@ -409,6 +417,11 @@ def _check_voice_kit(body: str, answers: list[dict], voice: dict) -> list[Issue]
     offer = (((rules.get("closing") or {}).get("call_offer")) or DEFAULT_OFFER_STEM).strip().rstrip(".\u2026 ")
     starts = [m.start() for m in re.finditer(re.escape(offer), body, re.IGNORECASE)]
     starts += [m.start() for m in _LOOSE_OFFER.finditer(body)]
+    if include_call_offer and " ".join(offer.lower().split()) not in " ".join(body.lower().split()):
+        violations.append(Issue(
+            f'The call offer is missing or reworded; write it as "{offer} ...".', "call_offer_wording",
+            body.strip()[-200:],
+        ))
     if starts:
         # From the last offer to the end of the body, so a paragraph after the offer counts too.
         tail = body[max(starts):].strip()
@@ -471,11 +484,13 @@ def check_rules(
     preferred_closing: Optional[str],
     screening_answers: Optional[list[dict]] = None,
     voice: Optional[dict] = None,
+    include_call_offer: Optional[bool] = None,
 ) -> list[Issue]:
     """Chris's hard rules. Returns human-readable violations (empty = clean).
     With `screening_answers`, the answer rules are checked too and explicit asks may be
     honoured in either the letter or the answers. With `voice` (the user's voice-kit bundle),
-    the kit's de-AI bans and round-3 rules are checked too."""
+    the kit's de-AI bans and round-3 rules are checked too; `include_call_offer` (whether the
+    request asked for a call offer, None when unknown) then also requires the kit's offer wording."""
     violations: list[Issue] = []
     stripped = text.strip()
     closing = expected_closing(preferred_closing)
@@ -516,8 +531,10 @@ def check_rules(
             violations.append(Issue(f"Explicit ask not honoured: {ask}", "explicit_ask", ask))
 
     violations.extend(check_answer_rules(answers))
+    if include_call_offer and any(_NO_CALLS_ASK.search(ask) for ask in brief.explicit_asks):
+        include_call_offer = False  # the client's own ask wins over the default call offer
     if voice:
-        violations.extend(_check_voice_kit(body, answers, voice))
+        violations.extend(_check_voice_kit(body, answers, voice, include_call_offer))
     return violations
 
 

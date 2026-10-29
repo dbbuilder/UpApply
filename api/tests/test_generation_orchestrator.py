@@ -356,3 +356,43 @@ async def test_answers_only_runs_the_voice_kit_checks():
     codes = {n.code for n in write.call_args_list[1].kwargs["repair_notes"]}
     assert {"dash", "tell_word", "company_name"} <= codes
     assert result.warnings == []
+
+
+OFFER_KIT = {"rules": {"closing": {"call_offer": "I would be happy to jump on a quick call at no cost or obligation"}}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("include_call_offer,repaired", [(True, True), (False, False)])
+async def test_requested_call_offer_wording_is_repaired_for_kit_users(include_call_offer, repaired):
+    """Decision Q6 (A): the include_call_offer flag reaches verify; a kit user's missing offer is repaired."""
+    draft = Draft(cover_letter=CLEAN, screening_answers=[], fact_ids_used=["fact-1"])
+    with patch.object(orch, "build_job_brief", AsyncMock(return_value=BRIEF)), \
+         patch.object(orch, "select_evidence", AsyncMock(return_value=Evidence(facts=[FACT]))), \
+         patch.object(orch, "write_application", AsyncMock(return_value=draft)) as write, \
+         patch.object(orch, "check_claims", AsyncMock(return_value=[])), \
+         patch.object(orch, "load_voice", return_value=OFFER_KIT):
+        result = await generate_application(
+            db=AsyncMock(), user=USER, profile=PROFILE, title="T", description="D", skills=[],
+            questions=[], credit_usage=False, include_call_offer=include_call_offer,
+        )
+    codes = {getattr(w, "code", None) for w in result.warnings}
+    assert ("call_offer_wording" in codes) is repaired
+    assert (write.call_count == 2) is repaired
+    if repaired:
+        assert "call_offer_wording" in {n.code for n in write.call_args_list[1].kwargs["repair_notes"]}
+
+
+@pytest.mark.asyncio
+async def test_answers_only_never_checks_the_call_offer_wording():
+    draft = Draft(cover_letter="x", screening_answers=[{"question": "Q?", "answer": GOOD_ANSWER}], fact_ids_used=[])
+    with patch.object(orch, "build_job_brief", AsyncMock(return_value=BRIEF)), \
+         patch.object(orch, "select_evidence", AsyncMock(return_value=Evidence(facts=[FACT]))), \
+         patch.object(orch, "write_application", AsyncMock(return_value=draft)) as write, \
+         patch.object(orch, "check_claims", AsyncMock(return_value=[])), \
+         patch.object(orch, "load_voice", return_value=OFFER_KIT):
+        result = await generate_application(
+            db=AsyncMock(), user=USER, profile=PROFILE, title="T", description="D", skills=[],
+            questions=["Q?"], credit_usage=False, answers_only=True, include_call_offer=True,
+        )
+    assert write.call_count == 1
+    assert result.warnings == []

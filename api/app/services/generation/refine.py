@@ -291,8 +291,12 @@ async def refine_application(
     )
 
     all_evidence = Evidence(facts=list(merged.values()), voice_samples=evidence.voice_samples)
+    # The refine thread does not know whether the original request asked for a call offer
+    # (cover_letters stores no include_call_offer, and the user may ask here to drop it), so the
+    # call-offer wording check is skipped (None).
     warnings: list[str] = check_rules(
-        draft.cover_letter, brief, profile.preferred_closing, draft.screening_answers, load_voice(email)
+        draft.cover_letter, brief, profile.preferred_closing, draft.screening_answers, load_voice(email),
+        include_call_offer=None,
     )
     for item in draft.screening_answers:
         if not item.get("answer"):
