@@ -247,7 +247,7 @@ REPAIR_INSTRUCTIONS = {
     "tech_in_close": "Move every technology name out of the closing paragraph; the close stays plain.",
     "morbid_words": "Remove the live-or-die rhetoric or morbid word named in the repair notes; say what success depends on instead.",
     "double_happy": 'Use "happy" once in the closing paragraph (the call offer); word the NDA clause exactly as in the CALL OFFER instruction.',
-    "missing_requirement": "Answer each client requirement quoted in the repair notes, in the letter or the screening answers, woven into the narrative rather than listed.",
+    "missing_requirement": "Answer each client requirement quoted in the repair notes, in the letter or the screening answers, woven into the narrative rather than listed. Use only the evidence: where it does not cover a requirement, speak to it through approach or adjacent experience and never claim it.",
 }
 
 
@@ -297,7 +297,8 @@ def build_writer_user_prompt(
         parts.insert(3, (
             "REQUIREMENTS (graded from the post, as [importance, tier]): answer every critical and high one in "
             "the letter or the screening answers, woven into the narrative; never list them mechanically or name "
-            f"their grades.\n{_block('client_requirements', _format_requirements(brief.requirements))}"
+            "their grades. Answer from the evidence only: where the evidence does not cover a requirement, speak to "
+            f"it through approach or adjacent experience, never by claiming it.\n{_block('client_requirements', _format_requirements(brief.requirements))}"
         ))
     voice = load_voice(email)
     nda = ((((voice or {}).get("rules") or {}).get("closing") or {}).get("nda_clause") or "").strip().rstrip(".")
