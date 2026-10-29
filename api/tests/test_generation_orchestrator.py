@@ -6,9 +6,9 @@ import pytest
 
 from app.services.generation import generate_application
 from app.services.generation import orchestrator as orch
-from app.services.generation.brief import JobBrief
+from app.services.generation.brief import JobBrief, Requirement
 from app.services.generation.evidence import Evidence
-from app.services.generation.verify import CLAIM_CHECK_SKIPPED
+from app.services.generation.verify import CLAIM_CHECK_SKIPPED, Issue
 from app.services.generation.writer import Draft
 
 SENTENCE = "Your migration plan needs a rollback path that was proven on a live estate."
@@ -396,3 +396,42 @@ async def test_answers_only_never_checks_the_call_offer_wording():
         )
     assert write.call_count == 1
     assert result.warnings == []
+
+
+GRADED = BRIEF.model_copy(update={"requirements": [
+    Requirement(requirement="Has shipped HIPAA systems", importance="critical", tier="stated", quote="HIPAA"),
+    Requirement(requirement="Nice to have Go", importance="preferred", tier="stated", quote="Go"),
+]})
+
+
+@pytest.mark.asyncio
+async def test_missing_critical_requirement_reaches_the_repair_pass():
+    missing = Issue("Client requirement not addressed: Has shipped HIPAA systems", "missing_requirement",
+                    "Has shipped HIPAA systems")
+    claims = AsyncMock(side_effect=[[missing], []])
+    with patch.object(orch, "select_evidence", AsyncMock(return_value=Evidence(facts=[FACT]))), \
+         patch.object(orch, "write_application", AsyncMock(side_effect=[_draft(CLEAN), _draft(CLEAN)])) as write, \
+         patch.object(orch, "check_claims", claims):
+        result = await generate_application(
+            db=AsyncMock(), user=USER, profile=PROFILE, title="T", description="D", skills=[], questions=[],
+            brief=GRADED,
+        )
+    assert claims.call_args_list[0].args[2] == ["Has shipped HIPAA systems"]
+    assert write.call_count == 2
+    notes = write.call_args_list[1].kwargs["repair_notes"]
+    assert [(n.code, n.detail) for n in notes] == [("missing_requirement", "Has shipped HIPAA systems")]
+    assert result.warnings == []
+
+
+@pytest.mark.asyncio
+async def test_answers_only_never_checks_requirements():
+    draft = Draft(cover_letter="x", screening_answers=[{"question": "Q?", "answer": GOOD_ANSWER}], fact_ids_used=[])
+    claims = AsyncMock(return_value=[])
+    with patch.object(orch, "select_evidence", AsyncMock(return_value=Evidence(facts=[FACT]))), \
+         patch.object(orch, "write_application", AsyncMock(return_value=draft)), \
+         patch.object(orch, "check_claims", claims):
+        await generate_application(
+            db=AsyncMock(), user=USER, profile=PROFILE, title="T", description="D", skills=[],
+            questions=["Q?"], brief=GRADED, credit_usage=False, answers_only=True,
+        )
+    assert claims.call_args.args[2] == []
