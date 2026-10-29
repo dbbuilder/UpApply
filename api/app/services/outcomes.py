@@ -87,10 +87,16 @@ async def apply_outcome(db: AsyncSession, proposal: Proposal, outcome: Optional[
     if proposal.facts_credited_at is not None:
         return False
 
+    # The letter actually sent: captured on Upwork (final_text), else marked submitted in the
+    # sidebar (was_submitted), else the newest draft for the job.
     letter = (await db.execute(
         select(CoverLetter)
         .where(CoverLetter.user_id == proposal.user_id, CoverLetter.job_id == proposal.job_id)
-        .order_by(CoverLetter.final_text.is_(None), CoverLetter.created_at.desc())
+        .order_by(
+            CoverLetter.final_text.is_(None),
+            CoverLetter.was_submitted.is_not(True),
+            CoverLetter.created_at.desc(),
+        )
         .limit(1)
     )).scalar_one_or_none()
     if not letter or not letter.fact_ids_used:
