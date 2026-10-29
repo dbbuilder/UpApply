@@ -32,6 +32,7 @@ from app.schemas.proposal import (
     ProposalOutcomeSyncRequest,
     ProposalOutcomeSyncResponse,
 )
+from app.services.edit_distance import word_edit_distance_pct
 from app.services.outcomes import apply_outcome, parse_submitted_at, resolve_outcome
 from app.services.proposal_status import advance_status
 
@@ -632,9 +633,17 @@ def _letter_is_job_description(letter: str, job_text: Optional[str]) -> bool:
     return len(ta & tb) / len(ta | tb) > LETTER_IS_JOB_JACCARD
 
 
-async def _server_author(db: AsyncSession, user_id: str, job_url: Optional[str], job_title: str) -> str:
-    """'chris_edited_ai' when UpApply generated a letter for this user's matching job, else 'chris'.
-    Never taken from the client."""
+# A submitted letter within this fraction of word edits of an UpApply draft was sent unchanged.
+UNEDITED_AI_MAX_EDIT = 0.05
+
+
+async def _server_author(
+    db: AsyncSession, user_id: str, job_url: Optional[str], job_title: str, sent_text: str = ""
+) -> str:
+    """'ai' when the sent letter is an UpApply draft sent (nearly) unchanged, 'chris_edited_ai'
+    when UpApply drafted a letter for this job and the user changed it, else 'chris'. Only the
+    last two are voice samples. Never taken from the client."""
+
     conds = [func.lower(func.trim(Job.title)) == job_title.strip().lower()]
     if job_url:
         conds.append(Job.upwork_url == job_url)
@@ -642,13 +651,18 @@ async def _server_author(db: AsyncSession, user_id: str, job_url: Optional[str],
         if slug:
             conds.append(Job.upwork_job_id.in_([slug.group(1), f"~{slug.group(1)}"]))
             conds.append(Job.upwork_url.contains(f"~{slug.group(1)}"))
-    hit = (await db.execute(
-        select(CoverLetter.id)
+    drafts = (await db.execute(
+        select(CoverLetter.content)
         .join(Job, CoverLetter.job_id == Job.id)
         .where(CoverLetter.user_id == user_id, Job.user_id == user_id, or_(*conds))
-        .limit(1)
-    )).first()
-    return "chris_edited_ai" if hit else "chris"
+    )).scalars().all()
+    if not drafts:
+        return "chris"
+    if sent_text.strip() and any(
+        word_edit_distance_pct(draft or "", sent_text) <= UNEDITED_AI_MAX_EDIT for draft in drafts
+    ):
+        return "ai"
+    return "chris_edited_ai"
 
 
 def _clean_answers(raw) -> Optional[list]:
@@ -799,7 +813,7 @@ async def import_proposals_from_upwork(
             submitted_at=submitted_at,
             source="scraped",
             embedding=embedding,
-            author=await _server_author(db, current_user.id, job_url, job_title),
+            author=await _server_author(db, current_user.id, job_url, job_title, cover_letter_text),
             outcome=outcome,
             job_text=job_text,
             screening_answers=screening_answers,

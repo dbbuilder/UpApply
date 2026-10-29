@@ -53,4 +53,33 @@ async def test_facts_but_no_voice_samples(db_session, test_user):
     status = await setup_status(db_session, test_user.id, profile)
     assert status["ready"] is False and status["voice_samples"] == 0
     assert status["approved_facts"] == MIN_APPROVED_FACTS  # candidates don't count
-    assert status["missing"] == ["a past proposal you wrote or edited (voice sample)"]
+    assert len(status["missing"]) == 1 and status["missing"][0].startswith("a past proposal you wrote or edited")
+    assert "backfill-job-embeddings" in status["missing"][0]
+
+
+@pytest.mark.asyncio
+async def test_blank_letters_do_not_count_as_voice_samples(db_session, test_user):
+    profile = UserProfile(user_id=test_user.id, full_name="Gus Tello", professional_title="Engineer")
+    blank = Proposal(user_id=test_user.id, cover_letter_text="   ", author="chris",
+                     job_needs_embedding=[0.0] * 1535 + [1.0])
+    db_session.add_all([profile, *_facts(test_user.id, MIN_APPROVED_FACTS), blank])
+    await db_session.commit()
+    assert (await setup_status(db_session, test_user.id, profile))["voice_samples"] == 0
+
+
+@pytest.mark.asyncio
+async def test_setup_status_never_creates_a_profile(client: AsyncClient, auth_headers: dict):
+    from sqlalchemy import delete, func, select
+
+    from tests.conftest import TestSessionLocal
+
+    async def profiles():
+        async with TestSessionLocal() as db:
+            return (await db.execute(select(func.count()).select_from(UserProfile))).scalar_one()
+
+    async with TestSessionLocal() as db:  # a user who has never saved a profile
+        await db.execute(delete(UserProfile))
+        await db.commit()
+    response = await client.get("/api/v1/profile/setup-status", headers=auth_headers)
+    assert response.status_code == 200 and response.json()["has_profile_basics"] is False
+    assert await profiles() == 0

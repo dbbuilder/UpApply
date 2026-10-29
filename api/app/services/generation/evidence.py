@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.embeddings import generate_embeddings_batch
@@ -127,6 +127,7 @@ async def _find_voice_samples(
             Proposal.user_id == user_id,
             Proposal.author.in_(VOICE_AUTHORS),
             Proposal.job_needs_embedding.isnot(None),
+            func.length(func.trim(Proposal.cover_letter_text)) > 0,
         )
         .order_by(distance)
         .limit(limit * 4)

@@ -184,9 +184,10 @@ All three tools below read or write the production database, so open the Render 
 
 ### Results report (read-only)
 ```bash
-cd api && doppler run --project upapply --config prd -- env DATABASE_URL="$(security find-generic-password -s cc:db-5c2ea0 -w)" \
-  ./venv/bin/python ../scripts/outcome_report.py --email chris@servicevision.net [--since 2026-10-28] [--json]
+(cd api && doppler run --project upapply --config prd -- env DATABASE_URL="$(security find-generic-password -s cc:db-5c2ea0 -w)" \
+  ./venv/bin/python ../scripts/outcome_report.py --email chris@servicevision.net)
 ```
+Optional flags: `--since 2026-10-28` (start of the v2 group) and `--json` (machine-readable output).
 - **Groups:** `v2` = proposals whose sent letter (`outcomes.find_sent_letter`, the same link outcome
   sync uses) was written by the v2 engine, sent on or after `--since` (default: the user's first v2
   cover letter); `baseline` = every other proposal sent in the 90 days before. Each group is also
@@ -222,10 +223,13 @@ quote. Re-running a page is safe: the facts service merges near-duplicates.
 
 ### New-user checklist (before turning `generation_v2` on)
 1. The user registers through the extension.
-2. Load facts: their Upwork proposals (extension import, then `POST /api/v1/facts/from-proposals`),
+2. Load facts: their Upwork proposals (extension import, then `POST /api/v1/facts/from-proposals`,
+   repeated until `remaining` is 0: each call processes 10 proposals),
    their ChatGPT export (§4) and client feedback (above); they approve candidates in Me → Facts.
 3. Check `GET /api/v1/profile/setup-status`: `ready` needs at least 25 approved facts, at least one
-   voice sample (a proposal they wrote or edited) and their name and professional title. `missing`
-   lists what is left.
+   voice sample (a non-empty proposal they wrote or edited, with a job embedding; run
+   `POST /api/v1/proposals/backfill-job-embeddings` for proposals saved before embeddings existed)
+   and their name and professional title. `missing` lists what is left. An UpApply draft sent
+   unchanged (under 5% of words edited) counts as AI, not as a voice sample.
 4. Optional: a voice kit for them in `~/dev2/sv/writing-style` (built from their own A/B feedback).
 5. Turn the flag on for that user only (§7, with their email).

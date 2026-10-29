@@ -193,10 +193,12 @@ async def import_resume(
 @router.get("/setup-status", response_model=SetupStatusResponse)
 async def get_setup_status(
     current_user: User = Depends(get_current_user),
-    profile: UserProfile = Depends(get_user_profile),
     db: AsyncSession = Depends(get_db),
 ):
-    """Is this user set up for memory-driven generation? Read-only checklist."""
+    """Is this user set up for memory-driven generation? Read-only: never creates a profile."""
+    profile = (await db.execute(
+        select(UserProfile).where(UserProfile.user_id == current_user.id)
+    )).scalar_one_or_none()
     return await setup_status(db, current_user.id, profile)
 
 
