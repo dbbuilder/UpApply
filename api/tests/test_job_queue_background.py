@@ -65,7 +65,7 @@ def _assert_called_with_real_signature(mock_rfa, db, profile, item):
 @pytest.mark.asyncio
 async def test_generate_draft_background_produces_ready_draft():
     item = _item()
-    profile = MagicMock()
+    profile = MagicMock(generation_v2=False)
     maker, db = _session_maker(item)
 
     with patch("app.core.database.async_session_maker", maker), \
