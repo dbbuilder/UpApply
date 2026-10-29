@@ -168,6 +168,41 @@ async def test_apply_outcome_is_user_scoped(db_session):
     assert theirs.times_in_won == 0
 
 
+async def test_apply_outcome_credits_the_submitted_letter_not_a_newer_draft(db_session):
+    """Mark Submitted (/submit) sets was_submitted but no final_text; a later draft for the
+    same job must not take the win credit."""
+    from app.models.cover_letter import CoverLetter
+    from app.models.job import Job
+    from app.models.proposal import Proposal
+
+    user = await _make_user(db_session, "outcomes-h@example.com")
+    sent = await _fact(db_session, user.id)
+    unsent = await _fact(db_session, user.id, statement="Shipped a pgvector search MVP.")
+    job = Job(user_id=user.id, upwork_url="https://www.upwork.com/jobs/~02", title="T", description="D")
+    db_session.add(job)
+    await db_session.flush()
+    db_session.add_all([
+        CoverLetter(
+            user_id=user.id, job_id=job.id, content="submitted draft", model_used="m",
+            fact_ids_used=[str(sent.id)], was_submitted=True, submitted_text="submitted draft",
+            created_at=NOW - timedelta(hours=1),
+        ),
+        CoverLetter(
+            user_id=user.id, job_id=job.id, content="later draft", model_used="m",
+            fact_ids_used=[str(unsent.id)], created_at=NOW,
+        ),
+    ])
+    proposal = Proposal(user_id=user.id, job_id=job.id, cover_letter_text="submitted draft", outcome=None)
+    db_session.add(proposal)
+    await db_session.flush()
+
+    assert await apply_outcome(db_session, proposal, "replied") is True
+    await db_session.refresh(sent)
+    await db_session.refresh(unsent)
+    assert sent.times_in_won == 1
+    assert unsent.times_in_won == 0
+
+
 async def test_apply_outcome_does_not_credit_rejected_facts(db_session):
     user = await _make_user(db_session, "outcomes-g@example.com")
     kept = await _fact(db_session, user.id)
