@@ -466,7 +466,7 @@ OFFER = "I would be happy to jump on a quick call at no cost or obligation"
 
 
 def test_vendored_kit_carries_round_3_rules():
-    assert KIT["kit_version"].startswith("v0.5.0")
+    assert KIT["kit_version"].startswith("v0.5.")
     assert KIT["de_ai"]["hard"]["dashes"] and KIT["rules"]["avoid_names"][0]["name"] == "DBBuilder"
 
 

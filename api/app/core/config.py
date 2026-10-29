@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
     anthropic_api_key: str = ""
     anthropic_base_url: str = ""
+    # Optional direct route for the cover-letter writer only (Q11 A): a real sk-ant key and,
+    # if needed, a base URL. Empty = the writer uses the normal client (the AICostCentral proxy).
+    writer_anthropic_api_key: str = ""
+    writer_anthropic_base_url: str = ""
     cover_letter_model: str = "claude-opus-5-5"            # generation v2 writer (no temperature/thinking params)
     legacy_cover_letter_model: str = "claude-sonnet-4-6"   # flag-off path; legacy calls still pass temperature
     extraction_model: str = "claude-haiku-4-5"             # job brief, claim check, fact extraction

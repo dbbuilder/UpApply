@@ -16,6 +16,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 _client: Optional[AsyncAnthropic] = None
+_writer_client: Optional[AsyncAnthropic] = None
 
 # Shown when the reply is not the requested JSON: the usual cause is a proxy
 # (ANTHROPIC_BASE_URL) that drops or rejects output_config.
@@ -42,6 +43,20 @@ def get_anthropic_client() -> AsyncAnthropic:
     return _client
 
 
+def get_writer_client() -> AsyncAnthropic:
+    """The cover-letter writer's client: a direct Anthropic client when WRITER_ANTHROPIC_API_KEY
+    is set, otherwise the shared client (proxy)."""
+    global _writer_client
+    if not settings.writer_anthropic_api_key:
+        return get_anthropic_client()
+    if _writer_client is None:
+        _writer_client = AsyncAnthropic(
+            api_key=settings.writer_anthropic_api_key,
+            base_url=settings.writer_anthropic_base_url or None,
+        )
+    return _writer_client
+
+
 async def structured_call(
     model: str,
     system: Union[str, list],
@@ -49,22 +64,33 @@ async def structured_call(
     schema: dict,
     effort: Optional[str] = None,
     max_tokens: int = 16000,
+    writer: bool = False,
+    api_retries: int = 0,
 ) -> dict:
-    """Single-turn call whose reply is guaranteed to match `schema`; returns the parsed dict."""
+    """Single-turn call whose reply is guaranteed to match `schema`; returns the parsed dict.
+    `writer=True` routes through get_writer_client(); `api_retries` re-sends the call that many
+    times after an API error the SDK's own retries did not clear (Q11 C)."""
     output_config: dict = {"format": {"type": "json_schema", "schema": schema}}
     if effort:
         output_config["effort"] = effort
 
-    try:
-        response = await get_anthropic_client().messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-            output_config=output_config,
-        )
-    except APIError as exc:
-        raise LLMError(f"structured_call API error from {model}: {exc} ({PROXY_HINT})", reason="api_error") from exc
+    client = get_writer_client() if writer else get_anthropic_client()
+    for attempt in range(api_retries + 1):
+        try:
+            response = await client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+                output_config=output_config,
+            )
+            break
+        except APIError as exc:
+            if attempt < api_retries:
+                logger.warning("structured_call %s API error (%s); retrying %d/%d",
+                               model, type(exc).__name__, attempt + 1, api_retries)
+                continue
+            raise LLMError(f"structured_call API error from {model}: {exc} ({PROXY_HINT})", reason="api_error") from exc
 
     # Usage only — never prompt or output content.
     usage = getattr(response, "usage", None)
