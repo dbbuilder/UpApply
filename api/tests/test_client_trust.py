@@ -194,3 +194,9 @@ async def test_job_queue_list_includes_client_trust_with_reposts(client, auth_he
         assert item["client_trust"]["tier"] == TIER_CAUTION
         assert _signal(item["client_trust"], "Reposted")["value"].startswith("Same title seen once")
         assert _signal(item["client_trust"], "Payment method")["effect"] == "positive"
+
+
+def test_non_finite_numbers_are_treated_as_missing():
+    from app.services.client_trust import _parse_number
+    assert _parse_number(float("inf")) is None and _parse_number(float("nan")) is None
+    assert _parse_number(True) is None and _parse_number(12.5) == 12.5

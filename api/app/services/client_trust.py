@@ -26,6 +26,7 @@ Tier: >= SUSPICIOUS_MIN_CAUTIONS cautions -> "Suspicious"; any caution ->
 """
 from __future__ import annotations
 
+import math
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Set
@@ -78,8 +79,10 @@ def _parse_number(value: Any) -> Optional[float]:
     """First number in ``value``; honours K/M suffixes ("$10K+" -> 10000)."""
     if isinstance(value, bool):
         return None
+    if isinstance(value, bool):
+        return None
     if isinstance(value, (int, float)):
-        return float(value)
+        return float(value) if math.isfinite(value) else None
     if not isinstance(value, str):
         return None
     match = re.search(r"(\d[\d,]*(?:\.\d+)?)\s*([kKmM])?", value)

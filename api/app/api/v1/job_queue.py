@@ -243,11 +243,19 @@ async def list_job_queue(
     items = result.scalars().all()
     # Client trust cards are computed at read time (no stored column); one
     # title index covers repost detection for the whole page.
-    cards = trust_cards_for(await recent_title_index(db, current_user.id), items)
+    try:
+        cards = trust_cards_for(await recent_title_index(db, current_user.id), items)
+    except Exception:  # non-critical: the queue lists without cards
+        logger.warning("client trust cards failed for the job queue", exc_info=True)
+        cards = [None] * len(items)
     responses = []
     for item, card in zip(items, cards):
         response = _to_response(item)
-        response.client_trust = ClientTrust(**card)
+        if card is not None:
+            try:
+                response.client_trust = ClientTrust(**card)
+            except Exception:
+                logger.warning("client trust card invalid for queue item %s", item.id, exc_info=True)
         responses.append(response)
     return responses
 

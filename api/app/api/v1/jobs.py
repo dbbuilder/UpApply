@@ -125,11 +125,20 @@ async def analyze_job(
         relevant_memories=result.relevant_memories,
         recommendation=result.recommendation,
         reason=result.reason,
-        client_trust=await client_trust_for(
+        client_trust=await _safe_trust_card(
             db, current_user.id, client_info=client_info,
             title=request.title, upwork_url=request.upwork_url,
         ),
     )
+
+
+async def _safe_trust_card(db: AsyncSession, user_id: str, **kwargs) -> Optional[ClientTrust]:
+    """The trust card is non-critical: on any failure the analysis returns without it."""
+    try:
+        return ClientTrust(**await client_trust_for(db, user_id, **kwargs))
+    except Exception:
+        logger.warning("client trust card failed during analysis", exc_info=True)
+        return None
 
 
 async def _with_client_trust(db: AsyncSession, job: Job) -> JobResponse:
