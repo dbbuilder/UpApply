@@ -439,3 +439,60 @@ async def test_screening_v2_failures_disclose_no_exception_text(
         )
     logged = _assert_generic_failure(resp, status_code, caplog, ["sk-ant-SECRET", "claude-x", "embedding failed"])
     assert type(exc).__name__ in logged and "sk-ant-SECRET" not in logged
+
+
+@pytest.mark.asyncio
+async def test_cover_letter_generate_passes_client_review_and_returns_the_verdict(
+    client: AsyncClient, auth_headers_with_profile
+):
+    await _enable_v2()
+    result = _result([])
+    result.client_review = {
+        "shortlist": "maybe", "why": "Credible, but the opening is generic.",
+        "paragraphs": [{"paragraph": 1, "verdict": "rewrite", "reason": "Too vague.", "text": "Your cutover"}],
+    }
+    engine = AsyncMock(return_value=result)
+    with patch("app.api.v1.jobs.run_full_analysis", AsyncMock(return_value=_analysis())), \
+         patch("app.api.v1.jobs.generate_embedding", AsyncMock(side_effect=RuntimeError("no quota"))), \
+         patch("app.api.v1.jobs.generate_application", engine):
+        resp = await client.post(
+            "/api/v1/jobs/cover-letters/generate",
+            headers=auth_headers_with_profile,
+            json={"job_data": JOB_DATA, "client_review": True},
+        )
+    assert resp.status_code == 200, resp.text
+    assert engine.call_args.kwargs["client_review"] is True
+    assert resp.json()["client_review"] == result.client_review
+
+
+@pytest.mark.asyncio
+async def test_cover_letter_generate_client_review_defaults_off(client: AsyncClient, auth_headers_with_profile):
+    await _enable_v2()
+    engine = AsyncMock(return_value=_result([]))
+    with patch("app.api.v1.jobs.run_full_analysis", AsyncMock(return_value=_analysis())), \
+         patch("app.api.v1.jobs.generate_embedding", AsyncMock(side_effect=RuntimeError("no quota"))), \
+         patch("app.api.v1.jobs.generate_application", engine):
+        resp = await client.post(
+            "/api/v1/jobs/cover-letters/generate", headers=auth_headers_with_profile, json={"job_data": JOB_DATA},
+        )
+    assert resp.status_code == 200, resp.text
+    assert engine.call_args.kwargs["client_review"] is False
+    assert resp.json()["client_review"] is None
+
+
+@pytest.mark.asyncio
+async def test_cover_letter_generate_legacy_path_ignores_client_review(client: AsyncClient, auth_headers_with_profile):
+    engine = AsyncMock()
+    with patch("app.api.v1.jobs.run_full_analysis", AsyncMock(return_value=_analysis())), \
+         patch("app.api.v1.jobs.generate_embedding", AsyncMock(side_effect=RuntimeError("no quota"))), \
+         patch("app.api.v1.jobs.find_relevant_proposals", AsyncMock(return_value=[])), \
+         patch("app.api.v1.jobs.generate_cover_letter", AsyncMock(return_value="Legacy letter.")), \
+         patch("app.api.v1.jobs.generate_application", engine):
+        resp = await client.post(
+            "/api/v1/jobs/cover-letters/generate",
+            headers=auth_headers_with_profile,
+            json={"job_data": JOB_DATA, "client_review": True},
+        )
+    assert resp.status_code == 200, resp.text
+    engine.assert_not_called()
+    assert resp.json()["client_review"] is None

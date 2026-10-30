@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     cover_letter_model: str = "claude-opus-5-5"            # generation v2 writer (no temperature/thinking params)
     legacy_cover_letter_model: str = "claude-sonnet-4-6"   # flag-off path; legacy calls still pass temperature
     extraction_model: str = "claude-haiku-4-5"             # job brief, claim check, fact extraction
+    client_review_model: str = "claude-sonnet-4-6"         # opt-in client's-eye reviewer (structured output)
     writer_effort: str = "high"                            # Opus 5.5 defaults to medium; set explicitly
 
     # Security

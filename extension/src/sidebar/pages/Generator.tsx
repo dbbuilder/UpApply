@@ -73,6 +73,7 @@ export default function GeneratorPage() {
   const [inclusions, setInclusions] = useState('');
   const [prototypeUrl, setPrototypeUrl] = useState('');
   const [includeCallOffer, setIncludeCallOffer] = useState(true);
+  const [clientReview, setClientReview] = useState(false);
 
   // Milestones state
   const [milestones, setMilestones] = useState<MilestoneSuggestion[]>([]);
@@ -146,12 +147,16 @@ export default function GeneratorPage() {
 
   const handleGenerate = () => {
     _resetFeedbackLoopState();
-    generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
+    generateCoverLetter(
+      inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer, clientReview,
+    );
   };
 
   const handleRegenerateFresh = () => {
     _resetFeedbackLoopState();
-    generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
+    generateCoverLetter(
+      inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer, clientReview,
+    );
   };
 
   const handleFill = async () => {
@@ -393,7 +398,9 @@ export default function GeneratorPage() {
 
   const handleGenerateAll = async () => {
     _resetFeedbackLoopState();
-    await generateCoverLetter(inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer);
+    await generateCoverLetter(
+      inclusions.trim() || undefined, prototypeUrl.trim() || undefined, includeCallOffer, clientReview,
+    );
     // v2 answers come back with the letter (same evidence, one call) — use them instead of per-question calls
     const meta = useAppStore.getState().draftMeta;
     const v2Answers = meta?.screeningAnswers ?? [];
@@ -596,6 +603,9 @@ export default function GeneratorPage() {
               setPrototypeUrl={setPrototypeUrl}
               includeCallOffer={includeCallOffer}
               setIncludeCallOffer={setIncludeCallOffer}
+              clientReview={clientReview}
+              setClientReview={setClientReview}
+              clientReviewResult={draftMeta?.clientReview ?? null}
               coverLetterError={coverLetterError}
               coverLetterLoading={coverLetterLoading}
               submitting={submitting}

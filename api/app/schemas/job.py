@@ -142,6 +142,7 @@ class CoverLetterGenerateRequest(BaseModel):
     custom_instructions: Optional[str] = Field(None, max_length=MAX_EXTRA_POINTS)  # Additional instructions
     prototype_url: Optional[str] = Field(None, max_length=MAX_PROTOTYPE_URL)  # URL to a prototype built for this job
     include_call_offer: bool = True  # Append no-cost/no-commitment call offer before close
+    client_review: bool = False  # v2 only: client's-eye review of the first draft feeds the single repair
     screening_questions: Optional[List[ScreeningQuestion]] = Field(
         None, max_length=MAX_SCREENING_QUESTIONS
     )  # v2: answered jointly with the letter
@@ -198,6 +199,8 @@ class CoverLetterResponse(BaseModel):
     verify_warnings: Optional[List[str]] = None
     facts_used: Optional[List[dict]] = None  # [{id, statement}] of facts the draft cites
     claims_verified: Optional[bool] = None  # False when the claim check was skipped
+    # {shortlist: yes|maybe|no, why, paragraphs: [{paragraph, verdict, reason, text}]} on the first draft
+    client_review: Optional[dict] = None
 
     model_config = {"from_attributes": True}
 

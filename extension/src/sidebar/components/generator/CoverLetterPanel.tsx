@@ -1,3 +1,11 @@
+import type { ClientReview } from '../../../lib/api-client';
+
+const SHORTLIST_LABEL: Record<ClientReview['shortlist'], string> = {
+  yes: 'Shortlisted',
+  maybe: 'Maybe',
+  no: 'Not shortlisted',
+};
+
 interface CoverLetterPanelProps {
   coverLetter: string;
   jobAnalysis: unknown; // just for the inclusions form visibility — non-null means show
@@ -7,6 +15,9 @@ interface CoverLetterPanelProps {
   setPrototypeUrl: (v: string) => void;
   includeCallOffer: boolean;
   setIncludeCallOffer: (v: boolean) => void;
+  clientReview: boolean;
+  setClientReview: (v: boolean) => void;
+  clientReviewResult: ClientReview | null;
   coverLetterError: string | null;
   coverLetterLoading: boolean;
   submitting: boolean;
@@ -38,6 +49,9 @@ export default function CoverLetterPanel({
   setPrototypeUrl,
   includeCallOffer,
   setIncludeCallOffer,
+  clientReview,
+  setClientReview,
+  clientReviewResult,
   coverLetterError,
   coverLetterLoading,
   submitting,
@@ -116,6 +130,15 @@ export default function CoverLetterPanel({
               <span className="text-gray-400 ml-1">(recommended)</span>
             </span>
           </label>
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={clientReview}
+              onChange={e => setClientReview(e.target.checked)}
+              className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            <span className="text-xs text-gray-600">Client's-eye review (slower)</span>
+          </label>
           <div className="flex gap-2">
             <button type="button" onClick={onGenerate} className="btn-outline flex-1">
               Cover Letter Only
@@ -171,6 +194,28 @@ export default function CoverLetterPanel({
                   <li key={i}>{w}</li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {clientReviewResult && (
+            <div className="mt-2 rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900">
+              <p className="font-medium">
+                Client's-eye review: {SHORTLIST_LABEL[clientReviewResult.shortlist] ?? clientReviewResult.shortlist}
+              </p>
+              {clientReviewResult.why && <p className="mt-0.5">{clientReviewResult.why}</p>}
+              <details className="mt-1">
+                <summary className="cursor-pointer select-none">
+                  First-draft verdicts (cut and rewrite ones were sent back to the writer)
+                </summary>
+                <ul className="list-disc pl-4 mt-1 space-y-0.5">
+                  {clientReviewResult.paragraphs.map(p => (
+                    <li key={p.paragraph}>
+                      Paragraph {p.paragraph}: <span className="font-medium">{p.verdict}</span>
+                      {p.reason ? ` - ${p.reason}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </details>
             </div>
           )}
 

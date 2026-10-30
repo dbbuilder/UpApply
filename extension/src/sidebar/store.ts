@@ -2,7 +2,7 @@
  * Zustand store for sidebar state management.
  */
 import { create } from 'zustand';
-import { apiClient, Profile, JobAnalysisResponse, ApplicationOutcome } from '../lib/api-client';
+import { apiClient, Profile, JobAnalysisResponse, ApplicationOutcome, ClientReview } from '../lib/api-client';
 import type { JobData } from '../types';
 
 interface User {
@@ -16,6 +16,7 @@ export interface DraftMeta {
   factsUsed: { id: string; statement: string }[];
   screeningAnswers: { question: string; answer: string }[];
   claimsVerified: boolean;
+  clientReview?: ClientReview | null;
 }
 
 interface AppState {
@@ -68,7 +69,9 @@ interface AppState {
   logout: () => Promise<void>;
   loadProfile: () => Promise<void>;
   analyzeCurrentJob: () => Promise<void>;
-  generateCoverLetter: (inclusions?: string, prototypeUrl?: string, includeCallOffer?: boolean) => Promise<void>;
+  generateCoverLetter: (
+    inclusions?: string, prototypeUrl?: string, includeCallOffer?: boolean, clientReview?: boolean,
+  ) => Promise<void>;
   fillCoverLetter: () => Promise<boolean>;
   fillScreeningQuestion: (selector: string, answer: string) => Promise<boolean>;
   saveCurrentJob: () => Promise<string | null>;
@@ -281,7 +284,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   // Generate cover letter
-  generateCoverLetter: async (inclusions?: string, prototypeUrl?: string, includeCallOffer: boolean = true) => {
+  generateCoverLetter: async (
+    inclusions?: string, prototypeUrl?: string, includeCallOffer: boolean = true, clientReview: boolean = false,
+  ) => {
     const { currentJob } = get();
     if (!currentJob || !currentJob.title || !currentJob.description) {
       return;
@@ -301,6 +306,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         custom_instructions: inclusions || undefined,
         prototype_url: prototypeUrl || undefined,
         include_call_offer: includeCallOffer,
+        client_review: clientReview,
         screening_questions: currentJob.screeningQuestions?.map((q) => q.question),
       });
       set({
@@ -315,6 +321,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                 factsUsed: result.facts_used ?? [],
                 screeningAnswers: result.screening_answers ?? [],
                 claimsVerified: result.claims_verified !== false,
+                clientReview: result.client_review ?? null,
               }
             : null,
       });

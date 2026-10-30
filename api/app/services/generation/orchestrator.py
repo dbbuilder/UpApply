@@ -1,4 +1,5 @@
 """Generation v2 pipeline: brief → evidence → write → verify → at most one repair."""
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
@@ -7,6 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas.job import MAX_GEN_DESCRIPTION, MAX_GEN_SKILL_LENGTH, MAX_GEN_SKILLS, MAX_GEN_TITLE
 from app.services.facts import credit_facts
 from app.services.generation.brief import JobBrief, build_job_brief
+from app.services.generation.client_review import (
+    CLIENT_REVIEW_UNAVAILABLE,
+    ClientReviewError,
+    review_as_client,
+    review_issues,
+)
 from app.services.generation.evidence import Evidence, select_evidence
 from app.services.generation.verify import (
     CLAIM_CHECK_SKIPPED,
@@ -21,6 +28,9 @@ from app.services.generation.verify import (
 )
 from app.services.generation.voice import load_voice
 from app.services.generation.writer import Draft, write_application
+from app.services.llm import LLMError
+
+logger = logging.getLogger(__name__)
 
 NO_FACTS_WARNING = "No approved facts matched this job, so the draft has no verified specifics."
 # Stored jobs (job_id path) and stored briefs never passed request validation, so the engine
@@ -34,6 +44,8 @@ class GenerationResult:
     evidence: Evidence
     warnings: list[str]
     claims_verified: bool = True  # False when the claim check was skipped for the final draft
+    # The client's-eye verdict on the FIRST draft ({shortlist, why, paragraphs}); None when not run.
+    client_review: Optional[dict] = None
 
 
 async def _verify(
@@ -92,6 +104,7 @@ async def generate_application(
     credit_usage: bool = True,
     answers_only: bool = False,
     exclude_proposal_ids: Optional[list[str]] = None,
+    client_review: bool = False,
 ) -> GenerationResult:
     """Run the full v2 pipeline. The caller owns the transaction (commit).
 
@@ -102,6 +115,9 @@ async def generate_application(
     decision) ignores the letter.
     `exclude_proposal_ids`: proposal ids / upwork_proposal_ids never used as voice samples
     (the eval excludes each golden job's own letter).
+    `client_review=True`: after the first verify, a reviewer playing the client marks each
+    paragraph keep / cut / rewrite; cut and rewrite verdicts join the repairable warnings, so
+    they ride the same single repair pass. A failed review degrades to one warning.
     """
     if brief is None:
         brief = await build_job_brief(
@@ -127,6 +143,16 @@ async def generate_application(
     )
 
     repairable = [w for w in warnings if w != CLAIM_CHECK_SKIPPED]
+    review: Optional[dict] = None
+    review_failed = False
+    if client_review and not answers_only:
+        try:
+            review = await review_as_client(brief, evidence, draft.cover_letter, profile.preferred_closing)
+            repairable.extend(review_issues(review))
+        except (LLMError, ClientReviewError) as exc:
+            # Category only: the message can carry upstream text.
+            logger.warning("client review unavailable (%s)", getattr(exc, "reason", type(exc).__name__))
+            review_failed = True
     if repairable:
         draft = await write_application(
             profile, brief, evidence, include_call_offer, prototype_url, extra_points,
@@ -138,11 +164,14 @@ async def generate_application(
 
     claims_verified = CLAIM_CHECK_SKIPPED not in warnings
     warnings.extend(evidence.warnings)
+    if review_failed:
+        warnings.append(CLIENT_REVIEW_UNAVAILABLE)
     if not evidence.facts:
         warnings.append(NO_FACTS_WARNING)
 
     if credit_usage:
         await _credit_usage(db, user.id, evidence, draft)
     return GenerationResult(
-        draft=draft, brief=brief, evidence=evidence, warnings=warnings, claims_verified=claims_verified
+        draft=draft, brief=brief, evidence=evidence, warnings=warnings, claims_verified=claims_verified,
+        client_review=review,
     )
