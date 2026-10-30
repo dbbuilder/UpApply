@@ -5,6 +5,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.schemas.job import ClientTrust
+
 
 # ── Request schemas ──────────────────────────────────────────────────────────
 
@@ -100,6 +102,7 @@ class JobQueueItemResponse(BaseModel):
     created_at: datetime
     reviewed_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
+    client_trust: Optional[ClientTrust] = None  # computed on GET /job-queue only
 
     model_config = {"from_attributes": True}
 

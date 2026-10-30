@@ -2,6 +2,8 @@
  * API client for communicating with the UpApply backend.
  */
 
+import type { ClientTrust } from './client-trust';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://upapply-api.onrender.com';
 
 interface RequestOptions {
@@ -878,6 +880,7 @@ export interface JobAnalysisRequest {
     hire_rate?: string;
     total_spent?: string;
   };
+  upwork_url?: string;
 }
 
 export interface JobAnalysisResponse {
@@ -889,6 +892,7 @@ export interface JobAnalysisResponse {
   deal_breaker_warnings: string[];
   relevant_memories: Record<string, unknown>[];
   recommendation: string;
+  client_trust?: ClientTrust | null;
 }
 
 export interface JobCreate {
@@ -1437,6 +1441,8 @@ export interface JobQueueItem {
   created_at: string;
   reviewed_at?: string;
   expires_at?: string;
+  /** Computed on GET /job-queue only; single-item responses leave it null. */
+  client_trust?: ClientTrust | null;
 }
 
 // ── Job Queue Stats ─────────────────────────────────────────────────────────
