@@ -3,7 +3,9 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
+
+from app.services.skip_reasons import parse_stored
 
 from app.schemas.job import ClientTrust
 
@@ -33,6 +35,8 @@ class JobQueueActionRequest(BaseModel):
     """Body for PUT /api/v1/job-queue/{id}/action."""
 
     action: str  # "approve" | "reject"
+    # A code from app.services.skip_reasons.USER_REASONS, optionally "code: note";
+    # anything else is stored as "other: <text>"
     rejection_reason: Optional[str] = None
 
 
@@ -88,8 +92,9 @@ class JobQueueItemResponse(BaseModel):
     source: str
     source_query_id: Optional[str] = None
     rejection_reason: Optional[str] = None
-    # When status="pre_filtered", rejection_reason holds the filter reason code
-    # e.g. "blocked_country (India)", "budget_too_low ($300 < $500)"
+    # Stored as "<code>" or "<code>: <text>" (app.services.skip_reasons), e.g.
+    # "budget_too_low", "pre_filter:blocked_country: India". Legacy values are mapped by
+    # skip_reason / skip_reason_detail below.
     draft_cover_letter: Optional[str] = None
     draft_status: Optional[str] = None
     draft_generated_at: Optional[datetime] = None
@@ -105,6 +110,18 @@ class JobQueueItemResponse(BaseModel):
     client_trust: Optional[ClientTrust] = None  # computed on GET /job-queue only
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def skip_reason(self) -> Optional[str]:
+        """Canonical skip code for rejected / pre_filtered items (legacy values mapped)."""
+        return parse_stored(self.rejection_reason, self.status)[0]
+
+    @computed_field
+    @property
+    def skip_reason_detail(self) -> Optional[str]:
+        """Free text kept with the code (user note, or pre-filter detail such as the country)."""
+        return parse_stored(self.rejection_reason, self.status)[1]
 
 
 class DraftSubmitResponse(BaseModel):
