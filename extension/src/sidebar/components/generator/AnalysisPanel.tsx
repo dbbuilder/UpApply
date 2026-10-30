@@ -1,4 +1,5 @@
 import type { JobAnalysisResponse } from '../../../lib/api-client';
+import ClientTrustCard from '../ClientTrustCard';
 
 function MatchScoreBadge({ score }: { score: number }) {
   let colorClass = 'score-low';
@@ -67,6 +68,8 @@ export default function AnalysisPanel({
             <h4 className="font-medium text-gray-900">Match Analysis</h4>
             <MatchScoreBadge score={jobAnalysis.match_score} />
           </div>
+
+          {jobAnalysis.client_trust && <ClientTrustCard trust={jobAnalysis.client_trust} />}
 
           <p className="text-sm text-gray-600 mb-3">{jobAnalysis.recommendation}</p>
 

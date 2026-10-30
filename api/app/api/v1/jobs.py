@@ -24,6 +24,7 @@ from app.schemas.job import (
     JobResponse,
     JobAnalysisRequest,
     JobAnalysisResponse,
+    ClientTrust,
     CoverLetterGenerateRequest,
     CoverLetterResponse,
     CoverLetterRegenerateRequest,
@@ -49,6 +50,7 @@ from app.services.job_analysis import (
     find_relevant_proposals,
     run_full_analysis,
 )
+from app.services.client_trust import client_trust_for
 from app.services.cover_letter import (
     generate_cover_letter,
     regenerate_cover_letter,
@@ -124,7 +126,33 @@ async def analyze_job(
         relevant_memories=result.relevant_memories,
         recommendation=result.recommendation,
         reason=result.reason,
+        client_trust=await _safe_trust_card(
+            db, current_user.id, client_info=client_info,
+            title=request.title, upwork_url=request.upwork_url,
+        ),
     )
+
+
+async def _safe_trust_card(db: AsyncSession, user_id: str, **kwargs) -> Optional[ClientTrust]:
+    """The trust card is non-critical: on any failure the analysis returns without it."""
+    try:
+        return ClientTrust(**await client_trust_for(db, user_id, **kwargs))
+    except Exception:
+        logger.warning("client trust card failed during analysis", exc_info=True)
+        return None
+
+
+async def _with_client_trust(db: AsyncSession, job: Job) -> JobResponse:
+    """JobResponse for ``job`` plus its client trust card (never touches match_score)."""
+    response = JobResponse.model_validate(job)
+    try:
+        response.client_trust = ClientTrust(**await client_trust_for(
+            db, job.user_id, client_info=job.client_info, title=job.title,
+            upwork_url=job.upwork_url, posted_at=job.posted_date,
+        ))
+    except Exception:  # non-critical: the job saves and returns without a card
+        logger.warning("client trust card failed for job %s", job.id, exc_info=True)
+    return response
 
 
 @router.post("", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
@@ -181,7 +209,7 @@ async def create_job(
                 await db.refresh(existing_job)
             except Exception:
                 pass  # non-critical — return existing job as-is
-        return existing_job
+        return await _with_client_trust(db, existing_job)
 
     job_skills = job_data.skills_required or []
     client_info = job_data.client_info.model_dump() if job_data.client_info else None
@@ -247,7 +275,7 @@ async def create_job(
     await db.commit()
     await db.refresh(job)
 
-    return job
+    return await _with_client_trust(db, job)
 
 
 
@@ -867,6 +895,7 @@ async def generate_cover_letter_endpoint(
                 include_call_offer=body.include_call_offer,
                 prototype_url=body.prototype_url,
                 extra_points=body.custom_instructions,
+                client_review=body.client_review,
             )
         except EvidenceUnavailable as exc:
             await db.rollback()
@@ -930,6 +959,7 @@ async def generate_cover_letter_endpoint(
             "screening_answers": v2_result.draft.screening_answers,
             "verify_warnings": v2_result.warnings,
             "claims_verified": v2_result.claims_verified,
+            "client_review": v2_result.client_review,
             "facts_used": [
                 {"id": str(f.id), "statement": f.statement}
                 for f in v2_result.evidence.facts

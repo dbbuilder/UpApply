@@ -26,6 +26,8 @@ from app.models.job import Job
 from app.models.job_queue import JobQueueItem
 from app.models.outcome_event import OutcomeEvent
 from app.models.user import User, UserProfile
+from app.schemas.job import ClientTrust
+from app.services.client_trust import recent_title_index, trust_cards_for
 from app.schemas.job_queue import (
     ConfirmSubmitRequest,
     ConfirmSubmitResponse,
@@ -36,6 +38,7 @@ from app.schemas.job_queue import (
     JobQueueItemResponse,
     ProposalResponseRequest,
 )
+from app.services.skip_reasons import encode, normalise_pre_filter, normalise_user_reason, parse_stored
 from agent.autonomy_governor import (
     get_or_create_autonomy_profile,
     record_proposal_drafted,
@@ -106,7 +109,8 @@ async def create_job_queue_item(
     if existing:
         return _to_response(existing)
 
-    is_pre_filtered = bool(data.filter_reason)
+    filter_reason = normalise_pre_filter(data.filter_reason)
+    is_pre_filtered = filter_reason is not None
     item = JobQueueItem(
         id=str(uuid4()),
         user_id=current_user.id,
@@ -121,7 +125,7 @@ async def create_job_queue_item(
         ai_reasoning=data.ai_reasoning,
         chips=data.chips or [],
         status="pre_filtered" if is_pre_filtered else "suggested",
-        rejection_reason=data.filter_reason if is_pre_filtered else None,
+        rejection_reason=encode(*filter_reason) if is_pre_filtered else None,
         source=data.source,
         source_query_id=data.source_query_id,
         draft_status="none",
@@ -237,7 +241,23 @@ async def list_job_queue(
 
     result = await db.execute(stmt)
     items = result.scalars().all()
-    return [_to_response(item) for item in items]
+    # Client trust cards are computed at read time (no stored column); one
+    # title index covers repost detection for the whole page.
+    try:
+        cards = trust_cards_for(await recent_title_index(db, current_user.id), items)
+    except Exception:  # non-critical: the queue lists without cards
+        logger.warning("client trust cards failed for the job queue", exc_info=True)
+        cards = [None] * len(items)
+    responses = []
+    for item, card in zip(items, cards):
+        response = _to_response(item)
+        if card is not None:
+            try:
+                response.client_trust = ClientTrust(**card)
+            except Exception:
+                logger.warning("client trust card invalid for queue item %s", item.id, exc_info=True)
+        responses.append(response)
+    return responses
 
 
 # ── PUT /api/v1/job-queue/{id}/action ─────────────────────────────────────
@@ -286,8 +306,12 @@ async def action_job_queue_item(
             )
     else:
         item.status = "rejected"
-        item.rejection_reason = body.rejection_reason
-        meta = {"rejection_reason": body.rejection_reason} if body.rejection_reason else None
+        reason = normalise_user_reason(body.rejection_reason)
+        item.rejection_reason = encode(*reason) if reason else None
+        meta = (
+            {"rejection_reason": body.rejection_reason, "skip_reason": reason[0]}
+            if reason else None
+        )
         await _record_outcome(db, current_user.id, item_id, "rejected", meta)
         level_change = await record_suggestion_rejected(current_user.id, db)
 
@@ -675,7 +699,8 @@ async def score_anyway(
     """Override a pre-filter block and score the job against the user's profile.
 
     Transitions status: pre_filtered → suggested
-    Clears rejection_reason (which held the filter reason code).
+    Clears rejection_reason (which held the filter reason code); the canonical code is kept on
+    the score_anyway outcome event so scripts/filter_audit.py can still attribute the item.
     Triggers background scoring — ai_score/ai_reasoning will be populated shortly.
     """
     result = await db.execute(
@@ -694,11 +719,13 @@ async def score_anyway(
             detail=f"Item is not pre-filtered (current status: {item.status}).",
         )
 
+    code, detail = parse_stored(item.rejection_reason, item.status)
+    meta = {"skip_reason": code, "skip_reason_detail": detail} if code else None
     item.status = "suggested"
     item.rejection_reason = None
     await db.flush()
 
-    await _record_outcome(db, current_user.id, item_id, "score_anyway")
+    await _record_outcome(db, current_user.id, item_id, "score_anyway", meta)
     ap = await get_or_create_autonomy_profile(current_user.id, db)
     ap.suggestions_shown += 1
     await db.flush()
