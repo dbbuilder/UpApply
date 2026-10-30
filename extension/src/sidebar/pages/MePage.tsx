@@ -4,8 +4,9 @@ import SkillsPage from './Skills';
 import EditProfilePage from './EditProfile';
 import OptimizePage from './OptimizePage';
 import FactsPage from './FactsPage';
+import RulesPage from './RulesPage';
 
-type MeTab = 'profile' | 'skills' | 'memories' | 'facts' | 'optimize';
+type MeTab = 'profile' | 'skills' | 'memories' | 'facts' | 'rules' | 'optimize';
 
 export default function MePage() {
   const [activeTab, setActiveTab] = useState<MeTab>('profile');
@@ -15,7 +16,7 @@ export default function MePage() {
       {/* Sub-nav */}
       <div className="bg-white border-b px-4 pt-3 flex-shrink-0">
         <div className="flex gap-1 pb-2">
-          {(['profile', 'skills', 'memories', 'facts', 'optimize'] as MeTab[]).map(tab => (
+          {(['profile', 'skills', 'memories', 'facts', 'rules', 'optimize'] as MeTab[]).map(tab => (
             <button
               key={tab}
               type="button"
@@ -38,6 +39,7 @@ export default function MePage() {
         {activeTab === 'skills' && <SkillsPage />}
         {activeTab === 'memories' && <MemoriesPage />}
         {activeTab === 'facts' && <FactsPage />}
+        {activeTab === 'rules' && <RulesPage />}
         {activeTab === 'optimize' && <OptimizePage />}
       </div>
     </div>

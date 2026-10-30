@@ -737,6 +737,21 @@ class ApiClient {
       body: { source_type: sourceType, items },
     });
   }
+
+  // ── Learned rules (from the user's own edits) ───────────────────────────────
+
+  async getLearnedRules(status?: LearnedRuleStatus): Promise<LearnedRule[]> {
+    const qs = status ? `?status=${status}` : '';
+    return this.request<LearnedRule[]>(`/api/v1/learned-rules${qs}`);
+  }
+
+  async proposeLearnedRules(): Promise<LearnedRuleProposeResult> {
+    return this.request<LearnedRuleProposeResult>('/api/v1/learned-rules/propose', { method: 'POST' });
+  }
+
+  async decideLearnedRule(id: string, status: 'accepted' | 'rejected'): Promise<LearnedRuleDecision> {
+    return this.request<LearnedRuleDecision>(`/api/v1/learned-rules/${id}`, { method: 'PUT', body: { status } });
+  }
 }
 
 export class ApiError extends Error {
@@ -1609,4 +1624,26 @@ export interface FactIngestResult {
   skipped: number;
   failed: number;
   remaining: number;
+}
+
+export type LearnedRuleStatus = 'proposed' | 'accepted' | 'rejected';
+
+export interface LearnedRule {
+  id: string;
+  rule: string;
+  evidence_quote: string;
+  times_seen: number;
+  status: LearnedRuleStatus;
+  created_at: string;
+  decided_at: string | null;
+}
+
+export interface LearnedRuleDecision extends LearnedRule {
+  note: string | null;
+}
+
+export interface LearnedRuleProposeResult {
+  proposed: LearnedRule[];
+  pairs_found: number;
+  refine_requests_found: number;
 }

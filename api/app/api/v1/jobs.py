@@ -66,6 +66,7 @@ from app.services.generation.evidence import Evidence
 from app.services.generation.writer import Draft
 from app.services.generation.refine import MAX_HISTORY, RefineError, refine_application
 from app.services.edit_distance import word_edit_distance_pct
+from app.services.learned_rules import accepted_rules
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -1345,7 +1346,7 @@ async def refine_cover_letter_endpoint(
         outcome = await refine_application(
             db, current_user.id, profile, brief,
             Evidence(facts=facts, voice_samples=voice), current, history, message,
-            email=current_user.email,
+            email=current_user.email, rules=await accepted_rules(db, current_user.id),
         )
     except RefineError as exc:
         await db.rollback()

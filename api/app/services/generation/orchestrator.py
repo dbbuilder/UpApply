@@ -21,6 +21,7 @@ from app.services.generation.verify import (
 )
 from app.services.generation.voice import load_voice
 from app.services.generation.writer import Draft, write_application
+from app.services.learned_rules import accepted_rules
 
 NO_FACTS_WARNING = "No approved facts matched this job, so the draft has no verified specifics."
 # Stored jobs (job_id path) and stored briefs never passed request validation, so the engine
@@ -118,8 +119,10 @@ async def generate_application(
         db, user.id, brief, profile.proposal_anchors, exclude_proposal_ids=exclude_proposal_ids
     )
 
+    rules = await accepted_rules(db, user.id)
     draft = await write_application(
-        profile, brief, evidence, include_call_offer, prototype_url, extra_points, email=user.email
+        profile, brief, evidence, include_call_offer, prototype_url, extra_points, email=user.email,
+        rules=rules,
     )
     voice = load_voice(user.email)
     warnings = await _verify(
@@ -130,7 +133,7 @@ async def generate_application(
     if repairable:
         draft = await write_application(
             profile, brief, evidence, include_call_offer, prototype_url, extra_points,
-            repair_notes=[repair_note(w) for w in repairable], email=user.email,
+            repair_notes=[repair_note(w) for w in repairable], email=user.email, rules=rules,
         )
         warnings = await _verify(
             draft, brief, evidence, profile, prototype_url, answers_only, voice, include_call_offer
