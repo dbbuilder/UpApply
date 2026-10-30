@@ -200,7 +200,7 @@ export default function CoverLetterPanel({
           {clientReviewResult && (
             <div className="mt-2 rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900">
               <p className="font-medium">
-                Client's-eye review: {SHORTLIST_LABEL[clientReviewResult.shortlist] ?? clientReviewResult.shortlist}
+                Client's-eye review of the first draft: {SHORTLIST_LABEL[clientReviewResult.shortlist] ?? clientReviewResult.shortlist}
               </p>
               {clientReviewResult.why && <p className="mt-0.5">{clientReviewResult.why}</p>}
               <details className="mt-1">

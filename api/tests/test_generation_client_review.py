@@ -216,3 +216,17 @@ async def test_answers_only_never_runs_the_reviewer():
     result, _, reviewer = await _run([_draft(LETTER)], client_review=True, answers_only=True)
     reviewer.assert_not_called()
     assert result.client_review is None
+
+
+def test_a_verdict_without_a_reason_is_rejected():
+    import pytest as _pytest
+    from app.services.generation.client_review import ClientReviewError, parse_client_review
+    with _pytest.raises(ClientReviewError):
+        parse_client_review({"paragraphs": [{"paragraph": 1, "verdict": "cut"}], "shortlist": "no", "why": "x"}, 1)
+
+
+def test_reviewer_sees_the_explicit_asks_and_the_writer_keeps_the_call_offer():
+    from app.services.generation.client_review import CLIENT_REVIEW_SYSTEM
+    from app.services.generation.writer import REPAIR_INSTRUCTIONS
+    assert "<explicit_asks>" in CLIENT_REVIEW_SYSTEM and "Never mark \"cut\"" in CLIENT_REVIEW_SYSTEM
+    assert "Never cut the call offer" in REPAIR_INSTRUCTIONS["client_review"]

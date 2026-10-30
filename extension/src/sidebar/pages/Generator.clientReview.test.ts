@@ -91,7 +91,7 @@ describe("Generator client's-eye review", () => {
     await act(async () => { clickButton('Cover Letter Only'); });
     expect(generateMock).toHaveBeenCalledTimes(1);
     expect(generateMock.mock.calls[0][0].client_review).toBe(false);
-    expect(container.textContent).not.toContain("Client's-eye review:");
+    expect(container.textContent).not.toContain("Client's-eye review of the first draft");
   });
 
   it('sends client_review: true when ticked and shows the verdict', async () => {
@@ -103,7 +103,7 @@ describe("Generator client's-eye review", () => {
     expect(generateMock.mock.calls[0][0].client_review).toBe(true);
     expect(generateMock.mock.calls[0][0].include_call_offer).toBe(true);
     expect(useAppStore.getState().draftMeta?.clientReview).toEqual(REVIEW);
-    expect(container.textContent).toContain("Client's-eye review: Maybe");
+    expect(container.textContent).toContain("Client's-eye review of the first draft: Maybe");
     expect(container.textContent).toContain('Credible, but the opening is generic.');
     expect(container.textContent).toContain('Paragraph 1: rewrite - Too vague about the cutover.');
   });
