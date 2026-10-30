@@ -9,18 +9,10 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, AgentDigest, ApiError, ConfirmSubmitResult, DraftSubmitResult, JobQueueItem, JobQueueStats } from '../../lib/api-client';
+import { USER_SKIP_REASONS, UserSkipReason, filterReasonChipClass, formatFilterReason, skipReasonLabel } from '../../lib/skip-reasons';
 import { useAppStore } from '../store';
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const REJECTION_REASONS = [
-  'Budget too low',
-  'Not my specialty',
-  'Too large / long',
-  'Client looks risky',
-  'Already applied',
-  'Other',
-];
+import { keepClientTrust } from '../../lib/client-trust';
+import ClientTrustCard from '../components/ClientTrustCard';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -28,42 +20,6 @@ function scoreColor(score: number): string {
   if (score >= 75) return 'bg-emerald-100 text-emerald-700';
   if (score >= 55) return 'bg-amber-100 text-amber-700';
   return 'bg-red-100 text-red-600';
-}
-
-/** Return Tailwind classes for a pre-filter reason chip based on its prefix. */
-function filterReasonChipClass(reason: string): string {
-  if (reason.startsWith('blocked_country')) return 'bg-orange-100 text-orange-700';
-  if (reason.startsWith('budget_too_low') || reason.startsWith('hourly_top_too_low'))
-    return 'bg-amber-100 text-amber-700';
-  if (reason.startsWith('avoid_keyword')) return 'bg-red-100 text-red-600';
-  // too_old, score_cap_reached
-  return 'bg-gray-100 text-gray-500';
-}
-
-/** Convert a raw filter_reason code into a human-readable label. */
-function formatFilterReason(reason: string): string {
-  if (reason.startsWith('blocked_country')) {
-    const country = reason.match(/\(([^)]+)\)/)?.[1];
-    return country ? `📍 ${country}` : 'Geo blocked';
-  }
-  if (reason.startsWith('budget_too_low')) {
-    const detail = reason.match(/\(([^)]+)\)/)?.[1];
-    return detail ? `💰 Budget ${detail}` : 'Budget too low';
-  }
-  if (reason.startsWith('hourly_top_too_low')) {
-    const detail = reason.match(/\(([^)]+)\)/)?.[1];
-    return detail ? `⏱ ${detail}` : 'Hourly too low';
-  }
-  if (reason.startsWith('too_old')) {
-    const detail = reason.match(/\(([^)]+)\)/)?.[1];
-    return detail ? `🕐 ${detail} old` : 'Too old';
-  }
-  if (reason.startsWith('avoid_keyword')) {
-    const kw = reason.match(/\(([^)]+)\)/)?.[1];
-    return kw ? `🚫 "${kw.replace(/'/g, '')}"` : 'Blocked keyword';
-  }
-  if (reason.startsWith('score_cap_reached')) return '🔢 Score cap';
-  return reason;
 }
 
 function formatRelative(isoStr: string): string {
@@ -82,36 +38,36 @@ function formatRelative(isoStr: string): string {
 // ── Rejection reason picker ───────────────────────────────────────────────────
 
 interface RejectPickerProps {
-  onConfirm: (reason: string) => void;
+  onConfirm: (reason: UserSkipReason) => void;
   onCancel: () => void;
 }
 
 function RejectPicker({ onConfirm, onCancel }: RejectPickerProps) {
-  const [selected, setSelected] = useState<string>('');
+  const [selected, setSelected] = useState<UserSkipReason | ''>('');
 
   return (
     <div className="mt-1 space-y-1.5 bg-red-50 border border-red-100 rounded-xl p-2.5">
       <p className="text-[10px] font-medium text-red-600">Why are you passing?</p>
       <div className="flex flex-wrap gap-1">
-        {REJECTION_REASONS.map((r) => (
+        {USER_SKIP_REASONS.map((r) => (
           <button
-            key={r}
+            key={r.code}
             type="button"
-            onClick={() => setSelected(selected === r ? '' : r)}
+            onClick={() => setSelected(selected === r.code ? '' : r.code)}
             className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
-              selected === r
+              selected === r.code
                 ? 'bg-red-500 text-white border-red-500'
                 : 'bg-white text-red-500 border-red-200 hover:border-red-400'
             }`}
           >
-            {r}
+            {r.label}
           </button>
         ))}
       </div>
       <div className="flex gap-1.5 pt-0.5">
         <button
           type="button"
-          onClick={() => onConfirm(selected || 'Other')}
+          onClick={() => onConfirm(selected || 'other')}
           className="flex-1 py-1 text-[10px] font-medium bg-red-500 text-white rounded-lg hover:bg-red-600 active:scale-95 transition-all"
         >
           Confirm Pass
@@ -495,6 +451,9 @@ function JobCard({ item, onAction, onRequestDraft, onSubmitEdit, onConfirmSubmit
         )}
       </div>
 
+      {/* Client trust (separate from the score) */}
+      {item.client_trust && <ClientTrustCard trust={item.client_trust} compact />}
+
       {/* Chips */}
       {item.chips && item.chips.length > 0 && (
         <div className="flex flex-wrap gap-1">
@@ -571,7 +530,7 @@ function JobCard({ item, onAction, onRequestDraft, onSubmitEdit, onConfirmSubmit
         >
           {item.status === 'approved'
             ? '✓ Approved'
-            : `✕ Passed${item.rejection_reason ? ` · ${item.rejection_reason}` : ''}`}
+            : `✕ Passed${item.skip_reason ? ` · ${skipReasonLabel(item.skip_reason, item.skip_reason_detail)}` : ''}`}
         </div>
       )}
 
@@ -603,7 +562,6 @@ interface FilteredCardProps {
 function FilteredCard({ item, onScoreAnyway }: FilteredCardProps) {
   const [scoring, setScoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const reason = item.rejection_reason ?? 'filtered';
 
   const handleScoreAnyway = async () => {
     setScoring(true);
@@ -631,9 +589,9 @@ function FilteredCard({ item, onScoreAnyway }: FilteredCardProps) {
       {/* Filter reason chip + budget */}
       <div className="flex items-center justify-between gap-2">
         <span
-          className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium leading-none ${filterReasonChipClass(reason)}`}
+          className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium leading-none ${filterReasonChipClass(item.skip_reason)}`}
         >
-          {formatFilterReason(reason)}
+          {formatFilterReason(item.skip_reason, item.skip_reason_detail)}
         </span>
         {item.budget_amount && (
           <span className="text-[10px] text-gray-400">
@@ -815,7 +773,7 @@ export default function SuggestionsTab() {
   const handleAction = useCallback(
     async (id: string, action: 'approve' | 'reject', reason?: string) => {
       const updated = await apiClient.actionJobQueueItem(id, action, reason);
-      setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
+      setItems((prev) => prev.map((item) => (item.id === id ? keepClientTrust(updated, item) : item)));
       apiClient.getJobQueueStats().then(setStats).catch(() => {});
     },
     []
@@ -823,7 +781,7 @@ export default function SuggestionsTab() {
 
   const handleRequestDraft = useCallback(async (id: string) => {
     const updated = await apiClient.generateQueueItemDraft(id);
-    setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
+    setItems((prev) => prev.map((item) => (item.id === id ? keepClientTrust(updated, item) : item)));
     // Poll once after 8 seconds to pick up completed draft
     setTimeout(async () => {
       try {
@@ -885,7 +843,7 @@ export default function SuggestionsTab() {
 
   const handleScoreAnyway = useCallback(async (id: string) => {
     const updated = await apiClient.scoreAnyway(id);
-    setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
+    setItems((prev) => prev.map((item) => (item.id === id ? keepClientTrust(updated, item) : item)));
     // Poll once after 8s to pick up the scored result
     setTimeout(async () => {
       try {

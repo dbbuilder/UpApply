@@ -249,6 +249,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           hire_rate: currentJob.clientInfo.hireRate || undefined,
           total_spent: currentJob.clientInfo.totalSpent || undefined,
         },
+        upwork_url: currentJob.url,
       });
       set({ jobAnalysis: analysis, analysisLoading: false });
     } catch (error) {

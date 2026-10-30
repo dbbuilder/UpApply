@@ -27,6 +27,22 @@ class ClientInfo(BaseModel):
     member_since: Optional[str] = None
 
 
+class TrustSignal(BaseModel):
+    """One line of the client trust card."""
+
+    label: str
+    value: str
+    effect: str  # positive | neutral | caution
+
+
+class ClientTrust(BaseModel):
+    """Client trust card (app/services/client_trust.py); separate from match_score."""
+
+    tier: str  # High Confidence | Proceed with Caution | Suspicious
+    signals: List[TrustSignal]
+    notes: List[str] = []
+
+
 class JobCreate(BaseModel):
     """Schema for creating/submitting a job from extension."""
 
@@ -76,6 +92,7 @@ class JobResponse(BaseModel):
 
     match_score: Optional[float] = None
     analysis: Optional[dict] = None
+    client_trust: Optional[ClientTrust] = None  # set by POST /jobs only
 
     # Full job posting data
     full_description: Optional[str] = None
@@ -113,6 +130,7 @@ class JobAnalysisRequest(BaseModel):
     budget_amount: Optional[str] = None
     experience_level: Optional[str] = None
     client_info: Optional[ClientInfo] = None
+    upwork_url: Optional[str] = None  # lets repost detection skip this job itself
 
 
 class JobAnalysisResponse(BaseModel):
@@ -127,6 +145,7 @@ class JobAnalysisResponse(BaseModel):
     relevant_memories: List[dict]  # Memory summaries
     recommendation: str  # Overall recommendation
     reason: Optional[str] = None  # One-sentence LLM scoring reason
+    client_trust: Optional[ClientTrust] = None
 
 
 class CoverLetterGenerateRequest(BaseModel):
