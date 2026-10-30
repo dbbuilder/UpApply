@@ -1428,8 +1428,12 @@ export interface JobQueueItem {
   status: string;
   source: string;
   source_query_id?: string;
-  /** For pre_filtered items: the filter reason code, e.g. "blocked_country (India)" */
+  /** Stored reason: "<code>" or "<code>: <text>", e.g. "pre_filter:blocked_country: India" */
   rejection_reason?: string;
+  /** Canonical skip code (legacy values mapped by the API), e.g. "budget_too_low", "pre_filter:too_old" */
+  skip_reason?: string | null;
+  /** Free text kept with the code (user note or pre-filter detail) */
+  skip_reason_detail?: string | null;
   /** none | generating | ready | sent */
   draft_status?: string;
   draft_cover_letter?: string;
