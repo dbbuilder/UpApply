@@ -30,6 +30,7 @@ REPAIR_CODES = (
     "exit_caveat", "also_credential", "stack_in_opening",
     "dash", "emoji", "tell_word", "company_name", "close_after_offer", "call_offer_wording", "nda_offer",
     "glad_to_sign", "short_opening", "tech_in_close", "morbid_words", "double_happy", "missing_requirement",
+    "client_review",
 )
 
 

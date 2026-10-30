@@ -953,7 +953,15 @@ export interface CoverLetterGenerateRequest {
   custom_instructions?: string;
   prototype_url?: string;
   include_call_offer?: boolean;
+  client_review?: boolean; // v2 only: client's-eye review of the first draft (slower)
   screening_questions?: string[];
+}
+
+export interface ClientReview {
+  shortlist: 'yes' | 'maybe' | 'no';
+  why: string;
+  // Verdicts on the FIRST draft; cut / rewrite ones fed the single repair pass.
+  paragraphs: { paragraph: number; verdict: 'keep' | 'cut' | 'rewrite'; reason: string; text?: string }[];
 }
 
 export interface CoverLetter {
@@ -973,6 +981,7 @@ export interface CoverLetter {
   verify_warnings?: string[] | null;
   facts_used?: { id: string; statement: string }[] | null;
   claims_verified?: boolean | null; // false when the claim check was skipped
+  client_review?: ClientReview | null;
 }
 
 export interface QAPair {

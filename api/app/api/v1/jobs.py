@@ -894,6 +894,7 @@ async def generate_cover_letter_endpoint(
                 include_call_offer=body.include_call_offer,
                 prototype_url=body.prototype_url,
                 extra_points=body.custom_instructions,
+                client_review=body.client_review,
             )
         except EvidenceUnavailable as exc:
             await db.rollback()
@@ -957,6 +958,7 @@ async def generate_cover_letter_endpoint(
             "screening_answers": v2_result.draft.screening_answers,
             "verify_warnings": v2_result.warnings,
             "claims_verified": v2_result.claims_verified,
+            "client_review": v2_result.client_review,
             "facts_used": [
                 {"id": str(f.id), "statement": f.statement}
                 for f in v2_result.evidence.facts

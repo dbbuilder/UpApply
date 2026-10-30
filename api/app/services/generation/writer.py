@@ -248,6 +248,7 @@ REPAIR_INSTRUCTIONS = {
     "morbid_words": "Remove the live-or-die rhetoric or morbid word named in the repair notes; say what success depends on instead.",
     "double_happy": 'Use "happy" once in the closing paragraph (the call offer); word the NDA clause exactly as in the CALL OFFER instruction.',
     "missing_requirement": "Answer each client requirement quoted in the repair notes, in the letter or the screening answers, woven into the narrative rather than listed. Use only the evidence: where it does not cover a requirement, speak to it through approach or adjacent experience and never claim it.",
+    "client_review": "A reviewer reading as this client marked the paragraphs quoted in the repair notes cut or rewrite: cut each one marked cut, and revise each one marked rewrite to answer the reviewer's reason. Never cut the call offer the CALL OFFER instruction asks for or anything an explicit ask requires; keep or rework those instead. Use only the evidence: never add a claim, figure or credential it does not hold.",
 }
 
 
