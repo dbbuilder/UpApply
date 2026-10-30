@@ -11,6 +11,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, AgentDigest, ApiError, ConfirmSubmitResult, DraftSubmitResult, JobQueueItem, JobQueueStats } from '../../lib/api-client';
 import { USER_SKIP_REASONS, UserSkipReason, filterReasonChipClass, formatFilterReason, skipReasonLabel } from '../../lib/skip-reasons';
 import { useAppStore } from '../store';
+import { keepClientTrust } from '../../lib/client-trust';
+import ClientTrustCard from '../components/ClientTrustCard';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -449,6 +451,9 @@ function JobCard({ item, onAction, onRequestDraft, onSubmitEdit, onConfirmSubmit
         )}
       </div>
 
+      {/* Client trust (separate from the score) */}
+      {item.client_trust && <ClientTrustCard trust={item.client_trust} compact />}
+
       {/* Chips */}
       {item.chips && item.chips.length > 0 && (
         <div className="flex flex-wrap gap-1">
@@ -768,7 +773,7 @@ export default function SuggestionsTab() {
   const handleAction = useCallback(
     async (id: string, action: 'approve' | 'reject', reason?: string) => {
       const updated = await apiClient.actionJobQueueItem(id, action, reason);
-      setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
+      setItems((prev) => prev.map((item) => (item.id === id ? keepClientTrust(updated, item) : item)));
       apiClient.getJobQueueStats().then(setStats).catch(() => {});
     },
     []
@@ -776,7 +781,7 @@ export default function SuggestionsTab() {
 
   const handleRequestDraft = useCallback(async (id: string) => {
     const updated = await apiClient.generateQueueItemDraft(id);
-    setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
+    setItems((prev) => prev.map((item) => (item.id === id ? keepClientTrust(updated, item) : item)));
     // Poll once after 8 seconds to pick up completed draft
     setTimeout(async () => {
       try {
@@ -838,7 +843,7 @@ export default function SuggestionsTab() {
 
   const handleScoreAnyway = useCallback(async (id: string) => {
     const updated = await apiClient.scoreAnyway(id);
-    setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
+    setItems((prev) => prev.map((item) => (item.id === id ? keepClientTrust(updated, item) : item)));
     // Poll once after 8s to pick up the scored result
     setTimeout(async () => {
       try {

@@ -26,6 +26,8 @@ from app.models.job import Job
 from app.models.job_queue import JobQueueItem
 from app.models.outcome_event import OutcomeEvent
 from app.models.user import User, UserProfile
+from app.schemas.job import ClientTrust
+from app.services.client_trust import recent_title_index, trust_cards_for
 from app.schemas.job_queue import (
     ConfirmSubmitRequest,
     ConfirmSubmitResponse,
@@ -239,7 +241,23 @@ async def list_job_queue(
 
     result = await db.execute(stmt)
     items = result.scalars().all()
-    return [_to_response(item) for item in items]
+    # Client trust cards are computed at read time (no stored column); one
+    # title index covers repost detection for the whole page.
+    try:
+        cards = trust_cards_for(await recent_title_index(db, current_user.id), items)
+    except Exception:  # non-critical: the queue lists without cards
+        logger.warning("client trust cards failed for the job queue", exc_info=True)
+        cards = [None] * len(items)
+    responses = []
+    for item, card in zip(items, cards):
+        response = _to_response(item)
+        if card is not None:
+            try:
+                response.client_trust = ClientTrust(**card)
+            except Exception:
+                logger.warning("client trust card invalid for queue item %s", item.id, exc_info=True)
+        responses.append(response)
+    return responses
 
 
 # ── PUT /api/v1/job-queue/{id}/action ─────────────────────────────────────

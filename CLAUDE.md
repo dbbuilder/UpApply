@@ -152,6 +152,7 @@ The job analysis service (`api/app/services/job_analysis.py`) scores jobs agains
 - Deal breaker detection
 - Memory relevance scoring
 - Match score calculation (0-100)
+- Client trust card (`api/app/services/client_trust.py`), separate from and never feeding the match score: deterministic rules over `client_info` (payment, spend, hire rate, rating, proposals, job age) plus title-only repost detection (30 days, jobs + job_queue) → `client_trust` {tier High Confidence | Proceed with Caution | Suspicious, signals, notes} on `POST /jobs/analyze`, `POST /jobs` and `GET /job-queue` (computed at read time); missing data is neutral
 
 ### Cover Letter Generation
 
