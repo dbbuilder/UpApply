@@ -127,8 +127,9 @@ async def test_collect_evidence_pairs_meaningful_edits_only(db_session, test_use
     assert ev.refine_requests == [REFINE_ASK]
 
 
-async def test_accepted_rules_are_only_accepted_sorted_and_deduped(db_session, test_user):
-    for rule, status in [("Zeta rule.", "accepted"), ("Alpha rule.", "accepted"), ("Alpha rule.", "accepted"),
+async def test_accepted_rules_are_only_accepted_and_sorted(db_session, test_user):
+    # A duplicate can no longer be stored (uq_learned_rules_user_rule; see the uniqueness test).
+    for rule, status in [("Zeta rule.", "accepted"), ("Alpha rule.", "accepted"),
                          ("Proposed rule.", "proposed"), ("Rejected rule.", "rejected")]:
         db_session.add(LearnedRule(user_id=test_user.id, rule=rule, evidence_quote="q" * 10, status=status))
     await db_session.commit()
@@ -317,3 +318,20 @@ async def test_migration_down_and_up_against_postgres(setup_database):
             await conn.run_sync(run)
         finally:
             await trans.rollback()
+
+
+@pytest.mark.asyncio
+async def test_the_same_rule_is_stored_once_per_user(db_session, test_user):
+    from sqlalchemy import func, select
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models.learned_rule import LearnedRule
+
+    row = {"user_id": test_user.id, "rule": "Keep openings short.", "evidence_quote": "short opener please",
+           "status": "proposed"}
+    await db_session.execute(pg_insert(LearnedRule).values({**row, "id": "r-1"}))
+    await db_session.execute(pg_insert(LearnedRule).values(
+        {**row, "id": "r-2", "rule": "keep openings short."}).on_conflict_do_nothing())
+    await db_session.commit()
+    count = (await db_session.execute(select(func.count()).select_from(LearnedRule))).scalar_one()
+    assert count == 1

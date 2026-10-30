@@ -32,8 +32,13 @@ def upgrade() -> None:
         ),
     )
     op.create_index('ix_learned_rules_user_id', 'learned_rules', ['user_id'])
+    # One copy of a rule per user (case-insensitive): concurrent proposals cannot duplicate it.
+    op.create_index(
+        'uq_learned_rules_user_rule', 'learned_rules', ['user_id', sa.text('lower(rule)')], unique=True
+    )
 
 
 def downgrade() -> None:
+    op.drop_index('uq_learned_rules_user_rule', table_name='learned_rules')
     op.drop_index('ix_learned_rules_user_id', table_name='learned_rules')
     op.drop_table('learned_rules')

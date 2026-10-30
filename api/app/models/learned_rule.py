@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -28,3 +28,7 @@ class LearnedRule(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="proposed", server_default="proposed")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# One copy of a rule per user, case-insensitive (migration 028).
+Index("uq_learned_rules_user_rule", LearnedRule.user_id, func.lower(LearnedRule.rule), unique=True)

@@ -9,7 +9,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from uuid import uuid4
+
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -198,12 +201,20 @@ async def propose_rules(db: AsyncSession, user_id: str) -> tuple[list[LearnedRul
         effort="medium",
         max_tokens=4000,
     )
-    rows = [
-        LearnedRule(user_id=user_id, status="proposed", **rule)
+    # Re-read after the slow model call (another request may have stored rules meanwhile), and let
+    # the unique (user_id, lower(rule)) index drop any duplicate that still races in.
+    existing += list((await db.scalars(
+        select(LearnedRule.rule).where(LearnedRule.user_id == user_id)
+    )).all())
+    values = [
+        {"id": str(uuid4()), "user_id": user_id, "status": "proposed", **rule}
         for rule in filter_rules(data.get("rules"), evidence, existing)
     ]
-    db.add_all(rows)
-    await db.flush()
+    if not values:
+        return [], evidence
+    rows = list((await db.scalars(
+        pg_insert(LearnedRule).values(values).on_conflict_do_nothing().returning(LearnedRule)
+    )).all())
     return rows, evidence
 
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiClient, LearnedRule, LearnedRuleStatus } from '../../lib/api-client';
 
 const STATUS_TABS: LearnedRuleStatus[] = ['proposed', 'accepted', 'rejected'];
@@ -19,16 +19,21 @@ export default function RulesPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  // The tab currently shown: a late response for another tab is ignored.
+  const currentStatus = useRef<LearnedRuleStatus>(status);
+  currentStatus.current = status;
 
   const load = async (s: LearnedRuleStatus) => {
     setLoading(true);
     setError(null);
     try {
-      setRules(await apiClient.getLearnedRules(s));
+      const list = await apiClient.getLearnedRules(s);
+      if (currentStatus.current === s) setRules(list);
     } catch (err) {
-      setError(errorText(err, 'Failed to load rules.'));
+      if (currentStatus.current === s) setError(errorText(err, 'Failed to load rules.'));
     } finally {
-      setLoading(false);
+      if (currentStatus.current === s) setLoading(false);
     }
   };
 
@@ -49,7 +54,7 @@ export default function RulesPage() {
             `${r.pairs_found} edited letter${r.pairs_found === 1 ? '' : 's'} and ` +
             `${r.refine_requests_found} refine request${r.refine_requests_found === 1 ? '' : 's'}.`,
       );
-      if (status === 'proposed') await load('proposed');
+      if (currentStatus.current === 'proposed') await load('proposed');
       else setStatus('proposed');
     } catch (err) {
       setError(errorText(err, 'Could not suggest rules.'));
@@ -60,6 +65,8 @@ export default function RulesPage() {
   };
 
   const decide = async (rule: LearnedRule, next: 'accepted' | 'rejected') => {
+    if (pendingId) return;
+    setPendingId(rule.id);
     setError(null);
     try {
       const r = await apiClient.decideLearnedRule(rule.id, next);
@@ -67,6 +74,8 @@ export default function RulesPage() {
       setNotice(r.note ?? (next === 'accepted' ? 'Rule accepted. New drafts will follow it.' : 'Rule rejected.'));
     } catch (err) {
       setError(errorText(err, 'Update failed.'));
+    } finally {
+      setPendingId(null);
     }
   };
 
@@ -112,10 +121,10 @@ export default function RulesPage() {
           <p className="text-[11px] text-gray-500 italic border-l-2 border-gray-200 pl-2">“{rule.evidence_quote}”</p>
           {rule.status === 'proposed' && (
             <div className="flex gap-2">
-              <button type="button" onClick={() => decide(rule, 'accepted')} className="text-xs text-emerald-700 font-medium">
+              <button type="button" disabled={pendingId !== null} onClick={() => decide(rule, 'accepted')} className="text-xs text-emerald-700 font-medium disabled:opacity-50">
                 Accept
               </button>
-              <button type="button" onClick={() => decide(rule, 'rejected')} className="text-xs text-red-600">
+              <button type="button" disabled={pendingId !== null} onClick={() => decide(rule, 'rejected')} className="text-xs text-red-600 disabled:opacity-50">
                 Reject
               </button>
             </div>
