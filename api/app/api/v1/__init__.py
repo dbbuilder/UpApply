@@ -19,6 +19,7 @@ from app.api.v1.guardrails import router as guardrails_router
 from app.api.v1.agent import router as agent_router
 from app.api.v1.admin import router as admin_router
 from app.api.v1.facts import router as facts_router
+from app.api.v1.learned_rules import router as learned_rules_router
 
 router = APIRouter()
 
@@ -40,3 +41,4 @@ router.include_router(guardrails_router, prefix="/guardrails", tags=["Guardrails
 router.include_router(agent_router, prefix="/agent", tags=["Agent"])
 router.include_router(admin_router, prefix="/admin", tags=["Admin"])
 router.include_router(facts_router, prefix="/facts", tags=["Facts"])
+router.include_router(learned_rules_router, prefix="/learned-rules", tags=["Learned Rules"])

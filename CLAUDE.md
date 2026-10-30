@@ -169,6 +169,7 @@ Package `api/app/services/generation/`: brief → evidence → write → verify 
 - `client_review.py` — opt-in (`client_review: true` on generate; extension checkbox "Client's-eye review (slower)", default off): after the first verify, one `client_review_model` (`claude-sonnet-4-6`) structured call plays the client (neutralised brief + evidence) and returns exactly one keep/cut/rewrite verdict per letter-body paragraph (count validated in code) plus `shortlist: yes|maybe|no`; cut/rewrite verdicts become `client_review` repair notes in the same single repair pass, never a second loop; a failed review adds one warning; the first-draft verdict is returned as `client_review` (never the writer, never adds claims beyond the evidence)
 - `refine.py` — `POST /api/v1/jobs/cover-letters/{letter_id}/refine` chat with a `search_facts` tool (caps: `MAX_TOOL_ROUNDS=4`, `MAX_TOOL_CALLS=6`, `MAX_FOUND_FACTS=8`)
 - Facts: `api/app/services/facts.py` (dedupe at 0.92 cosine; matches of an approved fact auto-approve unless figures conflict or the source is the client) and `fact_extraction.py`; outcome sync credits facts once via `proposals.facts_credited_at`
+- Learned rules: `api/app/services/learned_rules.py` + `/api/v1/learned-rules` (`POST /propose`, `GET`, `PUT /{id}`; extension Me → Rules). Evidence is the user's own edits: `cover_letters` content vs `final_text` (else `submitted_text`) where ≥5% of words changed, plus refine-chat requests. One `learned_rules_model` call (`claude-opus-5-5`) proposes at most 5 rules; a rule is kept only if its `evidence_quote` is verbatim in the user's words (a refine request, or a sent text but not the paired AI draft). Nothing is auto-accepted; accepted rules go into the writer and refine system prompts as "YOUR RULES (accepted from your own edits)", sorted, between the voice kit and HARD RULES. For voice-kit users, accept returns a note to copy the rule to the kit's `feedback-log.md` (the kit stays the source of truth)
 - **Untrusted text** (job posts, client messages, scraped pages) must pass through `app/services/untrusted.neutralise()` before it reaches any prompt
 
 Design: `docs/superpowers/specs/2026-10-12-memory-driven-generation-design.md`. Plan: `docs/superpowers/plans/2026-10-12-memory-driven-generation.md`. Rollout (ingest, golden set, blind A/B ≥75% before flipping the flag): `docs/superpowers/runbook-memory-driven-generation.md`, using `scripts/ingest_chatgpt_facts.py` and `scripts/eval_generation.py`.
@@ -303,6 +304,7 @@ exec(open('scripts/import_chatgpt_corpus.py').read())
 | 025 | Data: relabel Chris's 14 curated bio memories chatgpt_corpus → bio_import |
 | 026 | Add facts.doubtful review flag (marks a candidate doubtful without rejecting it) |
 | 027 | Canonical proposal stages: `proposals.stage` (backfilled from `status` via the alias map in `app/services/proposal_status.py`) + append-only `proposal_stage_events` transition ledger |
+| 028 | Add learned_rules table (rules proposed from the user's own edits; proposed → accepted/rejected once, by the user) |
 
 ## Environment Variables
 

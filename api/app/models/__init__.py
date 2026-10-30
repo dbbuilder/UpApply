@@ -18,6 +18,7 @@ from app.models.outcome_event import OutcomeEvent
 from app.models.user_guardrail_config import UserGuardrailConfig
 from app.models.global_signal_pool import GlobalSignalPool
 from app.models.fact import Fact, FactIngestLog
+from app.models.learned_rule import LearnedRule
 
 __all__ = [
     "User",
@@ -42,4 +43,5 @@ __all__ = [
     "GlobalSignalPool",
     "Fact",
     "FactIngestLog",
+    "LearnedRule",
 ]
