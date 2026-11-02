@@ -95,11 +95,13 @@ def pre_filter(
     scored: int = 0,
     score_cap: Optional[int] = None,
     now: Optional[datetime] = None,
+    max_age_days: Optional[int] = None,
 ) -> Optional[str]:
     """Return a skip reason string if the job should not be scored, else None.
 
     Checks (in order):
-      1. Age         — posted_at (or posted_text when posted_at is missing) older than MAX_JOB_AGE_DAYS
+      1. Age         — posted_at (or posted_text when posted_at is missing) older than max_age_days
+                       (the caller's lookback, e.g. the extension's scan setting), else MAX_JOB_AGE_DAYS
       2. Geography   — client country in blocked list (only when known)
       3. Fixed price — below the floor, unless a known placeholder value
       4. Hourly rate — top end of range below the floor
@@ -113,7 +115,7 @@ def pre_filter(
     if posted:
         if posted.tzinfo is None:
             posted = posted.replace(tzinfo=timezone.utc)
-        if posted < now - timedelta(days=MAX_JOB_AGE_DAYS):
+        if posted < now - timedelta(days=max_age_days or MAX_JOB_AGE_DAYS):
             return f"too_old ({(now - posted).days}d)"
 
     # 2. Geography gate

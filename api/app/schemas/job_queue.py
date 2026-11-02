@@ -101,6 +101,8 @@ class JobQueueIngestRequest(BaseModel):
     query_id: Optional[str] = Field(None, max_length=36)
     query: Optional[str] = Field(None, max_length=MAX_INGEST_SHORT)
     jobs: List[IngestJob] = Field(..., max_length=MAX_INGEST_JOBS)
+    # The scan's lookback window: jobs posted longer ago are pre_filter:too_old (default 7 days)
+    max_age_days: Optional[int] = Field(None, ge=1, le=30)
 
 
 class JobQueueIngestResponse(BaseModel):
