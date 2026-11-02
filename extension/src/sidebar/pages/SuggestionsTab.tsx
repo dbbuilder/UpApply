@@ -16,6 +16,16 @@ import ClientTrustCard from '../components/ClientTrustCard';
 import AutoScanPanel from '../components/AutoScanPanel';
 import { upworkApplyUrl } from '../../lib/apply-url';
 
+/**
+ * The newest 200 items plus every pending suggestion. The newest 200 alone dropped suggestions once
+ * scans filled the queue with pre-filtered items (Pending said 39 while 93 were waiting).
+ */
+async function loadQueueItems(): Promise<JobQueueItem[]> {
+  const [recent, pending] = await Promise.all([apiClient.getJobQueue(), apiClient.getJobQueue('suggested')]);
+  const seen = new Set(recent.map((i) => i.id));
+  return [...recent, ...pending.filter((i) => !seen.has(i.id))];
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function scoreColor(score: number): string {
@@ -754,7 +764,7 @@ export default function SuggestionsTab() {
     setError(null);
     try {
       const [all, queueStats] = await Promise.all([
-        apiClient.getJobQueue(),
+        loadQueueItems(),
         apiClient.getJobQueueStats(),
       ]);
       setItems(all);
@@ -787,7 +797,7 @@ export default function SuggestionsTab() {
     // Poll once after 8 seconds to pick up completed draft
     setTimeout(async () => {
       try {
-        const all = await apiClient.getJobQueue();
+        const all = await loadQueueItems();
         setItems(all);
       } catch { /* ignore */ }
     }, 8000);
@@ -797,7 +807,7 @@ export default function SuggestionsTab() {
     async (id: string, text: string) => {
       const result = await apiClient.submitQueueItemEdit(id, text);
       const [all, queueStats] = await Promise.all([
-        apiClient.getJobQueue(),
+        loadQueueItems(),
         apiClient.getJobQueueStats(),
       ]);
       setItems(all);
@@ -835,7 +845,7 @@ export default function SuggestionsTab() {
     await chrome.tabs.create({ url: upworkApplyUrl(item.upwork_url), active: true });
 
     // 4. Refresh queue in background
-    apiClient.getJobQueue().then(setItems).catch(() => {});
+    loadQueueItems().then(setItems).catch(() => {});
 
     return result;
   }, [items]);
@@ -846,7 +856,7 @@ export default function SuggestionsTab() {
     // Poll once after 8s to pick up the scored result
     setTimeout(async () => {
       try {
-        const all = await apiClient.getJobQueue();
+        const all = await loadQueueItems();
         setItems(all);
       } catch { /* ignore */ }
     }, 8000);
