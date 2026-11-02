@@ -250,3 +250,46 @@ search-page scan via `POST /api/v1/job-queue/ingest` (120/hour, at most 25 jobs 
   shows whether the threshold throws out jobs worth having. Score-anyway works on those items.
 - A `query_id` the user owns gets its run stats (run count, jobs found = jobs scored, rolling average
   score, jobs scoring 70+).
+
+### Reviewer, trust card, rules and filters
+**Client's-eye reviewer (opt-in, v2 only).** The extension's "Client's-eye review (slower)" checkbox
+sends `client_review: true` with a generate request (default off). After the first verify, one extra
+`client_review_model` (`claude-sonnet-4-6`) call reads the draft as the client would, from the
+neutralised brief and the evidence only, and returns one keep, cut or rewrite verdict per body
+paragraph plus a shortlist call (yes, maybe or no). Cut and rewrite verdicts become repair notes in
+the same single repair pass; there is never a second repair loop, and a verdict never cuts the call
+offer or an explicit ask. The response's `client_review` holds the first draft's verdict. A failed
+review only adds a warning. Cost and wait: one more model call per letter, so leave it off for
+routine jobs and use it on the ones that matter.
+
+**Client trust card.** `app/services/client_trust.py` grades the client behind a job as High
+Confidence, Proceed with Caution (any caution) or Suspicious (3 or more cautions), from payment
+verification, total spent, hire rate, rating, proposals already in, job age and a title repost seen in
+the last 30 days. Location and member-since are shown but never count. Missing data is neutral, and
+the card never changes the match score. It is computed at read time on `POST /jobs/analyze`,
+`POST /jobs` and `GET /job-queue`. What the extension captures today: on a job page, rating,
+location, hire rate and total spent; on a search-page scan, payment verified, rating and total spent.
+Proposals count, posted date and jobs posted are not captured yet, so those signals stay neutral.
+
+**Learned rules.** Me → Rules → "Suggest rules from my edits" calls `POST /api/v1/learned-rules/propose`.
+The evidence is the user's own words: sent letters where at least 5% of the words differ from the
+UpApply draft (`final_text`, else `submitted_text`), and refine-chat requests. One model call
+proposes at most 5 rules, and a rule is kept only when its evidence quote appears word for word in
+those words. Nothing is accepted automatically. The user accepts or rejects each rule once
+(`PUT /api/v1/learned-rules/{id}`); accepted rules go into the writer and refine prompts as "YOUR
+RULES". For a voice-kit user, accepting returns a note to copy the rule into the kit's
+`feedback-log.md`, because the kit stays the source of truth for voice.
+
+**Filter audit (read-only).** Skips and pre-filter blocks use the canonical codes in
+`app/services/skip_reasons.py` (the Pass picker sends a user code; free text outside the list is
+stored as `other: <text>`).
+```bash
+(cd api && doppler run --project upapply --config prd -- env DATABASE_URL="$(security find-generic-password -s cc:db-5c2ea0 -w)" \
+  ./venv/bin/python ../scripts/filter_audit.py --email chris@servicevision.net --days 90)
+```
+It counts user skips by reason (and lists the most common `other` texts) and, for each pre-filter
+rule (`pre_filter:too_old`, `blocked_country`, `budget_too_low`, `hourly_top_too_low`,
+`avoid_keyword`, `score_cap_reached`, `below_threshold`), the items blocked, how many were scored
+with score-anyway and how, and how many blocked items scored 70 or more. A rule that blocked any job
+scoring 70+ is flagged. Percentages over fewer than 5 items print `n<5`. `--json` gives
+machine-readable output.
