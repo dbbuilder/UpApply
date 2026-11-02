@@ -41,6 +41,8 @@ export function formatFilterReason(code?: string | null, detail?: string | null)
       return detail ? `🚫 "${detail.replace(/'/g, '')}"` : 'Blocked keyword';
     case 'score_cap_reached':
       return '🔢 Score cap';
+    case 'below_threshold':
+      return detail ? `📉 Score ${detail}` : 'Score too low';
     default:
       return detail || rule || 'filtered';
   }
@@ -52,6 +54,6 @@ export function filterReasonChipClass(code?: string | null): string {
   if (rule === 'blocked_country') return 'bg-orange-100 text-orange-700';
   if (rule === 'budget_too_low' || rule === 'hourly_top_too_low') return 'bg-amber-100 text-amber-700';
   if (rule === 'avoid_keyword') return 'bg-red-100 text-red-600';
-  // too_old, score_cap_reached
+  // too_old, score_cap_reached, below_threshold
   return 'bg-gray-100 text-gray-500';
 }

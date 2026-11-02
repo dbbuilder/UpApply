@@ -9,6 +9,8 @@ import { apiClient } from '../lib/api-client';
 import {
   MAX_CONSECUTIVE_THROTTLED, SAVE_BATCH_SIZE, THROTTLE_PAGE_TEXT,
   completeProposalIds, isThrottledRead, randomDetailDelayMs, takeBatch, throttleBackoffMs, RUN_BUDGET_MS, LIST_CACHE_TTL_MS, pickProposalStatus, proposalFromNuxtData } from '../lib/proposal-scrape';
+import { blockMessage, buildSearchUrl, detectBlockedPage } from '../lib/job-gather';
+import { initGatherer, type SearchScrapeOptions, type SearchScrapeResult } from './gatherer';
 
 // A generated draft stays linked to its job's apply page for a day (Submit-click capture).
 const ACTIVE_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -95,6 +97,21 @@ function _startKeepAlive(): void {
 function _stopKeepAlive(): void {
   if (_keepAliveTimer) { clearInterval(_keepAliveTimer); _keepAliveTimer = undefined; }
 }
+
+// One hidden search tab at a time: the History buttons and the automatic scan queue behind each other.
+let _searchTabChain: Promise<unknown> = Promise.resolve();
+
+// Automatic job scan (chrome.alarms). Registered at top level so the alarm wakes this worker.
+const { startGatherRun, getGatherStatus, saveGatherSettings } = initGatherer({
+  scrapeSearch: (query, urlParams, opts) => scrapeUpworkSearch(query, urlParams, opts),
+  keepAlive: {
+    start: () => { _startKeepAlive(); _activeScoringCount++; },
+    stop: () => {
+      _activeScoringCount = Math.max(0, _activeScoringCount - 1);
+      if (_activeScoringCount === 0) _stopKeepAlive();
+    },
+  },
+});
 
 // Listen for messages from content script and sidebar
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -1062,34 +1079,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'SEARCH_UPWORK_JOBS':
       // Open a background tab, scrape search results, close tab, return cards
-      (async () => {
-        const query = encodeURIComponent(message.query || '');
-        const extraParams = message.urlParams ? `&${message.urlParams}` : '';
-        const searchUrl = `https://www.upwork.com/nx/search/jobs/?q=${query}&sort=recency${extraParams}`;
-        logger.log('UpApply Background: Opening search tab for:', searchUrl);
-        const tab = await chrome.tabs.create({ url: searchUrl, active: false });
-        if (!tab.id) { sendResponse({ success: false, error: 'Failed to create tab' }); return; }
-        try {
-          await waitForTabLoad(tab.id);
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          const manifest = chrome.runtime.getManifest();
-          const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
-          if (contentScriptPath) {
-            try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [contentScriptPath] }); }
-            catch (e) { /* already loaded */ }
-          }
-          await new Promise(resolve => setTimeout(resolve, 500));
-          const response = await new Promise<{ success: boolean; data?: unknown; error?: string }>((resolve) => {
-            chrome.tabs.sendMessage(tab.id!, { type: 'SCRAPE_JOB_CARDS' }, (resp) => {
-              if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
-              else resolve(resp || { success: false, error: 'No response' });
-            });
-          });
-          sendResponse(response);
-        } finally {
-          try { await chrome.tabs.remove(tab.id); } catch (e) { /* ignore */ }
-        }
-      })();
+      scrapeUpworkSearch(message.query || '', message.urlParams)
+        .then((r) => sendResponse(r))
+        .catch((e) => sendResponse({ success: false, error: String(e) }));
+      return true;
+
+    case 'GATHER_GET_STATUS':
+      getGatherStatus()
+        .then((s) => sendResponse({ success: true, ...s }))
+        .catch((e) => sendResponse({ success: false, error: String(e) }));
+      return true;
+
+    case 'GATHER_SET_SETTINGS':
+      saveGatherSettings(message.settings || {})
+        .then((settings) => sendResponse({ success: true, settings }))
+        .catch((e) => sendResponse({ success: false, error: String(e) }));
+      return true;
+
+    case 'GATHER_RUN_NOW':
+      // Replies once the run starts (or is refused); the sidebar watches storage for the result.
+      startGatherRun('manual')
+        .then((r) => sendResponse({ success: r.started, reason: r.reason }))
+        .catch((e) => sendResponse({ success: false, reason: String(e) }));
       return true;
 
     case 'GET_VIEW_POSTING_LINK':
@@ -1408,6 +1419,70 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return false;
 });
+
+
+/**
+ * Open a hidden Upwork search tab, check it is a normal results page (not Upwork's error toast,
+ * a login page or a challenge), scrape the job cards, and always close the tab.
+ * Shared by SEARCH_UPWORK_JOBS (History buttons) and the automatic job scan.
+ */
+function scrapeUpworkSearch(query: string, urlParams?: string | null, opts: SearchScrapeOptions = {}): Promise<SearchScrapeResult> {
+  const run = _searchTabChain.then(() => _scrapeUpworkSearchNow(query, urlParams, opts));
+  _searchTabChain = run.catch(() => {});
+  return run;
+}
+
+async function _scrapeUpworkSearchNow(query: string, urlParams: string | null | undefined, opts: SearchScrapeOptions): Promise<SearchScrapeResult> {
+  const searchUrl = buildSearchUrl(query, urlParams);
+  logger.log('UpApply Background: Opening search tab for:', searchUrl);
+  const tab = await chrome.tabs.create({ url: searchUrl, active: false });
+  if (!tab.id) return { success: false, error: 'Failed to create tab' };
+  const tabId = tab.id;
+  await opts.onTabOpened?.(tabId);
+  const snapshot = async () => {
+    try {
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => ({
+          url: location.href,
+          title: document.title,
+          text: document.body?.innerText || '',
+          hasJobTiles: !!document.querySelector('article[data-test="JobTile"]'),
+        }),
+      });
+      return detectBlockedPage(res?.result ?? { url: '' });
+    } catch {
+      // Not scriptable (e.g. a non-Upwork challenge host): read the URL from the tab instead.
+      try { return detectBlockedPage({ url: (await chrome.tabs.get(tabId)).url || '' }); } catch { return null; }
+    }
+  };
+  try {
+    await waitForTabLoad(tabId);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const blocked = await snapshot();
+    if (blocked) return { success: false, error: blockMessage(blocked), blocked };
+    const manifest = chrome.runtime.getManifest();
+    const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+    if (contentScriptPath) {
+      try { await chrome.scripting.executeScript({ target: { tabId }, files: [contentScriptPath] }); }
+      catch (e) { /* already loaded */ }
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const response = await new Promise<SearchScrapeResult>((resolve) => {
+      chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_JOB_CARDS', maxPages: opts.maxPages }, (resp) => {
+        if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
+        else resolve(resp || { success: false, error: 'No response' });
+      });
+    });
+    // Paging can trip the rate-limit toast; keep what was read and tell the caller to stop.
+    const after = await snapshot();
+    if (after === 'error_toast') return { ...response, blocked: after };
+    return response;
+  } finally {
+    try { await chrome.tabs.remove(tabId); } catch (e) { /* ignore */ }
+    await opts.onTabClosed?.();
+  }
+}
 
 /**
  * Wait for a tab to complete loading.

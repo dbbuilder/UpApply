@@ -633,6 +633,11 @@ class ApiClient {
     });
   }
 
+  /** Automatic job scan: scraped search cards go straight to the agent queue (max 50 jobs per call). */
+  async ingestJobQueue(body: JobQueueIngestRequest): Promise<JobQueueIngestResponse> {
+    return this.request<JobQueueIngestResponse>('/api/v1/job-queue/ingest', { method: 'POST', body });
+  }
+
   async getJobQueueStats(): Promise<JobQueueStats> {
     return this.request<JobQueueStats>('/api/v1/job-queue/stats');
   }
@@ -1471,6 +1476,48 @@ export interface JobQueueItem {
   expires_at?: string;
   /** Computed on GET /job-queue only; single-item responses leave it null. */
   client_trust?: ClientTrust | null;
+}
+
+// ── Job Queue ingest (automatic job scan) ───────────────────────────────────
+
+export interface JobQueueIngestClientInfo {
+  payment_verified?: boolean;
+  rating?: number;
+  total_spent?: string;
+  hire_rate?: string;
+  jobs_posted?: string;
+  location?: string;
+  proposals?: string;
+}
+
+export interface JobQueueIngestJob {
+  upwork_url: string;
+  title: string;
+  description: string;
+  skills: string[];
+  budget_amount: string | null;
+  budget_type: 'fixed' | 'hourly' | null;
+  /** ISO timestamp */
+  posted_at: string | null;
+  posted_text: string | null;
+  client_info: JobQueueIngestClientInfo | null;
+  proposals_text: string | null;
+}
+
+export interface JobQueueIngestRequest {
+  query_id: string | null;
+  query: string | null;
+  jobs: JobQueueIngestJob[];
+}
+
+export interface JobQueueIngestResponse {
+  received: number;
+  duplicates: number;
+  pre_filtered: number;
+  scored: number;
+  suggested: number;
+  below_threshold: number;
+  queued_ids: string[];
 }
 
 // ── Job Queue Stats ─────────────────────────────────────────────────────────

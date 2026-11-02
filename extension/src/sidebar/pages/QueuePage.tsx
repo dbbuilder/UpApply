@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient, ApiError, Job, Application, CoverLetter } from '../../lib/api-client';
+import { upworkApplyUrl } from '../../lib/apply-url';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -91,10 +92,7 @@ function QueueRow({ item, applyStatus, onApply }: {
   onApply: () => void;
 }) {
   const { job, application, coverLetters, state } = item;
-  const jobSlug = job.upwork_url?.match(/(~[a-zA-Z0-9]+)/)?.[1];
-  const applyUrl = jobSlug
-    ? `https://www.upwork.com/nx/proposals/job/${jobSlug}/apply/`
-    : job.upwork_url;
+  const applyUrl = upworkApplyUrl(job.upwork_url);
 
   const dateStr = application?.submitted_at
     ? formatDate(application.submitted_at)
@@ -230,10 +228,7 @@ export default function QueuePage() {
     const { job, coverLetters } = item;
     setApplyStatuses((p) => ({ ...p, [job.id]: 'Opening…' }));
     try {
-      const jobSlug = job.upwork_url?.match(/(~[a-zA-Z0-9]+)/)?.[1];
-      const applyUrl = jobSlug
-        ? `https://www.upwork.com/nx/proposals/job/${jobSlug}/apply/`
-        : job.upwork_url;
+      const applyUrl = upworkApplyUrl(job.upwork_url);
 
       if (coverLetters.length > 0) {
         const latest = coverLetters[coverLetters.length - 1];

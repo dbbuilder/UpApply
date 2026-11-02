@@ -223,7 +223,7 @@ function extractJobCards(): ScrapedJobCard[] {
 /**
  * Extract job cards across all pagination pages.
  */
-async function extractAllJobCards(): Promise<ScrapedJobCard[]> {
+async function extractAllJobCards(maxPages = 50): Promise<ScrapedJobCard[]> {
   // Use same cross-instance lock as proposals
   const lockKey = '__upapplyJobCardScrapingPromise';
   const win = window as unknown as Record<string, unknown>;
@@ -241,7 +241,7 @@ async function extractAllJobCards(): Promise<ScrapedJobCard[]> {
     const totalPages = paginationEl
       ? parseInt(paginationEl.getAttribute('data-ev-max_page_count') || '1', 10)
       : 1;
-    const pagesToScrape = Math.min(totalPages, 50); // cap at 50 pages
+    const pagesToScrape = Math.min(totalPages, maxPages); // cap at 50 pages unless the caller asks for fewer
 
     logger.log('UpApply: Job card scrape — total pages:', totalPages, 'scraping up to:', pagesToScrape);
 
@@ -734,7 +734,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       } else {
         (async () => {
           try {
-            const cards = await extractAllJobCards();
+            const cards = await extractAllJobCards(typeof message.maxPages === 'number' ? message.maxPages : undefined);
             try { sendResponse({ success: true, data: cards, url: window.location.href }); } catch { /* channel closed */ }
           } catch (err) {
             try { sendResponse({ success: false, error: String(err) }); } catch { /* channel closed */ }
