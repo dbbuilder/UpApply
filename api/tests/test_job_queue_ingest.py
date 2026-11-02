@@ -82,7 +82,7 @@ async def test_requires_auth(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_validation(client: AsyncClient, auth_headers_with_profile):
     h = auth_headers_with_profile
-    assert (await _post(client, h, {"jobs": [_job(i) for i in range(51)]})).status_code == 422
+    assert (await _post(client, h, {"jobs": [_job(i) for i in range(26)]})).status_code == 422
     assert (await _post(client, h, {"jobs": [_job(1, title="x" * 301)]})).status_code == 422
     assert (await _post(client, h, {"jobs": [_job(1, description="x" * 20001)]})).status_code == 422
     assert (await _post(client, h, {"jobs": [_job(1, skills=["s"] * 51)]})).status_code == 422
@@ -204,14 +204,14 @@ async def test_pre_filter_codes_and_profile_minimums(client: AsyncClient, auth_h
 
 
 @pytest.mark.asyncio
-async def test_scoring_cap_is_25_per_request(client: AsyncClient, auth_headers_with_profile):
+async def test_a_full_request_is_all_scored(client: AsyncClient, auth_headers_with_profile):
+    # A request holds at most MAX_SCORED_PER_REQUEST jobs, so none is left as score_cap_reached
+    # (a stored capped job would be a duplicate on every later scan and never get scored).
     h = auth_headers_with_profile
     scorer = _scorer()
-    data = (await _post(client, h, {"jobs": [_job(i) for i in range(30)]}, scorer)).json()
+    data = (await _post(client, h, {"jobs": [_job(i) for i in range(25)]}, scorer)).json()
     assert len(scorer.calls) == 25
-    assert data["scored"] == 25 and data["pre_filtered"] == 5
-    capped = [i for i in await _items(await _user_id(client, h)) if i.status == "pre_filtered"]
-    assert len(capped) == 5 and all(i.rejection_reason == "pre_filter:score_cap_reached: 25" for i in capped)
+    assert data["scored"] == 25 and data["pre_filtered"] == 0
 
 
 @pytest.mark.asyncio

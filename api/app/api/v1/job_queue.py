@@ -169,7 +169,7 @@ BELOW_THRESHOLD = PRE_FILTER_PREFIX + "below_threshold"
 
 
 @router.post("/ingest", response_model=JobQueueIngestResponse)
-@limiter.limit("30/hour")
+@limiter.limit("120/hour")
 async def ingest_job_queue(
     request: Request,
     body: JobQueueIngestRequest,
@@ -180,8 +180,8 @@ async def ingest_job_queue(
 
     Each job is, in order: a duplicate (same Upwork job id, else same URL, as one of this user's
     queue items or jobs rows or an earlier job in this batch: counted, not stored); pre-filtered
-    (app/services/job_prefilter.py with the profile's budget floors; at most
-    MAX_SCORED_PER_REQUEST jobs are scored, the rest are pre_filter:score_cap_reached); or scored
+    (app/services/job_prefilter.py with the profile's budget floors; a request holds at most
+    MAX_SCORED_PER_REQUEST jobs, so the score cap is a backstop only); or scored
     with run_full_analysis and stored as "suggested" when the score reaches the user's autonomy
     score_threshold, else "pre_filtered" with pre_filter:below_threshold. A query_id the user
     owns gets its run stats updated (another user's id is ignored).

@@ -16,7 +16,7 @@ from app.schemas.job import (
     ClientTrust,
 )
 
-MAX_INGEST_JOBS = 50
+MAX_INGEST_JOBS = 25  # = MAX_SCORED_PER_REQUEST, so no job in a call is left unscored
 MAX_INGEST_URL = 500  # jobs.upwork_url is VARCHAR(500)
 MAX_INGEST_SHORT = 200  # budget, posted/proposals text, client_info values
 
