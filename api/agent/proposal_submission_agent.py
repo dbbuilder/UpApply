@@ -5,8 +5,8 @@ At Level 5 (Autonomous), this agent:
   2. Runs guardrail checks for each (enabled, daily cap, connects, score threshold)
   3. For items that pass all guards:
      - Auto-approves the item (status → approved)
-     - Generates a cover letter draft via draft_prepped_items() once the caller has
-       committed (the job queue's own draft job; draft_status → ready, or back to none)
+     - Claims the draft (draft_status → generating); draft_prepped_items() runs it once the
+       caller has committed (the job queue's own draft job; → ready, or back to none)
      - Calls confirm_submit internally (confirmed_at set)
      - Writes pendingAutoFill to the agent's output batch
   4. Records all actions to outcome_events and autonomy_profile
@@ -160,11 +160,11 @@ async def run_autonomous_prep(
                 break
             continue
 
-        # Auto-approve. draft_status stays "none" until the draft actually runs: the caller
-        # commits, then draft_prepped_items() generates the drafts (an item set to
-        # "generating" with no draft job behind it would be stuck).
+        # Auto-approve and claim the draft ("generating", so the manual draft endpoint does not
+        # start a second one). The caller commits, then draft_prepped_items() runs the draft.
         item.status = "approved"
         item.reviewed_at = datetime.now(timezone.utc)
+        item.draft_status = "generating"
         await db.flush()
 
         await _record_outcome(db, user_id, item.id, "approved", {"source": "autonomous"})

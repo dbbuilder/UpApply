@@ -606,6 +606,13 @@ async def _draft_with_v2(db: AsyncSession, item: JobQueueItem, user_id: str, pro
     return content
 
 
+async def _already_sent(db: AsyncSession, item: JobQueueItem) -> bool:
+    """True when the item was submitted while its draft was generating: a late draft must not
+    turn "sent" back into "ready"."""
+    await db.refresh(item, ["draft_status"])
+    return item.draft_status == "sent"
+
+
 async def _generate_draft_background(item_id: str, user_id: str) -> None:
     """Background task: generate cover letter draft and persist it (v2 engine when the user's
     generation_v2 flag is on, the legacy generator otherwise)."""
@@ -633,7 +640,10 @@ async def _generate_draft_background(item_id: str, user_id: str) -> None:
                 return
 
             if profile.generation_v2 is True:
-                item.draft_cover_letter = await _draft_with_v2(db, item, user_id, profile)
+                draft = await _draft_with_v2(db, item, user_id, profile)
+                if await _already_sent(db, item):
+                    return
+                item.draft_cover_letter = draft
                 item.draft_status = "ready"
                 item.draft_generated_at = datetime.now(timezone.utc)
                 await _record_outcome(db, user_id, item_id, "proposal_drafted")
@@ -675,6 +685,8 @@ async def _generate_draft_background(item_id: str, user_id: str) -> None:
                 past_proposals=past_proposals,
             )
 
+            if await _already_sent(db, item):
+                return
             item.draft_cover_letter = draft
             item.draft_status = "ready"
             item.draft_generated_at = datetime.now(timezone.utc)
@@ -693,7 +705,7 @@ async def _generate_draft_background(item_id: str, user_id: str) -> None:
                     select(JobQueueItem).where(JobQueueItem.id == item_id)
                 )
                 item = result.scalar_one_or_none()
-                if item:
+                if item and item.draft_status != "sent":
                     item.draft_status = "none"
                     await db.commit()
             except Exception:

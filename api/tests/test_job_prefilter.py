@@ -126,3 +126,9 @@ def test_agent_pre_filter_honours_profile_minimums():
     assert _agent()._pre_filter(_raw("$600", "fixed")) is None
     assert _agent(min_budget=1000)._pre_filter(_raw("$600", "fixed")) == "budget_too_low ($600 < $1000)"
     assert _agent(min_hourly=100)._pre_filter(_raw("$40 - $90", "hourly")) == "hourly_top_too_low ($90/hr < $100)"
+
+
+def test_malformed_untrusted_values_do_not_raise():
+    assert parse_posted_text("99999 years ago") is None
+    assert parse_posted_text("9" * 200 + " days ago") is None
+    assert _pf(budget_amount="$,") is None

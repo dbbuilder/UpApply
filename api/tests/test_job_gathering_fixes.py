@@ -44,7 +44,7 @@ async def test_autonomous_prep_drafts_instead_of_sticking(db_session, test_user)
     assert result.items_prepped == 1
     async with TestSessionLocal() as db:
         stored = (await db.execute(select(JobQueueItem).where(JobQueueItem.id == item.id))).scalar_one()
-    assert stored.status == "approved" and stored.draft_status == "none"
+    assert stored.status == "approved" and stored.draft_status == "generating"
 
     draft = AsyncMock()
     with patch("app.api.v1.job_queue._generate_draft_background", draft):

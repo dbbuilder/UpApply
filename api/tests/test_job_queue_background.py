@@ -43,6 +43,7 @@ def _session_maker(item):
     db = MagicMock()
     db.execute = AsyncMock(return_value=result)
     db.commit = AsyncMock()
+    db.refresh = AsyncMock()
     maker = MagicMock()
     maker.return_value.__aenter__.return_value = db
     maker.return_value.__aexit__.return_value = False
@@ -98,3 +99,27 @@ async def test_score_pre_filtered_background_sets_score():
     _assert_called_with_real_signature(mock_rfa, db, profile, item)
     assert item.ai_score == 82.0
     assert "Missing: Rust." in item.ai_reasoning
+
+
+@pytest.mark.asyncio
+async def test_late_draft_does_not_overwrite_sent():
+    item = _item()
+    profile = MagicMock(generation_v2=False)
+    maker, db = _session_maker(item)
+
+    async def submitted_meanwhile(obj, attrs=None):
+        obj.draft_status = "sent"
+
+    db.refresh = AsyncMock(side_effect=submitted_meanwhile)
+    with patch("app.core.database.async_session_maker", maker), \
+         patch.object(job_queue, "_get_user_profile", AsyncMock(return_value=profile)), \
+         patch.object(job_queue, "_record_outcome", AsyncMock()), \
+         patch.object(job_queue, "record_proposal_drafted", AsyncMock()), \
+         patch("app.services.job_analysis.run_full_analysis", autospec=True) as mock_rfa, \
+         patch("app.services.job_analysis.find_relevant_proposals", AsyncMock(return_value=[])), \
+         patch("app.services.cover_letter.generate_cover_letter", AsyncMock(return_value="Late draft")):
+        mock_rfa.return_value = _analysis()
+        await job_queue._generate_draft_background(item_id="item-1", user_id="user-1")
+
+    assert item.draft_status == "sent" and item.draft_cover_letter is None
+    db.commit.assert_not_awaited()

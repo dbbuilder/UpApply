@@ -45,7 +45,7 @@ _BLOCKED_COUNTRY_RE = re.compile(
 )
 
 # Extracts ALL dollar figures from a budget string
-_BUDGET_VALUE_RE = re.compile(r'\$\s*([\d,]+(?:\.\d+)?)')
+_BUDGET_VALUE_RE = re.compile(r'\$\s*(\d[\d,]*(?:\.\d+)?)')  # leading digit: "$," never reaches float()
 
 # Upwork's relative "posted" text: "3 days ago", "Posted 2 hours ago", "yesterday", "last week"
 _POSTED_AGO_RE = re.compile(
@@ -66,7 +66,10 @@ def parse_posted_text(text: Optional[str], now: Optional[datetime] = None) -> Op
     m = _POSTED_AGO_RE.search(lowered)
     if m:
         count = 1 if m.group(1) in ("a", "an", "one") else int(m.group(1))
-        return now - timedelta(days=count * _UNIT_DAYS[m.group(2)])
+        try:
+            return now - timedelta(days=count * _UNIT_DAYS[m.group(2)])
+        except OverflowError:  # "99999 years ago" from untrusted input
+            return None
     for phrase, days in _POSTED_WORDS.items():
         if phrase in lowered:
             return now - timedelta(days=days)
