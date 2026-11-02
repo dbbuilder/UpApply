@@ -117,10 +117,10 @@ export default function AutoScanPanel({ onNewSuggestions }: AutoScanPanelProps) 
           type="button"
           onClick={runNow}
           disabled={!!running}
-          className="px-3 py-1 text-[11px] font-medium bg-emerald-50 text-emerald-700 rounded-lg
+          className="shrink-0 whitespace-nowrap tabular-nums px-3 py-1 text-[11px] font-medium bg-emerald-50 text-emerald-700 rounded-lg
             hover:bg-emerald-100 active:scale-95 transition-all disabled:opacity-50"
         >
-          {running ? `Scanning ${Math.min(running.index + 1, running.queries.length)}/${running.queries.length}…` : 'Run now'}
+          {running ? `Scanning ${Math.min(running.index + 1, running.queries.length)} of ${running.queries.length}` : 'Run now'}
         </button>
       </div>
 
