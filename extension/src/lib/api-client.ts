@@ -1511,6 +1511,8 @@ export interface JobQueueIngestRequest {
   query_id: string | null;
   query: string | null;
   jobs: JobQueueIngestJob[];
+  /** The scan's lookback window in days (1-30); the server's too_old uses it. */
+  max_age_days?: number;
 }
 
 export interface JobQueueIngestResponse {

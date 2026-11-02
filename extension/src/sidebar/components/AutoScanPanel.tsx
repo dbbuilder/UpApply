@@ -3,7 +3,8 @@
  * Off until the user turns it on.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { INTERVAL_OPTIONS } from '../../lib/job-gather';
+import { INTERVAL_OPTIONS, effectiveLookbackDays } from '../../lib/job-gather';
+import { useAppStore } from '../store';
 import type { GatherLastRun, GatherRunProgress, GatherSettings } from '../../lib/job-gather';
 
 interface GatherStatusResponse {
@@ -40,6 +41,7 @@ interface AutoScanPanelProps {
 }
 
 export default function AutoScanPanel({ onNewSuggestions }: AutoScanPanelProps) {
+  const setCurrentView = useAppStore((st) => st.setCurrentView);
   const [status, setStatus] = useState<GatherStatusResponse | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -145,7 +147,9 @@ export default function AutoScanPanel({ onNewSuggestions }: AutoScanPanelProps) 
       <p className="text-[9px] text-gray-400 leading-snug">
         {settings.enabled ? '' : 'Off by default. '}
         Runs your active search queries (up to {settings.maxQueriesPerRun} per scan, taking turns) in a hidden tab,
-        only while Chrome is open and you are signed in to Upwork and UpApply.
+        newest first, up to {settings.maxPages} pages or {effectiveLookbackDays(settings)} days back, only while Chrome
+        is open and you are signed in to Upwork and UpApply.{' '}
+        <button type="button" onClick={() => setCurrentView('settings')} className="text-emerald-600 hover:underline">Settings</button>
       </p>
     </div>
   );

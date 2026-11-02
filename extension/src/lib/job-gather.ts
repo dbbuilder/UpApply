@@ -12,8 +12,15 @@ export const DEFAULT_MAX_QUERIES_PER_RUN = 10;
 /** The ingest endpoint scores at most 25 jobs per call (MAX_SCORED_PER_REQUEST) and stores the rest
  * as score_cap_reached, which later runs treat as duplicates, so never send more than that. */
 export const INGEST_CHUNK_SIZE = 25;
-/** Search results are sorted by recency, so a run reads only the first few pages of each query. */
-export const GATHER_MAX_PAGES = 3;
+/** Search results are sorted by recency; a query is paged until the lookback window or this cap. */
+export const DEFAULT_MAX_PAGES = 5;
+export const MAX_PAGES_LIMIT = 10;
+export const PAGE_OPTIONS = [1, 2, 3, 5, 8, 10];
+/** Lookback choices in days; null in settings means "automatic" (see defaultLookbackDays). */
+export const LOOKBACK_OPTIONS = [3, 7, 10, 14, 21, 30];
+/** Until this date the automatic lookback is 14 days (catching up), then 7. */
+export const LOOKBACK_CATCH_UP_UNTIL = '2026-11-05T00:00:00';
+
 /** A lock whose heartbeat is older than this belongs to a run that died. */
 export const LOCK_STALE_MS = 10 * 60_000;
 /** After a blocked run, skip alarms for interval × 2^(streak-1), capped at this many intervals. */
@@ -23,13 +30,28 @@ export interface GatherSettings {
   enabled: boolean;
   intervalMinutes: number;
   maxQueriesPerRun: number;
+  /** Days back to read each search; null = automatic (14 until LOOKBACK_CATCH_UP_UNTIL, then 7). */
+  lookbackDays: number | null;
+  /** Most result pages read per search. */
+  maxPages: number;
 }
 
 export const DEFAULT_GATHER_SETTINGS: GatherSettings = {
   enabled: false,
   intervalMinutes: DEFAULT_INTERVAL_MINUTES,
   maxQueriesPerRun: DEFAULT_MAX_QUERIES_PER_RUN,
+  lookbackDays: null,
+  maxPages: DEFAULT_MAX_PAGES,
 };
+
+/** The automatic lookback: 14 days before LOOKBACK_CATCH_UP_UNTIL (local time), 7 after. */
+export function defaultLookbackDays(now: Date = new Date()): number {
+  return now < new Date(LOOKBACK_CATCH_UP_UNTIL) ? 14 : 7;
+}
+
+export function effectiveLookbackDays(settings: GatherSettings, now: Date = new Date()): number {
+  return settings.lookbackDays ?? defaultLookbackDays(now);
+}
 
 /** Fills defaults and clamps a stored (possibly partial or stale) settings object. */
 export function normalizeGatherSettings(raw: Partial<GatherSettings> | null | undefined): GatherSettings {
@@ -42,6 +64,12 @@ export function normalizeGatherSettings(raw: Partial<GatherSettings> | null | un
       ? Math.min(MAX_INTERVAL_MINUTES, Math.max(MIN_INTERVAL_MINUTES, Math.round(interval)))
       : DEFAULT_INTERVAL_MINUTES,
     maxQueriesPerRun: Number.isFinite(maxQ) && maxQ >= 1 ? Math.round(maxQ) : DEFAULT_MAX_QUERIES_PER_RUN,
+    lookbackDays: r.lookbackDays == null || !Number.isFinite(Number(r.lookbackDays))
+      ? null
+      : Math.min(30, Math.max(1, Math.round(Number(r.lookbackDays)))),
+    maxPages: Number.isFinite(Number(r.maxPages)) && Number(r.maxPages) >= 1
+      ? Math.min(MAX_PAGES_LIMIT, Math.round(Number(r.maxPages)))
+      : DEFAULT_MAX_PAGES,
   };
 }
 
@@ -59,9 +87,50 @@ export function alarmMatches(existing: { periodInMinutes?: number } | null | und
   return !!existing && existing.periodInMinutes === plan.periodInMinutes;
 }
 
-export function buildSearchUrl(query: string, urlParams?: string | null): string {
+export function buildSearchUrl(query: string, urlParams?: string | null, page = 1): string {
   const extra = urlParams ? `&${urlParams}` : '';
-  return `https://www.upwork.com/nx/search/jobs/?q=${encodeURIComponent(query || '')}&sort=recency${extra}`;
+  const pageParam = page > 1 ? `&page=${page}` : '';
+  return `https://www.upwork.com/nx/search/jobs/?q=${encodeURIComponent(query || '')}&sort=recency${extra}${pageParam}`;
+}
+
+// ── Posted age and paging ─────────────────────────────────────────────────────
+
+const AGO_RE = /(\d+|an?|one)\s+(minute|hour|day|week|month|year)s?\s+ago/i;
+const UNIT_MS: Record<string, number> = {
+  minute: 60_000, hour: 3_600_000, day: 86_400_000, week: 7 * 86_400_000,
+  month: 30 * 86_400_000, year: 365 * 86_400_000,
+};
+
+/** Approximate posting time from Upwork's relative text ("Posted 3 hours ago", "yesterday"); null if unreadable. */
+export function parsePostedAt(text: string | null | undefined, now: Date = new Date()): Date | null {
+  const t = (text || '').toLowerCase();
+  if (!t) return null;
+  const m = t.match(AGO_RE);
+  if (m) {
+    const n = /^\d+$/.test(m[1]) ? Number(m[1]) : 1;
+    return new Date(now.getTime() - n * UNIT_MS[m[2]]);
+  }
+  if (/just now|moments? ago|seconds? ago/.test(t)) return now;
+  if (t.includes('yesterday')) return new Date(now.getTime() - 86_400_000);
+  if (t.includes('last week')) return new Date(now.getTime() - 7 * 86_400_000);
+  if (t.includes('last month')) return new Date(now.getTime() - 30 * 86_400_000);
+  return null;
+}
+
+export type PageDecision = { next: boolean; reason: 'more' | 'no_new' | 'past_lookback' | 'page_cap' };
+
+/**
+ * After reading result page `page` (newest first): keep paging while the page brought jobs not seen
+ * on earlier pages (if Upwork ignored the page number, it would repeat page 1 and stop here), its
+ * oldest readable job is still inside the lookback window, and the page cap is not reached.
+ */
+export function pageDecision(opts: {
+  page: number; maxPages: number; newCount: number; oldestPostedAt: Date | null; cutoff: Date;
+}): PageDecision {
+  if (opts.newCount === 0) return { next: false, reason: 'no_new' };
+  if (opts.oldestPostedAt && opts.oldestPostedAt < opts.cutoff) return { next: false, reason: 'past_lookback' };
+  if (opts.page >= opts.maxPages) return { next: false, reason: 'page_cap' };
+  return { next: true, reason: 'more' };
 }
 
 // ── Card → ingest job ─────────────────────────────────────────────────────────
@@ -75,6 +144,9 @@ export interface ScrapedJobCardLike {
   jobType?: string | null;
   experienceLevel?: string | null;
   postedDateRaw?: string | null;
+  /** From the tile text (parseTileText): "$70-$80" / "$1,500", "20 to 50". */
+  budgetAmount?: string | null;
+  proposalsText?: string | null;
   clientInfo?: {
     paymentVerified?: boolean;
     rating?: string | null;
@@ -92,8 +164,7 @@ export function parseRating(text: string | null | undefined): number | undefined
 
 /**
  * Maps a scraped search card to the ingest shape. Only fields the card scraper reads are filled;
- * skills, budget amount, posted_at, location and proposals are not on the card scraper, so they
- * go as empty / null rather than guessed.
+ * skills, posted_at and location are not on the card, so they go as empty / null rather than guessed.
  */
 export function cardToIngestJob(card: ScrapedJobCardLike): JobQueueIngestJob {
   const ci = card.clientInfo;
@@ -111,12 +182,12 @@ export function cardToIngestJob(card: ScrapedJobCardLike): JobQueueIngestJob {
     title: card.title,
     description: card.description || '',
     skills: [],
-    budget_amount: null,
+    budget_amount: card.budgetAmount || null,
     budget_type: jt === 'fixed' || jt === 'hourly' ? jt : null,
     posted_at: null,
     posted_text: card.postedDateRaw || null,
     client_info: clientInfo,
-    proposals_text: null,
+    proposals_text: card.proposalsText || null,
   };
 }
 
@@ -280,6 +351,9 @@ export interface GatherRunProgress extends GatherTotals {
   tab_id: number | null;
   /** Last non-fatal per-query problem (one query's scrape failing does not stop the run). */
   warning: string | null;
+  /** Lookback and page cap fixed when the run started (absent on runs saved before them). */
+  lookback_days?: number;
+  max_pages?: number;
 }
 
 export interface GatherLastRun extends GatherTotals {
@@ -333,4 +407,54 @@ export function describeEmptyPage(f: EmptyPageFacts): string {
     ...(f.tileTests ? [`first tile data-test: ${f.tileTests.slice(0, 10).join(', ') || 'none'}; link ${f.tileLink || 'none'}`] : []),
     `text "${text}"`,
   ].join('; ');
+}
+
+// ── Job tile text ──────────────────────────────────────────────────────────────
+
+export interface TileTextFacts {
+  budgetType: 'fixed' | 'hourly' | null;
+  budgetAmount: string | null;
+  postedText: string | null;
+  proposalsText: string | null;
+}
+
+/**
+ * Budget, posted time and proposals from a job tile's visible text, e.g. "Posted 3 hours ago",
+ * "Hourly: $70-$80", "Fixed price - Expert - Est. budget: $1,500", "Proposals: 20 to 50".
+ * Text-based so it survives Upwork renaming data-test attributes.
+ */
+export function parseTileText(text: string | null | undefined): TileTextFacts {
+  const t = (text || '').replace(/\s+/g, ' ');
+  const hourly = t.match(/Hourly(?:\s*:)?\s*\$\s*([\d,.]+)(?:\s*[-–]\s*\$\s*([\d,.]+))?/i);
+  const fixedBudget = t.match(/(?:Est\.?\s*budget|Budget)\s*:?\s*\$\s*([\d,.]+)/i);
+  let budgetType: TileTextFacts['budgetType'] = null;
+  let budgetAmount: string | null = null;
+  if (hourly) {
+    budgetType = 'hourly';
+    budgetAmount = hourly[2] ? `$${hourly[1]}-$${hourly[2]}` : `$${hourly[1]}`;
+  } else if (/\bHourly\b/i.test(t)) {
+    budgetType = 'hourly';
+  } else if (fixedBudget) {
+    budgetType = 'fixed';
+    budgetAmount = `$${fixedBudget[1]}`;
+  } else if (/Fixed[- ]price/i.test(t)) {
+    budgetType = 'fixed';
+  }
+  const posted = t.match(/Posted\s+((?:\d+|an?|one)\s+\w+?s?\s+ago|yesterday|last week|last month|just now)/i);
+  const proposals = t.match(/Proposals\s*:?\s*((?:Less than|Fewer than|More than)?\s*\d+(?:\s*(?:to|-|\+)\s*\d*)?)/i);
+  return {
+    budgetType,
+    budgetAmount,
+    postedText: posted ? `Posted ${posted[1]}` : null,
+    proposalsText: proposals ? proposals[1].trim() : null,
+  };
+}
+
+/** Cards posted before the cutoff are dropped; a card whose posted time can't be read is kept. */
+export function withinLookback<T extends { postedDateRaw?: string | null }>(cards: T[], lookbackDays: number, now: Date = new Date()): T[] {
+  const cutoff = now.getTime() - lookbackDays * 86_400_000;
+  return cards.filter((c) => {
+    const posted = parsePostedAt(c.postedDateRaw, now);
+    return !posted || posted.getTime() >= cutoff;
+  });
 }

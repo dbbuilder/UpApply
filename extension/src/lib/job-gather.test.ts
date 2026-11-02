@@ -3,6 +3,7 @@ import {
   DEFAULT_GATHER_SETTINGS, DEFAULT_INTERVAL_MINUTES, LOCK_STALE_MS, MAX_INTERVAL_MINUTES, MIN_INTERVAL_MINUTES,
   addIngestResult, alarmMatches, alarmPlan, backoffMs, buildSearchUrl, cardToIngestJob, cardsToIngestJobs, chunk,
   SETTLE_EMPTY_MS, SETTLE_MAX_MS, blockMessage, describeEmptyPage, settleStep,
+  defaultLookbackDays, effectiveLookbackDays, pageDecision, parsePostedAt, parseTileText, withinLookback,
   detectBlockedPage, emptyTotals, isLockFree, normalizeGatherSettings, parseRating, pickQueries,
 } from './job-gather';
 import { THROTTLE_PAGE_TEXT } from './proposal-scrape';
@@ -189,7 +190,7 @@ describe('isLockFree', () => {
 describe('settings and alarm', () => {
   it('defaults to off, every 180 minutes, 10 queries', () => {
     expect(normalizeGatherSettings(undefined)).toEqual(DEFAULT_GATHER_SETTINGS);
-    expect(DEFAULT_GATHER_SETTINGS).toEqual({ enabled: false, intervalMinutes: 180, maxQueriesPerRun: 10 });
+    expect(DEFAULT_GATHER_SETTINGS).toEqual({ enabled: false, intervalMinutes: 180, maxQueriesPerRun: 10, lookbackDays: null, maxPages: 5 });
   });
 
   it('clamps the interval to 60–720 minutes', () => {
@@ -293,5 +294,60 @@ describe('describeEmptyPage', () => {
     const line = describeEmptyPage({ url: 'https://www.upwork.com/nx/search/jobs/', title: 'T', jobTiles: 10, articles: 10,
       titleLinks: 0, jobLinks: 15, dataTests: [], text: '', tileTests: ['UpLink', 'job-type-label'], tileLink: '/jobs/x_~021/' });
     expect(line).toContain('first tile data-test: UpLink, job-type-label; link /jobs/x_~021/');
+  });
+});
+
+describe('lookback and paging', () => {
+  const now = new Date('2026-11-03T12:00:00');
+
+  it('defaults to 14 days until Nov 5, 2026, then 7; a set value wins', () => {
+    expect(defaultLookbackDays(new Date('2026-11-04T23:59:00'))).toBe(14);
+    expect(defaultLookbackDays(new Date('2026-11-05T00:00:00'))).toBe(7);
+    expect(effectiveLookbackDays({ ...DEFAULT_GATHER_SETTINGS }, now)).toBe(14);
+    expect(effectiveLookbackDays({ ...DEFAULT_GATHER_SETTINGS, lookbackDays: 21 }, now)).toBe(21);
+    expect(normalizeGatherSettings({ lookbackDays: 99, maxPages: 50 })).toMatchObject({ lookbackDays: 30, maxPages: 10 });
+    expect(normalizeGatherSettings({})).toMatchObject({ lookbackDays: null, maxPages: 5 });
+  });
+
+  it('reads Upwork posted text', () => {
+    expect(parsePostedAt('Posted 3 hours ago', now)?.getTime()).toBe(now.getTime() - 3 * 3_600_000);
+    expect(parsePostedAt('Posted yesterday', now)?.getTime()).toBe(now.getTime() - 86_400_000);
+    expect(parsePostedAt('2 weeks ago', now)?.getTime()).toBe(now.getTime() - 14 * 86_400_000);
+    expect(parsePostedAt('Posted an hour ago', now)?.getTime()).toBe(now.getTime() - 3_600_000);
+    expect(parsePostedAt('sometime', now)).toBeNull();
+  });
+
+  it('pages until nothing new, the lookback window or the cap', () => {
+    const cutoff = new Date(now.getTime() - 14 * 86_400_000);
+    const base = { page: 1, maxPages: 5, newCount: 10, oldestPostedAt: new Date(now.getTime() - 86_400_000), cutoff };
+    expect(pageDecision(base)).toEqual({ next: true, reason: 'more' });
+    expect(pageDecision({ ...base, newCount: 0 })).toEqual({ next: false, reason: 'no_new' });
+    expect(pageDecision({ ...base, oldestPostedAt: new Date(now.getTime() - 15 * 86_400_000) })).toEqual({ next: false, reason: 'past_lookback' });
+    expect(pageDecision({ ...base, page: 5 })).toEqual({ next: false, reason: 'page_cap' });
+    expect(pageDecision({ ...base, oldestPostedAt: null })).toEqual({ next: true, reason: 'more' });
+  });
+
+  it('builds page URLs and drops cards older than the window', () => {
+    expect(buildSearchUrl('sql', null, 2)).toBe('https://www.upwork.com/nx/search/jobs/?q=sql&sort=recency&page=2');
+    expect(buildSearchUrl('sql', null, 1)).toBe('https://www.upwork.com/nx/search/jobs/?q=sql&sort=recency');
+    const cards = [{ postedDateRaw: 'Posted 2 days ago' }, { postedDateRaw: 'Posted 3 weeks ago' }, { postedDateRaw: null }];
+    expect(withinLookback(cards, 14, now)).toEqual([cards[0], cards[2]]);
+  });
+});
+
+describe('parseTileText', () => {
+  it('reads hourly ranges, posted time and proposals', () => {
+    expect(parseTileText('Posted 3 hours ago  Senior Software Consultant Hourly: $70-$80 Expert Proposals: Fewer than 5'))
+      .toEqual({ budgetType: 'hourly', budgetAmount: '$70-$80', postedText: 'Posted 3 hours ago', proposalsText: 'Fewer than 5' });
+  });
+
+  it('reads fixed-price budgets', () => {
+    expect(parseTileText('Posted yesterday Fixed price - Intermediate - Est. budget: $1,500 Proposals: 20 to 50'))
+      .toEqual({ budgetType: 'fixed', budgetAmount: '$1,500', postedText: 'Posted yesterday', proposalsText: '20 to 50' });
+  });
+
+  it('knows the type when no amount is shown', () => {
+    expect(parseTileText('Posted 1 hour ago Hourly Expert Est. Time: Less than 1 week')).toMatchObject({ budgetType: 'hourly', budgetAmount: null });
+    expect(parseTileText('nothing here')).toEqual({ budgetType: null, budgetAmount: null, postedText: null, proposalsText: null });
   });
 });

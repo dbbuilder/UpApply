@@ -9,7 +9,7 @@ import { apiClient } from '../lib/api-client';
 import {
   MAX_CONSECUTIVE_THROTTLED, SAVE_BATCH_SIZE, THROTTLE_PAGE_TEXT,
   completeProposalIds, isThrottledRead, randomDetailDelayMs, takeBatch, throttleBackoffMs, RUN_BUDGET_MS, LIST_CACHE_TTL_MS, pickProposalStatus, proposalFromNuxtData } from '../lib/proposal-scrape';
-import { SETTLE_POLL_MS, blockMessage, buildSearchUrl, describeEmptyPage, detectBlockedPage, settleStep, type EmptyPageFacts, type PageSnapshot } from '../lib/job-gather';
+import { SETTLE_POLL_MS, blockMessage, buildSearchUrl, describeEmptyPage, detectBlockedPage, pageDecision, parsePostedAt, settleStep, type EmptyPageFacts, type PageSnapshot } from '../lib/job-gather';
 import { initGatherer, type SearchScrapeOptions, type SearchScrapeResult } from './gatherer';
 
 // A generated draft stays linked to its job's apply page for a day (Submit-click capture).
@@ -1458,33 +1458,37 @@ async function _scrapeUpworkSearchNow(query: string, urlParams: string | null | 
   };
   const snapshot = async () => detectBlockedPage(await readPage());
   try {
-    await waitForTabLoad(tabId);
     // Wait for job tiles; give a challenge time to clear itself before calling it a block.
-    const loadedAt = Date.now();
-    for (;;) {
-      await new Promise(resolve => setTimeout(resolve, SETTLE_POLL_MS));
-      const page = await readPage();
-      const step = settleStep(page, Date.now() - loadedAt);
-      if (step.action === 'proceed') break;
-      if (step.action === 'stop') {
-        logger.log('UpApply Background: search tab blocked', step.reason, page.url, page.title);
-        return { success: false, error: blockMessage(step.reason, page.title), blocked: step.reason };
+    const settle = async (loaded: Promise<void> = waitForTabLoad(tabId)): Promise<SearchScrapeResult | null> => {
+      await loaded;
+      const loadedAt = Date.now();
+      for (;;) {
+        await new Promise(resolve => setTimeout(resolve, SETTLE_POLL_MS));
+        const page = await readPage();
+        const step = settleStep(page, Date.now() - loadedAt);
+        if (step.action === 'proceed') return null;
+        if (step.action === 'stop') {
+          logger.log('UpApply Background: search tab blocked', step.reason, page.url, page.title);
+          return { success: false, error: blockMessage(step.reason, page.title), blocked: step.reason };
+        }
       }
-    }
-    const manifest = chrome.runtime.getManifest();
-    const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
-    if (contentScriptPath) {
-      try { await chrome.scripting.executeScript({ target: { tabId }, files: [contentScriptPath] }); }
-      catch (e) { /* already loaded */ }
-    }
-    await new Promise(resolve => setTimeout(resolve, 500));
-    const response = await new Promise<SearchScrapeResult>((resolve) => {
-      chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_JOB_CARDS', maxPages: opts.maxPages }, (resp) => {
-        if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
-        else resolve(resp || { success: false, error: 'No response' });
+    };
+    const scrapeCards = async (maxPages?: number): Promise<SearchScrapeResult> => {
+      const manifest = chrome.runtime.getManifest();
+      const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
+      if (contentScriptPath) {
+        try { await chrome.scripting.executeScript({ target: { tabId }, files: [contentScriptPath] }); }
+        catch (e) { /* already loaded */ }
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return new Promise<SearchScrapeResult>((resolve) => {
+        chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_JOB_CARDS', maxPages }, (resp) => {
+          if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
+          else resolve(resp || { success: false, error: 'No response' });
+        });
       });
-    });
-    if (response.success && Array.isArray(response.data) && response.data.length === 0) {
+    };
+    const describeEmpty = async (): Promise<string | undefined> => {
       try {
         const [res] = await chrome.scripting.executeScript({
           target: { tabId },
@@ -1513,13 +1517,60 @@ async function _scrapeUpworkSearchNow(query: string, urlParams: string | null | 
             };
           },
         });
-        if (res?.result) response.diag = describeEmptyPage(res.result);
-      } catch { /* diagnostics are best-effort */ }
+        return res?.result ? describeEmptyPage(res.result) : undefined;
+      } catch { return undefined; /* diagnostics are best-effort */ }
+    };
+
+    const firstBlock = await settle();
+    if (firstBlock) return firstBlock;
+
+    if (opts.lookbackDays == null) {
+      // History buttons: read this page and let the content script click through its pager.
+      const response = await scrapeCards(opts.maxPages);
+      if (response.success && Array.isArray(response.data) && response.data.length === 0) response.diag = await describeEmpty();
+      // Paging can trip the rate-limit toast; keep what was read and tell the caller to stop.
+      const after = await snapshot();
+      if (after === 'error_toast') return { ...response, blocked: after };
+      return response;
     }
-    // Paging can trip the rate-limit toast; keep what was read and tell the caller to stop.
-    const after = await snapshot();
-    if (after === 'error_toast') return { ...response, blocked: after };
-    return response;
+
+    // Scan: newest first, one result page at a time (&page=N), until the lookback window,
+    // a page with nothing new, or the page cap.
+    const cutoff = new Date(Date.now() - opts.lookbackDays * 86_400_000);
+    const maxPages = opts.maxPages ?? 1;
+    const all: Array<{ upworkUrl?: string; postedDateRaw?: string | null }> = [];
+    const seen = new Set<string>();
+    let pagesRead = 0;
+    let stopReason = 'page_cap';
+    for (let page = 1; ; page++) {
+      const response = await scrapeCards(1);
+      if (!response.success || !Array.isArray(response.data)) {
+        if (page === 1) return response;
+        stopReason = 'scrape_failed';
+        break;
+      }
+      pagesRead = page;
+      const cards = response.data as Array<{ upworkUrl?: string; postedDateRaw?: string | null }>;
+      const fresh = cards.filter(c => c?.upworkUrl && !seen.has(c.upworkUrl));
+      fresh.forEach(c => seen.add(c.upworkUrl!));
+      all.push(...fresh);
+      if (page === 1 && cards.length === 0) return { ...response, diag: await describeEmpty() };
+      const dates = fresh.map(c => parsePostedAt(c.postedDateRaw)).filter((d): d is Date => !!d);
+      const oldest = dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null;
+      const decision = pageDecision({ page, maxPages, newCount: fresh.length, oldestPostedAt: oldest, cutoff });
+      if (await snapshot() === 'error_toast') {
+        return { success: true, data: all, blocked: 'error_toast', pagesRead, stopReason: 'error_toast' };
+      }
+      if (!decision.next) { stopReason = decision.reason; break; }
+      // A human-paced pause before the next page.
+      await new Promise(resolve => setTimeout(resolve, 4000 + Math.random() * 3000));
+      const loaded = waitForTabLoad(tabId); // listen before navigating so the load event isn't missed
+      await chrome.tabs.update(tabId, { url: buildSearchUrl(query, urlParams, page + 1) });
+      const block = await settle(loaded);
+      if (block) return { success: true, data: all, blocked: block.blocked, error: block.error, pagesRead, stopReason: 'blocked' };
+    }
+    logger.log('UpApply Background: search paged', { query, pagesRead, cards: all.length, stopReason });
+    return { success: true, data: all, pagesRead, stopReason };
   } finally {
     try { await chrome.tabs.remove(tabId); } catch (e) { /* ignore */ }
     await opts.onTabClosed?.();

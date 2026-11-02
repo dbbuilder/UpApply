@@ -5,9 +5,9 @@ type NavMode = 'me' | 'find' | 'apply' | 'queue' | 'track' | 'insights' | 'impor
 type ViewType =
   | 'auth' | 'setup' | 'generator' | 'me' | 'find' | 'track' | 'queue' | 'go'
   | 'memories' | 'history' | 'analytics' | 'feedback' | 'skills' | 'profile'
-  | 'insights' | 'import' | 'suggestions' | 'guardrails';
+  | 'insights' | 'import' | 'suggestions' | 'guardrails' | 'settings';
 
-const ME_VIEWS: string[]          = ['me', 'profile', 'skills', 'memories', 'setup'];
+const ME_VIEWS: string[]          = ['me', 'profile', 'skills', 'memories', 'setup', 'settings'];
 const FIND_VIEWS: string[]        = ['find', 'scored'];
 const QUEUE_VIEWS: string[]       = ['queue'];
 const TRACK_VIEWS: string[]       = ['track', 'history', 'analytics', 'feedback'];
