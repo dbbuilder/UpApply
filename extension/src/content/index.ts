@@ -17,6 +17,7 @@ import { extractOutcomeItems } from './outcome-sync';
 import { isSubmitButton, readSubmission } from './submit-capture';
 import { isApplyPage, isProposalsListPage } from './page-match';
 import { findTitleLink, jobIdFromUrl, readTileDescription } from './job-cards';
+import { parseTileText } from '../lib/job-gather';
 import { scrapeAllContracts } from './scrapers/contracts';
 import './scoring';
 
@@ -156,6 +157,8 @@ interface ScrapedJobCard {
   jobType: string | null;
   experienceLevel: string | null;
   postedDateRaw: string | null;
+  budgetAmount: string | null;
+  proposalsText: string | null;
   clientInfo: {
     paymentVerified: boolean;
     rating: string | null;
@@ -185,18 +188,19 @@ function extractJobCards(): ScrapedJobCard[] {
 
     const description = readTileDescription(article);
 
+    const tileFacts = parseTileText((article as HTMLElement).innerText || article.textContent || '');
     const jobTypeEl = article.querySelector('[data-test="job-type-label"]');
     const jobType = jobTypeEl?.textContent?.trim().toLowerCase().includes('fixed')
       ? 'fixed'
       : jobTypeEl?.textContent?.trim().toLowerCase().includes('hourly')
       ? 'hourly'
-      : null;
+      : tileFacts.budgetType;
 
     const expEl = article.querySelector('[data-test="experience-level"]');
     const experienceLevel = expEl?.textContent?.trim() || null;
 
     const dateEl = article.querySelector('[data-test="job-pubilshed-date"]');
-    const postedDateRaw = dateEl?.textContent?.trim() || null;
+    const postedDateRaw = dateEl?.textContent?.trim() || tileFacts.postedText;
 
     const paymentVerified = !!article.querySelector('[data-test="payment-verified"]');
     const ratingEl = article.querySelector('[data-test="total-feedback"]');
@@ -212,6 +216,8 @@ function extractJobCards(): ScrapedJobCard[] {
       jobType,
       experienceLevel,
       postedDateRaw,
+      budgetAmount: tileFacts.budgetAmount,
+      proposalsText: tileFacts.proposalsText,
       clientInfo: { paymentVerified, rating, totalSpent },
     });
   });

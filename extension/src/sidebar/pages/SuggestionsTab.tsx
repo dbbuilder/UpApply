@@ -855,8 +855,10 @@ export default function SuggestionsTab() {
   const nonFiltered = items.filter((i) => i.status !== 'pre_filtered');
   const filteredItems = items.filter((i) => i.status === 'pre_filtered');
 
+  // Pending is a to-do list: best match first (ties: newest first). All keeps arrival order.
   const displayed = filter === 'pending'
     ? nonFiltered.filter((i) => i.status === 'suggested')
+        .sort((a, b) => (b.ai_score ?? -1) - (a.ai_score ?? -1) || (b.created_at ?? '').localeCompare(a.created_at ?? ''))
     : nonFiltered;
 
   const pendingCount = nonFiltered.filter((i) => i.status === 'suggested').length;

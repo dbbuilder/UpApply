@@ -10,7 +10,7 @@ import { apiClient, ApiError } from '../lib/api-client';
 import { logger } from '../lib/logger';
 import { randomDetailDelayMs } from '../lib/proposal-scrape';
 import {
-  GATHER_ALARM_NAME, GATHER_MAX_PAGES, INGEST_CHUNK_SIZE,
+  GATHER_ALARM_NAME, INGEST_CHUNK_SIZE, effectiveLookbackDays, withinLookback,
   addIngestResult, alarmMatches, alarmPlan, backoffMs, blockMessage, cardsToIngestJobs, chunk,
   emptyTotals, isLockFree, normalizeGatherSettings, pickQueries,
 } from '../lib/job-gather';
@@ -21,6 +21,8 @@ import type {
 
 export interface SearchScrapeOptions {
   maxPages?: number;
+  /** Set by the scan: page through results by URL until this many days back. */
+  lookbackDays?: number;
   onTabOpened?: (tabId: number) => void | Promise<void>;
   onTabClosed?: () => void | Promise<void>;
 }
@@ -32,6 +34,9 @@ export interface SearchScrapeResult {
   blocked?: BlockReason | null;
   /** What the tab showed when a search produced no cards (see describeEmptyPage). */
   diag?: string;
+  /** Scan paging: result pages read and why paging stopped. */
+  pagesRead?: number;
+  stopReason?: string;
 }
 
 export interface GathererDeps {
@@ -168,6 +173,8 @@ export function initGatherer(deps: GathererDeps) {
       index: 0,
       tab_id: null,
       warning: null,
+      lookback_days: effectiveLookbackDays(settings),
+      max_pages: settings.maxPages,
       ...emptyTotals(),
     };
   }
@@ -189,7 +196,8 @@ export function initGatherer(deps: GathererDeps) {
       let result: SearchScrapeResult;
       try {
         result = await deps.scrapeSearch(q.query, q.url_params, {
-          maxPages: GATHER_MAX_PAGES,
+          maxPages: progress.max_pages ?? 1,
+          lookbackDays: progress.lookback_days ?? 7,
           onTabOpened: async (tabId) => { progress.tab_id = tabId; await save(); },
           onTabClosed: async () => { progress.tab_id = null; await save(); },
         });
@@ -199,10 +207,11 @@ export function initGatherer(deps: GathererDeps) {
       }
 
       const cards = result.success && Array.isArray(result.data) ? (result.data as ScrapedJobCardLike[]) : [];
-      const jobs = cardsToIngestJobs(cards);
+      const lookbackDays = progress.lookback_days ?? 7;
+      const jobs = cardsToIngestJobs(withinLookback(cards, lookbackDays));
       for (const part of chunk(jobs, INGEST_CHUNK_SIZE)) {
         try {
-          const r = await apiClient.ingestJobQueue({ query_id: q.id, query: q.query, jobs: part });
+          const r = await apiClient.ingestJobQueue({ query_id: q.id, query: q.query, jobs: part, max_age_days: lookbackDays });
           addIngestResult(progress, part.length, r);
         } catch (e) {
           // Cursor stays before this query, so the next run retries it.

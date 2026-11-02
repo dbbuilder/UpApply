@@ -19,6 +19,7 @@ import InsightsPage from './pages/InsightsPage';
 import ImportPage from './pages/ImportPage';
 import SuggestionsTab from './pages/SuggestionsTab';
 import GuardrailSettings from './pages/GuardrailSettings';
+import SettingsPage from './pages/SettingsPage';
 
 
 function App() {
@@ -74,6 +75,8 @@ function App() {
         return <SuggestionsTab />;
       case 'guardrails':
         return <GuardrailSettings />;
+      case 'settings':
+        return <SettingsPage />;
       default:
         return <GeneratorPage />;
     }

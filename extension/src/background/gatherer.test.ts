@@ -218,7 +218,7 @@ describe('gatherer settings', () => {
   it('creates the alarm when enabled and clears it when disabled', async () => {
     const { g } = setup(() => ({ success: true, data: [] }));
     const s = await g.saveGatherSettings({ enabled: true, intervalMinutes: 240 });
-    expect(s).toEqual({ enabled: true, intervalMinutes: 240, maxQueriesPerRun: 10 });
+    expect(s).toEqual({ enabled: true, intervalMinutes: 240, maxQueriesPerRun: 10, lookbackDays: null, maxPages: 5 });
     expect(alarms['upapply-job-gather']).toEqual({ periodInMinutes: 240, delayInMinutes: 240 });
     await g.saveGatherSettings({ intervalMinutes: 9999 });
     expect(alarms['upapply-job-gather'].periodInMinutes).toBe(720);
@@ -229,7 +229,7 @@ describe('gatherer settings', () => {
   it('reports status with defaults before anything ran', async () => {
     const { g } = setup(() => ({ success: true, data: [] }));
     expect(await g.getGatherStatus()).toEqual({
-      settings: { enabled: false, intervalMinutes: 180, maxQueriesPerRun: 10 },
+      settings: { enabled: false, intervalMinutes: 180, maxQueriesPerRun: 10, lookbackDays: null, maxPages: 5 },
       lastRun: null, running: null, backoffUntil: null,
     });
   });

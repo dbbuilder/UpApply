@@ -22,6 +22,7 @@ const PAGE_TITLES: Record<string, string> = {
   insights: '💡 Insights',
   import: '⇅ Sync',
   suggestions: '🤖 Agent',
+  settings: '⚙️ Settings',
 };
 
 const UPWORK = 'https://www.upwork.com';
@@ -137,6 +138,16 @@ export default function AppShell({ children }: AppShellProps) {
                 </button>
               );
             })}
+            <button
+              type="button"
+              onClick={() => { setCurrentView('settings'); setMenuOpen(false); }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                currentView === 'settings' ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <span className="text-base leading-none w-5 text-center">⚙️</span>
+              Settings
+            </button>
           </div>
         </div>
       </div>
