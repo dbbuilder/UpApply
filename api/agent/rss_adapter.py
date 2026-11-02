@@ -1,4 +1,7 @@
-"""Upwork RSS search adapter.
+"""Upwork RSS search adapter (RETIRED).
+
+Upwork discontinued its RSS feeds in 2024: fetch_jobs_from_rss() logs a warning and returns []
+without a network call. Jobs now arrive from the extension via POST /api/v1/job-queue/ingest.
 
 Fetches jobs from the Upwork RSS feed using a search query's url_params.
 
@@ -24,6 +27,10 @@ import httpx
 logger = logging.getLogger(__name__)
 
 RSS_BASE = "https://www.upwork.com/ab/feed/jobs/rss"
+RSS_RETIRED_WARNING = (
+    "Upwork RSS feeds were discontinued in 2024; jobs now arrive from the extension "
+    "via /job-queue/ingest"
+)
 # Regex to extract the Upwork job UID from a URL like:
 #   https://www.upwork.com/jobs/~01abc123def456
 _UID_RE = re.compile(r'~([0-9a-f]+)', re.IGNORECASE)
@@ -178,6 +185,9 @@ async def fetch_jobs_from_rss(
         List of RawJob dataclasses, sorted newest-first.
         Returns empty list on any network or parse error (logged at WARNING).
     """
+    logger.warning(RSS_RETIRED_WARNING)
+    return []
+
     # Ensure the q= parameter is present; RSS requires it
     if not url_params:
         logger.warning("rss_adapter: empty url_params, skipping")

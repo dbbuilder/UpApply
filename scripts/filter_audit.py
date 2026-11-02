@@ -7,7 +7,7 @@ Sections (one user, items created or reviewed in the last --days):
                of the extension's old labels), plus the most common "other" texts
   pre-filter   for each automatic rule (pre_filter:too_old, pre_filter:blocked_country,
                pre_filter:budget_too_low, pre_filter:hourly_top_too_low, pre_filter:avoid_keyword,
-               pre_filter:score_cap_reached): items blocked, how many were scored via
+               pre_filter:score_cap_reached, pre_filter:below_threshold): items blocked, how many were scored via
                score-anyway and their score distribution, and how many blocked items have an
                ai_score >= 70. A rule that blocked any job scoring >= 70 is flagged.
 A percentage whose denominator is under 5 prints "n<5".

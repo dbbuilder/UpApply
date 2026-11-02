@@ -1,5 +1,10 @@
 """Render cron entry point for the daily job discovery run.
 
+Discovery itself is RETIRED (Upwork discontinued its RSS feeds in 2024): JobDiscoveryAgent.run()
+logs the warning and does nothing; jobs arrive from the extension via
+POST /api/v1/job-queue/ingest. The daily autonomy evaluation and Level 5 autonomous prep below
+still run when this is invoked (it is not scheduled).
+
 Designed to be invoked as:
   python -m agent.run_discovery
 
@@ -34,7 +39,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 
 from agent.autonomy_governor import evaluate_user, get_or_create_autonomy_profile
 from agent.job_discovery import JobDiscoveryAgent
-from agent.proposal_submission_agent import run_autonomous_prep
+from agent.proposal_submission_agent import draft_prepped_items, run_autonomous_prep
+from agent.rss_adapter import RSS_RETIRED_WARNING
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,11 +72,11 @@ def _mint_service_jwt(user_id: str) -> str:
 # --------------------------------------------------------------------------
 
 async def _get_active_user_ids(session: AsyncSession) -> list[str]:
-    """Return IDs of users that have a completed profile (setup_complete=True).
+    """Return IDs of users that have a completed profile (setup_completed=True).
 
     A user is considered active if:
       - their account is active
-      - they have a user_profile row with setup_complete = true
+      - they have a user_profile row with setup_completed = true
       - they have at least one active search_query (so the agent has something to search)
     """
     result = await session.execute(
@@ -80,7 +86,7 @@ async def _get_active_user_ids(session: AsyncSession) -> list[str]:
             JOIN user_profiles up ON up.user_id = u.id
             JOIN search_queries sq ON sq.user_id = u.id
             WHERE u.is_active = true
-              AND up.setup_complete = true
+              AND up.setup_completed = true
               AND sq.active = true
             ORDER BY u.id
         """)
@@ -114,6 +120,7 @@ async def run() -> None:
         logger.info("No active users with completed profiles — nothing to do")
         return
 
+    logger.warning(RSS_RETIRED_WARNING)
     logger.info("Starting discovery run for %d user(s): %s", len(user_ids), user_ids)
 
     total_queued = 0
@@ -125,7 +132,10 @@ async def run() -> None:
         agent = JobDiscoveryAgent(api_base=API_BASE_URL, token=token)
 
         try:
-            result = await agent.run(user_id=user_id)
+            async with session_factory() as session:
+                threshold = (await get_or_create_autonomy_profile(user_id, session)).score_threshold
+                await session.commit()
+            result = await agent.run(user_id=user_id, score_threshold=threshold)
             total_queued += result.jobs_queued
             total_errors += len(result.errors)
             logger.info(
@@ -147,6 +157,7 @@ async def run() -> None:
             continue
 
         # Run daily autonomy evaluation and Level 5 autonomous prep
+        prep_result = None
         async with session_factory() as session:
             try:
                 # Daily level evaluation (adjusts score_threshold ±2-3 pts)
@@ -179,6 +190,11 @@ async def run() -> None:
                     user_id, exc, exc_info=True,
                 )
                 await session.rollback()
+                prep_result = None
+
+        # Drafts for the auto-approved items, after the approvals are committed
+        if prep_result is not None:
+            await draft_prepped_items(prep_result)
 
     await engine.dispose()
     logger.info(

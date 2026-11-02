@@ -24,7 +24,8 @@ USER_REASONS = (
     OTHER,
 )
 
-# The automatic pre-filter rules in agent/job_discovery.py JobDiscoveryAgent._pre_filter().
+# The automatic pre-filter rules in app/services/job_prefilter.py pre_filter(), plus
+# below_threshold: scored by POST /job-queue/ingest under the user's autonomy score_threshold.
 PRE_FILTER_RULES = (
     "too_old",
     "blocked_country",
@@ -32,6 +33,7 @@ PRE_FILTER_RULES = (
     "hourly_top_too_low",
     "avoid_keyword",
     "score_cap_reached",
+    "below_threshold",
 )
 PRE_FILTER_PREFIX = "pre_filter:"
 PRE_FILTER_CODES = tuple(PRE_FILTER_PREFIX + r for r in PRE_FILTER_RULES)

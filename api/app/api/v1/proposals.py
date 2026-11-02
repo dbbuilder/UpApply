@@ -33,6 +33,7 @@ from app.schemas.proposal import (
     ProposalOutcomeSyncResponse,
 )
 from app.services.edit_distance import word_edit_distance_pct
+from app.services.job_ingest import UPWORK_JOB_SLUG
 from app.services.outcomes import apply_outcome, parse_submitted_at, resolve_outcome
 from app.services.proposal_status import advance_status
 
@@ -609,7 +610,7 @@ def _derive_outcome(raw_outcome: Optional[str], status_str: Optional[str], was_h
     return None
 
 
-_UPWORK_JOB_SLUG = re.compile(r"~(0[0-9a-zA-Z]+)")
+_UPWORK_JOB_SLUG = UPWORK_JOB_SLUG
 _WORD = re.compile(r"[a-z0-9]+")
 LETTER_IS_JOB_JACCARD = 0.8
 MIN_CONTAINED_CHARS = 50

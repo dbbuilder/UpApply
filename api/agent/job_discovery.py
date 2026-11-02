@@ -1,6 +1,11 @@
 """JobDiscoveryAgent — Anthropic tool-use loop for discovering and queuing jobs.
 
-The agent:
+RETIRED: Upwork discontinued its RSS feeds in 2024, so run() now logs RSS_RETIRED_WARNING and
+returns an empty result without calling the model. Jobs arrive from the extension via
+POST /api/v1/job-queue/ingest (app/api/v1/job_queue.py), which applies the same pre-filter
+(app/services/job_prefilter.py). The loop below is kept for reference.
+
+The agent (historically):
   1. Gets the user's active search queries
   2. Fetches jobs from Upwork RSS for each query
   3. Deduplicates against job_queue + jobs tables
@@ -18,15 +23,20 @@ Usage:
 """
 import json
 import logging
-import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import anthropic
 import httpx
 
-from agent.rss_adapter import RawJob, fetch_jobs_from_rss
+from agent.rss_adapter import RSS_RETIRED_WARNING, RawJob, fetch_jobs_from_rss
+from app.services.job_prefilter import (  # noqa: F401  (re-exported for older imports)
+    FIXED_BUDGET_MIN,
+    FIXED_BUDGET_PLACEHOLDERS,
+    HOURLY_MIN_TOP_RATE,
+    MAX_JOB_AGE_DAYS,
+    pre_filter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,38 +47,10 @@ logger = logging.getLogger(__name__)
 DISCOVERY_MODEL = "claude-sonnet-4-6"
 MAX_QUEUED_PER_RUN = 15
 DEFAULT_SCORE_THRESHOLD = 55.0
-MAX_JOB_AGE_DAYS = 7       # skip jobs older than this
 MAX_JOBS_TO_SCORE = 40     # hard cap on LLM calls per run across all queries
 
-# Budget rules
-FIXED_BUDGET_MIN = 500.0
-# Placeholder values many clients use when they don't know the budget yet
-FIXED_BUDGET_PLACEHOLDERS = {5.0, 100.0}
-HOURLY_MIN_TOP_RATE = 60.0  # top-end of range must be at least this
-
-# Client geography blocks — skip jobs from these countries
-# Only applied when country is detectable from the RSS description
-_BLOCKED_COUNTRIES: frozenset[str] = frozenset({
-    # Indian subcontinent
-    "india", "pakistan",
-    # Middle East
-    "saudi arabia", "uae", "united arab emirates", "qatar", "kuwait",
-    "bahrain", "oman", "jordan", "lebanon", "iraq", "iran", "yemen",
-    "syria", "israel", "palestine", "turkey",
-    # North Africa
-    "egypt", "algeria", "morocco", "tunisia", "libya", "sudan", "south sudan",
-    # Sub-Saharan Africa
-    "nigeria", "kenya", "ghana", "ethiopia", "tanzania", "south africa",
-    "uganda", "cameroon", "senegal", "zimbabwe", "somalia", "mozambique",
-    "madagascar", "ivory coast", "côte d'ivoire", "mali", "burkina faso",
-    "niger", "chad", "angola", "democratic republic of congo", "congo",
-    "rwanda", "burundi", "zambia", "malawi", "botswana", "namibia",
-    "lesotho", "eswatini", "mauritius", "cape verde", "seychelles",
-    "djibouti", "eritrea",
-})
-
-# Extracts ALL dollar figures from a budget string
-_BUDGET_VALUE_RE = re.compile(r'\$\s*([\d,]+(?:\.\d+)?)')
+# The pre-filter rules and floors live in app/services/job_prefilter.py (shared with
+# POST /api/v1/job-queue/ingest).
 
 SYSTEM_PROMPT = """\
 You are the UpApply Job Discovery Agent. Your job is to find relevant freelance
@@ -128,7 +110,7 @@ class JobDiscoveryAgent:
     def __init__(self, api_base: str, token: str) -> None:
         self.api_base = api_base.rstrip('/')
         self.token = token
-        self._client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
+        self._client: Optional[anthropic.Anthropic] = None  # created on first model call
         self._http: Optional[httpx.AsyncClient] = None
         # Loaded once at run() start from the user's profile
         self._min_budget: Optional[float] = None
@@ -162,60 +144,24 @@ class JobDiscoveryAgent:
         Checks (in order):
           1. Age         — posted_date older than MAX_JOB_AGE_DAYS
           2. Geography   — client country in blocked list (only when detectable)
-          3. Fixed price — below FIXED_BUDGET_MIN, unless a known placeholder value
-          4. Hourly rate — top end of range below HOURLY_MIN_TOP_RATE
+          3. Fixed price — below profile minimum_budget (else FIXED_BUDGET_MIN), unless a placeholder
+          4. Hourly rate — top end of range below profile minimum_hourly_rate (else HOURLY_MIN_TOP_RATE)
           5. Avoid kw    — any profile.avoid_keywords in title or description
           6. Score cap   — hard stop at MAX_JOBS_TO_SCORE LLM calls per run
         """
-        # 1. Age gate
-        if job.posted_date:
-            cutoff = datetime.now(timezone.utc) - timedelta(days=MAX_JOB_AGE_DAYS)
-            posted = job.posted_date
-            if posted.tzinfo is None:
-                posted = posted.replace(tzinfo=timezone.utc)
-            if posted < cutoff:
-                return f"too_old ({(datetime.now(timezone.utc) - posted).days}d)"
-
-        # 2. Geography gate (only when country is detectable)
-        if job.client_country:
-            country_lower = job.client_country.lower()
-            # Check exact match and substring match (e.g. "united arab emirates")
-            if country_lower in _BLOCKED_COUNTRIES or any(
-                blocked in country_lower for blocked in _BLOCKED_COUNTRIES
-            ):
-                return f"blocked_country ({job.client_country})"
-
-        # 3 & 4. Budget gate
-        if job.budget_amount:
-            all_values = [
-                float(v.replace(",", ""))
-                for v in _BUDGET_VALUE_RE.findall(job.budget_amount)
-            ]
-            if all_values:
-                min_val = min(all_values)
-                max_val = max(all_values)
-
-                if job.budget_type == "hourly":
-                    # Check the TOP of the range — what the client is willing to pay
-                    if max_val < HOURLY_MIN_TOP_RATE:
-                        return f"hourly_top_too_low (${max_val:.0f}/hr < ${HOURLY_MIN_TOP_RATE:.0f})"
-                else:
-                    # Fixed price: skip if below floor, but allow placeholder values
-                    if min_val not in FIXED_BUDGET_PLACEHOLDERS and min_val < FIXED_BUDGET_MIN:
-                        return f"budget_too_low (${min_val:.0f} < ${FIXED_BUDGET_MIN:.0f})"
-
-        # 5. Avoid keywords (title + first 400 chars of description, case-insensitive)
-        if self._avoid_keywords:
-            text = f"{job.title} {job.description[:400]}".lower()
-            for kw in self._avoid_keywords:
-                if kw.lower() in text:
-                    return f"avoid_keyword ({kw!r})"
-
-        # 6. Per-run LLM cap
-        if self._stats.get("jobs_scored", 0) >= MAX_JOBS_TO_SCORE:
-            return f"score_cap_reached ({MAX_JOBS_TO_SCORE})"
-
-        return None
+        return pre_filter(
+            title=job.title,
+            description=job.description,
+            budget_amount=job.budget_amount,
+            budget_type=job.budget_type,
+            posted_at=job.posted_date,
+            client_country=job.client_country,
+            min_budget=self._min_budget,
+            min_hourly=self._min_hourly,
+            avoid_keywords=self._avoid_keywords,
+            scored=self._stats.get("jobs_scored", 0),
+            score_cap=MAX_JOBS_TO_SCORE,
+        )
 
     # ── Tool implementations ───────────────────────────────────────────────
 
@@ -544,6 +490,12 @@ class JobDiscoveryAgent:
             "errors": [],
         }
 
+        logger.warning(RSS_RETIRED_WARNING)
+        return DiscoveryResult(
+            user_id=user_id, jobs_fetched=0, jobs_pre_filtered=0, jobs_skipped_duplicate=0,
+            jobs_scored=0, jobs_queued=0, errors=[],
+        )
+
         # Load profile thresholds for pre-filtering (non-fatal if unavailable)
         async with httpx.AsyncClient(timeout=10.0) as http:
             try:
@@ -583,6 +535,7 @@ class JobDiscoveryAgent:
 
             # Tool-use loop — max 25 turns to prevent runaway
             for turn in range(25):
+                self._client = self._client or anthropic.Anthropic()  # reads ANTHROPIC_API_KEY
                 response = self._client.messages.create(
                     model=DISCOVERY_MODEL,
                     max_tokens=4096,
