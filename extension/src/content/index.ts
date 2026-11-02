@@ -16,6 +16,7 @@ import { expandJobDescription, extractAllProposals, readJobDescription, scrapePr
 import { extractOutcomeItems } from './outcome-sync';
 import { isSubmitButton, readSubmission } from './submit-capture';
 import { isApplyPage, isProposalsListPage } from './page-match';
+import { findTitleLink, jobIdFromUrl, readTileDescription } from './job-cards';
 import { scrapeAllContracts } from './scrapers/contracts';
 import './scoring';
 
@@ -171,7 +172,7 @@ function extractJobCards(): ScrapedJobCard[] {
   const articles = document.querySelectorAll('article[data-test="JobTile"]');
 
   articles.forEach((article) => {
-    const titleLink = article.querySelector<HTMLAnchorElement>('a[data-test="job-tile-title-link"]');
+    const titleLink = findTitleLink(article);
     if (!titleLink) return;
 
     const title = titleLink.textContent?.trim() || '';
@@ -179,12 +180,10 @@ function extractJobCards(): ScrapedJobCard[] {
     const fullUrl = href.startsWith('http') ? href : `https://www.upwork.com${href}`;
 
     // Extract job ID from URL: ~0(\d+) pattern
-    const idMatch = fullUrl.match(/~0?(\d{15,})/);
-    if (!idMatch) return;
-    const upworkJobId = idMatch[1];
+    const upworkJobId = jobIdFromUrl(fullUrl);
+    if (!upworkJobId) return;
 
-    const description = article.querySelector('[data-test="UpCLineClamp JobDescription"]')
-      ?.textContent?.trim() || '';
+    const description = readTileDescription(article);
 
     const jobTypeEl = article.querySelector('[data-test="job-type-label"]');
     const jobType = jobTypeEl?.textContent?.trim().toLowerCase().includes('fixed')

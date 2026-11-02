@@ -286,5 +286,12 @@ describe('describeEmptyPage', () => {
     expect(line).toContain('0 JobTile, 12 article, 0 title links, 24 /jobs/ links');
     expect(line).toContain('data-test: job-tile, job-title');
     expect(line).toContain('text "There are no results that match your search"');
+    expect(line).not.toContain('first tile');
+  });
+
+  it('adds the first tile when tiles rendered but none was read', () => {
+    const line = describeEmptyPage({ url: 'https://www.upwork.com/nx/search/jobs/', title: 'T', jobTiles: 10, articles: 10,
+      titleLinks: 0, jobLinks: 15, dataTests: [], text: '', tileTests: ['UpLink', 'job-type-label'], tileLink: '/jobs/x_~021/' });
+    expect(line).toContain('first tile data-test: UpLink, job-type-label; link /jobs/x_~021/');
   });
 });
