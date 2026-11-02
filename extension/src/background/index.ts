@@ -1501,6 +1501,15 @@ async function _scrapeUpworkSearchNow(query: string, urlParams: string | null | 
               jobLinks: document.querySelectorAll('a[href*="/jobs/"]').length,
               dataTests: tests.slice(0, 12),
               text: (main as HTMLElement | null)?.innerText || '',
+              ...(() => {
+                const tile = document.querySelector('article[data-test="JobTile"]');
+                if (!tile) return {};
+                return {
+                  tileTests: Array.from(new Set(Array.from(tile.querySelectorAll('[data-test]'))
+                    .map(e => e.getAttribute('data-test') || '').filter(Boolean))),
+                  tileLink: tile.querySelector('a[href]')?.getAttribute('href')?.slice(0, 100) ?? null,
+                };
+              })(),
             };
           },
         });

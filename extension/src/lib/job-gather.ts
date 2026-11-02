@@ -312,6 +312,9 @@ export interface EmptyPageFacts {
   jobLinks: number;
   dataTests: string[];
   text: string;
+  /** data-test names and the first link inside the first job tile, when there is one. */
+  tileTests?: string[];
+  tileLink?: string | null;
 }
 
 /** One line describing a search page that produced no job cards, for the scan's warning. */
@@ -324,6 +327,7 @@ export function describeEmptyPage(f: EmptyPageFacts): string {
     `url ${path.slice(0, 120)}`,
     `${f.jobTiles} JobTile, ${f.articles} article, ${f.titleLinks} title links, ${f.jobLinks} /jobs/ links`,
     f.dataTests.length ? `data-test: ${f.dataTests.slice(0, 8).join(', ')}` : 'no data-test attributes',
+    ...(f.tileTests ? [`first tile data-test: ${f.tileTests.slice(0, 10).join(', ') || 'none'}; link ${f.tileLink || 'none'}`] : []),
     `text "${text}"`,
   ].join('; ');
 }
