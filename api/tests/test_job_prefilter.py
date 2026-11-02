@@ -132,3 +132,9 @@ def test_malformed_untrusted_values_do_not_raise():
     assert parse_posted_text("99999 years ago") is None
     assert parse_posted_text("9" * 200 + " days ago") is None
     assert _pf(budget_amount="$,") is None
+
+
+def test_max_age_days_overrides_the_default():
+    assert _pf(posted_text="10 days ago") == "too_old (10d)"
+    assert _pf(posted_text="10 days ago", max_age_days=14) is None
+    assert _pf(posted_text="3 weeks ago", max_age_days=14) == "too_old (21d)"

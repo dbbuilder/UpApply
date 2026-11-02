@@ -253,6 +253,7 @@ async def ingest_job_queue(
             scored=analysed,
             score_cap=job_ingest.MAX_SCORED_PER_REQUEST,
             now=now,
+            max_age_days=body.max_age_days,
         )
         if skip:
             outcome = "pre_filtered"
