@@ -618,8 +618,11 @@ class ApiClient {
 
   // Job Queue (agent suggestions)
   async getJobQueue(statusFilter?: string): Promise<JobQueueItem[]> {
-    const qs = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
-    return this.request<JobQueueItem[]>(`/api/v1/job-queue${qs}`);
+    // The API's maximum: the default 50 newest of any status hid suggestions behind
+    // below-threshold scan items, so Pending showed 27 of 44.
+    const params = new URLSearchParams({ limit: '200' });
+    if (statusFilter) params.set('status', statusFilter);
+    return this.request<JobQueueItem[]>(`/api/v1/job-queue?${params}`);
   }
 
   async actionJobQueueItem(

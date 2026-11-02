@@ -264,6 +264,8 @@ export interface GatherTotals {
   suggested: number;
   duplicates: number;
   pre_filtered: number;
+  /** Scored under the user's score threshold (optional: runs saved before this field lack it). */
+  below_threshold?: number;
 }
 
 /** In-flight run, persisted after every query so a killed worker resumes where it stopped. */
@@ -289,18 +291,19 @@ export interface GatherLastRun extends GatherTotals {
 }
 
 export function emptyTotals(): GatherTotals {
-  return { queries_run: 0, jobs_sent: 0, suggested: 0, duplicates: 0, pre_filtered: 0 };
+  return { queries_run: 0, jobs_sent: 0, suggested: 0, duplicates: 0, pre_filtered: 0, below_threshold: 0 };
 }
 
 export function addIngestResult(
   totals: GatherTotals,
   sent: number,
-  r: { suggested?: number; duplicates?: number; pre_filtered?: number },
+  r: { suggested?: number; duplicates?: number; pre_filtered?: number; below_threshold?: number },
 ): void {
   totals.jobs_sent += sent;
   totals.suggested += r.suggested ?? 0;
   totals.duplicates += r.duplicates ?? 0;
   totals.pre_filtered += r.pre_filtered ?? 0;
+  totals.below_threshold = (totals.below_threshold ?? 0) + (r.below_threshold ?? 0);
 }
 
 export interface EmptyPageFacts {

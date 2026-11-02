@@ -131,6 +131,7 @@ export function initGatherer(deps: GathererDeps) {
       suggested: progress.suggested,
       duplicates: progress.duplicates,
       pre_filtered: progress.pre_filtered,
+      below_threshold: progress.below_threshold ?? 0,
       error: error ?? progress.warning,
       blocked,
     };

@@ -238,9 +238,9 @@ describe('buildSearchUrl', () => {
 describe('addIngestResult', () => {
   it('sums ingest counts', () => {
     const t = emptyTotals();
-    addIngestResult(t, 50, { suggested: 3, duplicates: 10, pre_filtered: 7 });
+    addIngestResult(t, 50, { suggested: 3, duplicates: 10, pre_filtered: 7, below_threshold: 5 });
     addIngestResult(t, 20, { suggested: 1, duplicates: 0, pre_filtered: 2 });
-    expect(t).toEqual({ queries_run: 0, jobs_sent: 70, suggested: 4, duplicates: 10, pre_filtered: 9 });
+    expect(t).toEqual({ queries_run: 0, jobs_sent: 70, suggested: 4, duplicates: 10, pre_filtered: 9, below_threshold: 5 });
   });
 });
 

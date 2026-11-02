@@ -128,7 +128,8 @@ export default function AutoScanPanel({ onNewSuggestions }: AutoScanPanelProps) 
         <p className="text-[10px] text-gray-500 leading-snug">
           Last scan {timeAgo(lastRun.finished_at)}: {lastRun.queries_run} quer{lastRun.queries_run === 1 ? 'y' : 'ies'},{' '}
           {lastRun.jobs_sent} jobs sent, {lastRun.suggested} new suggestion{lastRun.suggested === 1 ? '' : 's'},{' '}
-          {lastRun.duplicates} already seen, {lastRun.pre_filtered} pre-filtered.
+          {lastRun.duplicates} already seen, {lastRun.pre_filtered} pre-filtered
+          {lastRun.below_threshold != null && `, ${lastRun.below_threshold} below your score threshold`}.
         </p>
       )}
       {lastRun?.error && (
