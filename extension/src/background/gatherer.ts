@@ -214,6 +214,12 @@ export function initGatherer(deps: GathererDeps) {
           const r = await apiClient.ingestJobQueue({ query_id: q.id, query: q.query, jobs: part, max_age_days: lookbackDays });
           addIngestResult(progress, part.length, r);
         } catch (e) {
+          if (e instanceof ApiError && e.status === 422) {
+            // The server refused this batch's data: skip it, say why, keep scanning.
+            progress.warning = `"${q.query}": ${part.length} jobs were rejected by UpApply (${e.message})`;
+            logger.log('UpApply gather: batch rejected, continuing', progress.warning);
+            continue;
+          }
           // Cursor stays before this query, so the next run retries it.
           const signedOut = e instanceof ApiError && e.status === 401;
           await finish(progress, signedOut ? 'Signed out of UpApply. Sign in again to resume scanning.' : `Could not send jobs to UpApply: ${e instanceof Error ? e.message : String(e)}`, null);

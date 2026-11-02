@@ -128,6 +128,17 @@ describe('gatherer run', () => {
     expect(store[GATHER_KEYS.cursor]).toBe('a');
   });
 
+  it('skips a batch the API rejects (422) and keeps scanning', async () => {
+    api.ingestJobQueue
+      .mockRejectedValueOnce(new ApiError(422, 'jobs.0.title: String should have at most 300 characters'));
+    const { g } = setup(() => ({ success: true, data: [card(1)] }));
+    await g.startGatherRun('manual');
+    const r = await lastRun();
+    expect(r.queries_run).toBe(3);
+    expect(r.error).toMatch(/"q-a": 1 jobs were rejected by UpApply \(jobs\.0\.title: String should have at most 300 characters\)/);
+    expect(store[GATHER_KEYS.cursor]).toBe('c');
+  });
+
   it('stops when the API signs the user out', async () => {
     api.ingestJobQueue.mockRejectedValue(new ApiError(401, 'Unauthorized'));
     const { g } = setup(() => ({ success: true, data: [card(1)] }));
