@@ -146,6 +146,14 @@ describe('gatherer run', () => {
     expect(r.error).toMatch(/q-a.*Tab load timeout/);
   });
 
+  it('says why when a search gives no jobs', async () => {
+    const { g } = setup((q) => (q === 'q-a' ? { success: true, data: [], diag: 'title "X"; 0 JobTile' } : { success: true, data: [card(1)] }));
+    await g.startGatherRun('manual');
+    const r = await lastRun();
+    expect(r.queries_run).toBe(3);
+    expect(r.error).toBe('"q-a" gave 0 jobs (0 cards read). Page: title "X"; 0 JobTile');
+  });
+
   it('keeps going when the scraper rejects for one query', async () => {
     const { g } = setup((q) => { if (q === 'q-a') throw new Error('Tab load timeout'); return { success: true, data: [card(1)] }; });
     await g.startGatherRun('manual');

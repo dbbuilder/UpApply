@@ -9,7 +9,7 @@ import { apiClient } from '../lib/api-client';
 import {
   MAX_CONSECUTIVE_THROTTLED, SAVE_BATCH_SIZE, THROTTLE_PAGE_TEXT,
   completeProposalIds, isThrottledRead, randomDetailDelayMs, takeBatch, throttleBackoffMs, RUN_BUDGET_MS, LIST_CACHE_TTL_MS, pickProposalStatus, proposalFromNuxtData } from '../lib/proposal-scrape';
-import { SETTLE_POLL_MS, blockMessage, buildSearchUrl, detectBlockedPage, settleStep, type PageSnapshot } from '../lib/job-gather';
+import { SETTLE_POLL_MS, blockMessage, buildSearchUrl, describeEmptyPage, detectBlockedPage, settleStep, type EmptyPageFacts, type PageSnapshot } from '../lib/job-gather';
 import { initGatherer, type SearchScrapeOptions, type SearchScrapeResult } from './gatherer';
 
 // A generated draft stays linked to its job's apply page for a day (Submit-click capture).
@@ -1484,6 +1484,29 @@ async function _scrapeUpworkSearchNow(query: string, urlParams: string | null | 
         else resolve(resp || { success: false, error: 'No response' });
       });
     });
+    if (response.success && Array.isArray(response.data) && response.data.length === 0) {
+      try {
+        const [res] = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: (): EmptyPageFacts => {
+            const main = document.querySelector('main') || document.body;
+            const tests = Array.from(new Set(Array.from(main?.querySelectorAll('[data-test]') ?? [])
+              .map(e => e.getAttribute('data-test') || '').filter(Boolean)));
+            return {
+              url: location.href,
+              title: document.title,
+              jobTiles: document.querySelectorAll('article[data-test="JobTile"]').length,
+              articles: document.querySelectorAll('article').length,
+              titleLinks: document.querySelectorAll('a[data-test="job-tile-title-link"]').length,
+              jobLinks: document.querySelectorAll('a[href*="/jobs/"]').length,
+              dataTests: tests.slice(0, 12),
+              text: (main as HTMLElement | null)?.innerText || '',
+            };
+          },
+        });
+        if (res?.result) response.diag = describeEmptyPage(res.result);
+      } catch { /* diagnostics are best-effort */ }
+    }
     // Paging can trip the rate-limit toast; keep what was read and tell the caller to stop.
     const after = await snapshot();
     if (after === 'error_toast') return { ...response, blocked: after };

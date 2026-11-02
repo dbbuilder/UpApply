@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_GATHER_SETTINGS, DEFAULT_INTERVAL_MINUTES, LOCK_STALE_MS, MAX_INTERVAL_MINUTES, MIN_INTERVAL_MINUTES,
   addIngestResult, alarmMatches, alarmPlan, backoffMs, buildSearchUrl, cardToIngestJob, cardsToIngestJobs, chunk,
-  SETTLE_EMPTY_MS, SETTLE_MAX_MS, blockMessage, settleStep,
+  SETTLE_EMPTY_MS, SETTLE_MAX_MS, blockMessage, describeEmptyPage, settleStep,
   detectBlockedPage, emptyTotals, isLockFree, normalizeGatherSettings, parseRating, pickQueries,
 } from './job-gather';
 import { THROTTLE_PAGE_TEXT } from './proposal-scrape';
@@ -271,5 +271,20 @@ describe('settleStep', () => {
   it('names the page it saw when it stops', () => {
     expect(blockMessage('captcha', 'Challenge - Upwork')).toContain('(page title: "Challenge - Upwork")');
     expect(blockMessage('captcha')).not.toContain('page title');
+  });
+});
+
+describe('describeEmptyPage', () => {
+  it('summarises what an empty search page showed', () => {
+    const line = describeEmptyPage({
+      url: 'https://www.upwork.com/nx/search/jobs/?q=%22SQL%20Server%22&sort=recency',
+      title: '"SQL Server" Jobs | Upwork', jobTiles: 0, articles: 12, titleLinks: 0, jobLinks: 24,
+      dataTests: ['job-tile', 'job-title'], text: '  There are no results\n that match your search ',
+    });
+    expect(line).toContain('title ""SQL Server" Jobs | Upwork"');
+    expect(line).toContain('url /nx/search/jobs/?q=%22SQL%20Server%22&sort=recency');
+    expect(line).toContain('0 JobTile, 12 article, 0 title links, 24 /jobs/ links');
+    expect(line).toContain('data-test: job-tile, job-title');
+    expect(line).toContain('text "There are no results that match your search"');
   });
 });
