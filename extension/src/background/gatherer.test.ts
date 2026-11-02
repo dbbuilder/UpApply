@@ -105,7 +105,7 @@ describe('gatherer run', () => {
   it('stops on a blocked page, keeps the cursor on that query and backs off the next alarm', async () => {
     store[GATHER_KEYS.settings] = { enabled: true, intervalMinutes: 60, maxQueriesPerRun: 10 };
     const { g, scrapeSearch } = setup((q) => (q === 'q-b'
-      ? { success: false, error: 'blocked', blocked: 'captcha' }
+      ? { success: false, error: 'Upwork showed a security check (page title: "Challenge - Upwork"). Open Upwork, complete it, then run again.', blocked: 'captcha' }
       : { success: true, data: [card(1)] }));
     await g.startGatherRun('alarm');
     const r = await lastRun();

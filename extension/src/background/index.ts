@@ -9,7 +9,7 @@ import { apiClient } from '../lib/api-client';
 import {
   MAX_CONSECUTIVE_THROTTLED, SAVE_BATCH_SIZE, THROTTLE_PAGE_TEXT,
   completeProposalIds, isThrottledRead, randomDetailDelayMs, takeBatch, throttleBackoffMs, RUN_BUDGET_MS, LIST_CACHE_TTL_MS, pickProposalStatus, proposalFromNuxtData } from '../lib/proposal-scrape';
-import { blockMessage, buildSearchUrl, detectBlockedPage } from '../lib/job-gather';
+import { SETTLE_POLL_MS, blockMessage, buildSearchUrl, detectBlockedPage, settleStep, type PageSnapshot } from '../lib/job-gather';
 import { initGatherer, type SearchScrapeOptions, type SearchScrapeResult } from './gatherer';
 
 // A generated draft stays linked to its job's apply page for a day (Submit-click capture).
@@ -1439,7 +1439,7 @@ async function _scrapeUpworkSearchNow(query: string, urlParams: string | null | 
   if (!tab.id) return { success: false, error: 'Failed to create tab' };
   const tabId = tab.id;
   await opts.onTabOpened?.(tabId);
-  const snapshot = async () => {
+  const readPage = async (): Promise<PageSnapshot> => {
     try {
       const [res] = await chrome.scripting.executeScript({
         target: { tabId },
@@ -1450,17 +1450,27 @@ async function _scrapeUpworkSearchNow(query: string, urlParams: string | null | 
           hasJobTiles: !!document.querySelector('article[data-test="JobTile"]'),
         }),
       });
-      return detectBlockedPage(res?.result ?? { url: '' });
+      return res?.result ?? { url: '' };
     } catch {
       // Not scriptable (e.g. a non-Upwork challenge host): read the URL from the tab instead.
-      try { return detectBlockedPage({ url: (await chrome.tabs.get(tabId)).url || '' }); } catch { return null; }
+      try { return { url: (await chrome.tabs.get(tabId)).url || '' }; } catch { return { url: '' }; }
     }
   };
+  const snapshot = async () => detectBlockedPage(await readPage());
   try {
     await waitForTabLoad(tabId);
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    const blocked = await snapshot();
-    if (blocked) return { success: false, error: blockMessage(blocked), blocked };
+    // Wait for job tiles; give a challenge time to clear itself before calling it a block.
+    const loadedAt = Date.now();
+    for (;;) {
+      await new Promise(resolve => setTimeout(resolve, SETTLE_POLL_MS));
+      const page = await readPage();
+      const step = settleStep(page, Date.now() - loadedAt);
+      if (step.action === 'proceed') break;
+      if (step.action === 'stop') {
+        logger.log('UpApply Background: search tab blocked', step.reason, page.url, page.title);
+        return { success: false, error: blockMessage(step.reason, page.title), blocked: step.reason };
+      }
+    }
     const manifest = chrome.runtime.getManifest();
     const contentScriptPath = manifest.content_scripts?.[0]?.js?.[0];
     if (contentScriptPath) {

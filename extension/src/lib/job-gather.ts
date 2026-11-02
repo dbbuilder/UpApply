@@ -198,12 +198,34 @@ export function detectBlockedPage(page: PageSnapshot): BlockReason | null {
   return null;
 }
 
-export function blockMessage(reason: BlockReason): string {
+export function blockMessage(reason: BlockReason, pageTitle?: string | null): string {
+  const seen = pageTitle ? ` (page title: "${pageTitle.slice(0, 80)}")` : '';
   switch (reason) {
     case 'error_toast': return 'Upwork showed "There was an error loading this page" (rate limit). Stopped; the next scheduled scan backs off.';
-    case 'login': return 'Upwork asked you to sign in. Sign in to Upwork in this browser, then run again.';
-    case 'captcha': return 'Upwork showed a security check. Open Upwork, complete it, then run again.';
+    case 'login': return `Upwork asked you to sign in${seen}. Sign in to Upwork in this browser, then run again.`;
+    case 'captcha': return `Upwork showed a security check${seen}. Open Upwork, complete it, then run again.`;
   }
+}
+
+/** How long a search tab may stay on a challenge (Cloudflare often clears itself) before the scan stops. */
+export const SETTLE_MAX_MS = 20000;
+/** A page with no tiles and no block after this long is an empty result page. */
+export const SETTLE_EMPTY_MS = 6000;
+export const SETTLE_POLL_MS = 1500;
+
+export type SettleStep = { action: 'proceed' } | { action: 'wait' } | { action: 'stop'; reason: BlockReason };
+
+/**
+ * What to do with a search tab `elapsedMs` after it loaded. Job tiles proceed at once; a login page
+ * or the error toast stop at once; a challenge (or a page still drawing) is waited out, and only a
+ * challenge still showing at SETTLE_MAX_MS stops the scan.
+ */
+export function settleStep(page: PageSnapshot, elapsedMs: number): SettleStep {
+  const blocked = detectBlockedPage(page);
+  if (blocked === 'error_toast' || blocked === 'login') return { action: 'stop', reason: blocked };
+  if (page.hasJobTiles) return { action: 'proceed' };
+  if (blocked === 'captcha') return elapsedMs >= SETTLE_MAX_MS ? { action: 'stop', reason: 'captcha' } : { action: 'wait' };
+  return elapsedMs >= SETTLE_EMPTY_MS ? { action: 'proceed' } : { action: 'wait' };
 }
 
 /** How long to skip scheduled runs after `streak` blocked runs in a row (0 → no backoff). */
