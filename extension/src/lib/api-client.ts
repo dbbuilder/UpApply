@@ -63,7 +63,7 @@ class ApiClient {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new ApiError(response.status, error.detail || 'Request failed');
+      throw new ApiError(response.status, errorDetailText(error.detail) || 'Request failed');
     }
 
     if (response.status === 204) {
@@ -762,6 +762,27 @@ class ApiClient {
   async decideLearnedRule(id: string, status: 'accepted' | 'rejected'): Promise<LearnedRuleDecision> {
     return this.request<LearnedRuleDecision>(`/api/v1/learned-rules/${id}`, { method: 'PUT', body: { status } });
   }
+}
+
+/**
+ * FastAPI's `detail` as readable text: a string as is, a validation list as
+ * "jobs.3.title: String should have at most 300 characters" (never "[object Object]").
+ */
+export function errorDetailText(detail: unknown): string {
+  if (detail == null) return '';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.slice(0, 3).map((d) => {
+      if (d && typeof d === 'object') {
+        const o = d as { loc?: unknown[]; msg?: unknown };
+        const loc = Array.isArray(o.loc) ? o.loc.filter((p) => p !== 'body').join('.') : '';
+        const msg = typeof o.msg === 'string' ? o.msg : JSON.stringify(d);
+        return loc ? `${loc}: ${msg}` : msg;
+      }
+      return String(d);
+    }).join('; ') + (detail.length > 3 ? ` (+${detail.length - 3} more)` : '');
+  }
+  try { return JSON.stringify(detail).slice(0, 300); } catch { return String(detail); }
 }
 
 export class ApiError extends Error {

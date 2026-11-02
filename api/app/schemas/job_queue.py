@@ -42,6 +42,12 @@ class JobQueueCreate(BaseModel):
     filter_reason: Optional[str] = None
 
 
+def _clip(v, limit: int):
+    """Scraped text longer than its column is cut to fit, not rejected: one odd job card must not
+    fail the whole ingest batch (a 422 drops all 25 jobs and stops the scan)."""
+    return v[:limit] if isinstance(v, str) and len(v) > limit else v
+
+
 class IngestClientInfo(BaseModel):
     """client_info on an ingested job: the known keys only (others are dropped). Numbers are kept
     as text, as the extension's scraper and the job analysis (hire_rate "0%") read them."""
@@ -60,7 +66,13 @@ class IngestClientInfo(BaseModel):
                      mode="before")
     @classmethod
     def _number_as_text(cls, v):
-        return str(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v
+        v = str(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v
+        return _clip(v, MAX_INGEST_SHORT)
+
+    @field_validator("payment_verified", mode="before")
+    @classmethod
+    def _clip_payment(cls, v):
+        return _clip(v, MAX_INGEST_SHORT)
 
 
 class IngestJob(BaseModel):
@@ -79,10 +91,41 @@ class IngestJob(BaseModel):
     client_info: Optional[IngestClientInfo] = None
     proposals_text: Optional[str] = Field(None, max_length=MAX_INGEST_SHORT)
 
+    @field_validator("title", mode="before")
+    @classmethod
+    def _clip_title(cls, v):
+        return _clip(v.strip() if isinstance(v, str) else v, MAX_GEN_TITLE)
+
+    @field_validator("budget_amount", "posted_text", "proposals_text", mode="before")
+    @classmethod
+    def _clip_short(cls, v):
+        return _clip(v, MAX_INGEST_SHORT)
+
+    @field_validator("posted_at", mode="before")
+    @classmethod
+    def _clip_posted_at(cls, v):
+        return _clip(v, 64)
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _clip_skills(cls, v):
+        if isinstance(v, list):
+            return [_clip(s, MAX_GEN_SKILL_LENGTH) for s in v[:MAX_GEN_SKILLS]]
+        return v
+
+    @field_validator("budget_type", mode="before")
+    @classmethod
+    def _unknown_budget_type(cls, v):
+        # Anything but fixed / hourly (a new Upwork label) is "unknown", not a rejected batch
+        if isinstance(v, str):
+            v = v.strip().lower()
+            return v if v in ("fixed", "hourly") else None
+        return v
+
     @field_validator("description", mode="before")
     @classmethod
     def _none_description(cls, v):
-        return "" if v is None else v
+        return "" if v is None else _clip(v, MAX_GEN_DESCRIPTION)
 
     @field_validator("upwork_url")
     @classmethod

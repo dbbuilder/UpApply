@@ -83,10 +83,6 @@ async def test_requires_auth(client: AsyncClient):
 async def test_validation(client: AsyncClient, auth_headers_with_profile):
     h = auth_headers_with_profile
     assert (await _post(client, h, {"jobs": [_job(i) for i in range(26)]})).status_code == 422
-    assert (await _post(client, h, {"jobs": [_job(1, title="x" * 301)]})).status_code == 422
-    assert (await _post(client, h, {"jobs": [_job(1, description="x" * 20001)]})).status_code == 422
-    assert (await _post(client, h, {"jobs": [_job(1, skills=["s"] * 51)]})).status_code == 422
-    assert (await _post(client, h, {"jobs": [_job(1, budget_type="weekly")]})).status_code == 422
     assert (await _post(client, h, {"jobs": [_job(1, upwork_url="https://evil.example/jobs/~01ab")]})).status_code == 422
     assert (await _post(client, h, {"jobs": [_job(1, upwork_url="javascript:alert(1)//upwork.com")]})).status_code == 422
     assert (await _post(client, h, {"jobs": [{"title": "no url"}]})).status_code == 422
@@ -394,3 +390,24 @@ async def test_max_age_days_sets_the_lookback(client: AsyncClient, auth_headers_
     assert data["scored"] == 1 and data["pre_filtered"] == 0
     # Out of range is rejected
     assert (await _post(client, h, {"max_age_days": 31, "jobs": [_job(3)]})).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_over_long_scraped_text_is_clipped_not_rejected(client: AsyncClient, auth_headers_with_profile):
+    # One odd card must not 422 the batch (that dropped 25 jobs and stopped the first paged scan)
+    h = auth_headers_with_profile
+    jobs = [
+        _job(1, title="x" * 301),
+        _job(2, description="x" * 20001),
+        _job(3, skills=["s" * 201] * 51),
+        _job(4, budget_type="weekly"),
+        _job(5, budget_amount="$" + "9" * 300, posted_text="p" * 300, proposals_text="q" * 300,
+             client_info={"total_spent": "t" * 300, "payment_verified": "v" * 300}),
+        _job(6),
+    ]
+    r = await _post(client, h, {"jobs": jobs})
+    assert r.status_code == 200, r.text
+    assert r.json()["received"] == 6
+    by_url = {i.upwork_url: i for i in await _items(await _user_id(client, h))}
+    assert len(by_url[_job(1)["upwork_url"]].title) == 300
+    assert by_url[_job(4)["upwork_url"]].budget_type is None
