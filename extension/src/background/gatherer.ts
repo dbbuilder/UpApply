@@ -30,6 +30,8 @@ export interface SearchScrapeResult {
   data?: unknown;
   error?: string;
   blocked?: BlockReason | null;
+  /** What the tab showed when a search produced no cards (see describeEmptyPage). */
+  diag?: string;
 }
 
 export interface GathererDeps {
@@ -209,6 +211,11 @@ export function initGatherer(deps: GathererDeps) {
         }
       }
 
+      if (result.success && jobs.length === 0 && !progress.warning) {
+        // Shown once per run, so a scan that finds nothing says why.
+        progress.warning = `"${q.query}" gave 0 jobs (${cards.length} cards read)${result.diag ? `. Page: ${result.diag}` : ''}`;
+        logger.log('UpApply gather: empty search', progress.warning);
+      }
       if (!result.success && !result.blocked) {
         progress.warning = `"${q.query}": ${result.error || 'scrape failed'}`;
         logger.log('UpApply gather: query failed, continuing', progress.warning);

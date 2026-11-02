@@ -302,3 +302,28 @@ export function addIngestResult(
   totals.duplicates += r.duplicates ?? 0;
   totals.pre_filtered += r.pre_filtered ?? 0;
 }
+
+export interface EmptyPageFacts {
+  url: string;
+  title: string;
+  jobTiles: number;
+  articles: number;
+  titleLinks: number;
+  jobLinks: number;
+  dataTests: string[];
+  text: string;
+}
+
+/** One line describing a search page that produced no job cards, for the scan's warning. */
+export function describeEmptyPage(f: EmptyPageFacts): string {
+  let path = f.url;
+  try { const u = new URL(f.url); path = u.pathname + u.search; } catch { /* keep the raw url */ }
+  const text = f.text.replace(/\s+/g, ' ').trim().slice(0, 160);
+  return [
+    `title "${f.title.slice(0, 80)}"`,
+    `url ${path.slice(0, 120)}`,
+    `${f.jobTiles} JobTile, ${f.articles} article, ${f.titleLinks} title links, ${f.jobLinks} /jobs/ links`,
+    f.dataTests.length ? `data-test: ${f.dataTests.slice(0, 8).join(', ')}` : 'no data-test attributes',
+    `text "${text}"`,
+  ].join('; ');
+}
