@@ -4,7 +4,7 @@ autopilot: off
 autopilot-max: 10
 built: 2026-11-02T18:40
 branch: main
-head: fb011f7
+head: 1fe8cc9
 status: active
 
 <!--
@@ -36,8 +36,7 @@ v2 is live for Chris with job-queue drafts, canonical outcome stages, a results 
 - [2026-10-29] Re-run the Proposals import in the extension so the 144 'unknown' proposal stages (numeric Upwork codes) resolve; only code '7' is confirmed (Chris)
 - [2026-10-29] Client feedback: 5 quotes from profile page 1 of 21 await approval in Me → Facts; paste the other pages (or expand the two shortened quotes) to import more (Chris)
 - [2026-10-29] No v2 letters have been generated in real use yet, so the results report has nothing to compare; it fills in as Chris applies with the engine (Chris)
-- [2026-11-02] Reload the extension (1.0.21 is built in `extension/dist`, Chrome asks for the new "alarms" permission), prune the 23 saved searches, then Agent tab → Automatic job scan → Run now once. No ingest call has reached production yet; the first run is the real test of the search-page scraper (Chris)
-- [2026-11-02] Merge #52 (docs) then #51 (scan stops on Upwork's own Cloudflare "Challenge - Upwork" page; without it a challenged scan keeps opening tabs). Rebuild the extension after #51 (Chris approves merges)
+- [2026-11-02] Reload the extension (1.0.22 is built in `extension/dist`; Chrome asks for the new "alarms" permission), then Agent tab → Automatic job scan → Run now once. No ingest call has reached production yet; the first run is the real test of the search-page scraper (Chris)
 - [2026-10-30] Trust card coverage: proposals count, posted date and jobs posted are not extracted from Upwork job pages yet, and there is no client identifier for "applied to this client before"; needs one saved job page to confirm selectors (Chris to provide)
 - [2026-10-29] Q11 A: the writer's direct Anthropic route needs a real `sk-ant-` key in Doppler `prd` as `WRITER_ANTHROPIC_API_KEY`; optional now that the proxy allows 300s (Chris)
 - [2026-10-29] Q13: wire the voice kit into the gtm-bible sales agent next, then marketing (attended session)
@@ -57,3 +56,4 @@ v2 is live for Chris with job-queue drafts, canonical outcome stages, a results 
 - [2026-10-30] Deployed 8a19f0e; migration 028 live with uq_learned_rules_user_rule; 938 API + 73 extension tests pass
 - [2026-11-02] #50 ingest endpoint + #49 automatic scan merged and deployed (6632238, 0989651); review fixes: 25 jobs per call (capped jobs were never re-scored), 120/hour, a rejected scrape fails one query, malformed input no longer fails a batch, Level 5 drafts claimed
 - [2026-11-02] step 1 done in #52 (runbook section); #51 found from a captured Upwork challenge page that the block detector returned null
+- [2026-11-02] #52 and #51 merged; extension 1.0.22 built. Chris's 23 imported saved searches (Upwork topic_ids whose labels the scan would have searched literally) deactivated and replaced by a 10-search suite (CTO, advisory, SaaS/MVP, product lead, AI, Claude/LLM, AI-built rescue, SQL Server, Azure/data); old ids kept in the session scratchpad, reversible by setting active=true
