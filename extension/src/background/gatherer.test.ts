@@ -78,14 +78,14 @@ beforeEach(() => {
 });
 
 describe('gatherer run', () => {
-  it('runs each query, sends cards in chunks of 50 with the query id, and records the summary', async () => {
+  it('runs each query, sends cards in chunks of 25 with the query id, and records the summary', async () => {
     const { g, keepAlive } = setup((q) => ({ success: true, data: q === 'q-a' ? Array.from({ length: 120 }, (_, i) => card(i)) : [card(900)] }));
     expect(await g.startGatherRun('manual')).toEqual({ started: true });
     const r = await lastRun();
 
     const sizes = api.ingestJobQueue.mock.calls.map(([b]) => [b.query_id, b.query, b.jobs.length]);
-    expect(sizes).toEqual([['a', 'q-a', 50], ['a', 'q-a', 50], ['a', 'q-a', 20], ['b', 'q-b', 1], ['c', 'q-c', 1]]);
-    expect(r).toMatchObject({ trigger: 'manual', queries_run: 3, jobs_sent: 122, suggested: 5, duplicates: 5, pre_filtered: 10, error: null, blocked: null });
+    expect(sizes).toEqual([['a', 'q-a', 25], ['a', 'q-a', 25], ['a', 'q-a', 25], ['a', 'q-a', 25], ['a', 'q-a', 20], ['b', 'q-b', 1], ['c', 'q-c', 1]]);
+    expect(r).toMatchObject({ trigger: 'manual', queries_run: 3, jobs_sent: 122, suggested: 7, duplicates: 7, pre_filtered: 14, error: null, blocked: null });
     expect(store[GATHER_KEYS.cursor]).toBe('c');
     expect(store[GATHER_KEYS.run]).toBeUndefined();
     expect(store[GATHER_KEYS.lock]).toBeUndefined();

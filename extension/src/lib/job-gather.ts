@@ -9,8 +9,9 @@ export const MIN_INTERVAL_MINUTES = 60;
 export const MAX_INTERVAL_MINUTES = 720;
 export const INTERVAL_OPTIONS = [60, 120, 180, 240, 360, 480, 720];
 export const DEFAULT_MAX_QUERIES_PER_RUN = 10;
-/** The ingest endpoint takes at most this many jobs per call. */
-export const INGEST_CHUNK_SIZE = 50;
+/** The ingest endpoint scores at most 25 jobs per call (MAX_SCORED_PER_REQUEST) and stores the rest
+ * as score_cap_reached, which later runs treat as duplicates, so never send more than that. */
+export const INGEST_CHUNK_SIZE = 25;
 /** Search results are sorted by recency, so a run reads only the first few pages of each query. */
 export const GATHER_MAX_PAGES = 3;
 /** A lock whose heartbeat is older than this belongs to a run that died. */
