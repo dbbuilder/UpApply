@@ -2,6 +2,7 @@
 
 Routes:
   POST   /api/v1/job-queue                    — add a job (agent or manual)
+  POST   /api/v1/job-queue/ingest             — jobs the extension gathered: dedupe, pre-filter, score, queue
   GET    /api/v1/job-queue/stats              — learning summary (last 30 decisions)
   GET    /api/v1/job-queue                    — list queued jobs for current user
   PUT    /api/v1/job-queue/{id}/action        — approve or reject a queued job
@@ -15,16 +16,19 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.rate_limit import limiter
 from app.core.security import get_current_user
 from app.models.cover_letter import CoverLetter
 from app.models.job import Job
 from app.models.job_queue import JobQueueItem
 from app.models.outcome_event import OutcomeEvent
+from app.models.search_query import SearchQuery
 from app.models.user import User, UserProfile
 from app.schemas.job import ClientTrust
 from app.services.client_trust import recent_title_index, trust_cards_for
@@ -35,14 +39,25 @@ from app.schemas.job_queue import (
     DraftSubmitResponse,
     JobQueueActionRequest,
     JobQueueCreate,
+    JobQueueIngestRequest,
+    JobQueueIngestResponse,
     JobQueueItemResponse,
     ProposalResponseRequest,
 )
-from app.services.skip_reasons import encode, normalise_pre_filter, normalise_user_reason, parse_stored
+from app.services import job_ingest
+from app.services.job_prefilter import pre_filter
+from app.services.skip_reasons import (
+    PRE_FILTER_PREFIX,
+    encode,
+    normalise_pre_filter,
+    normalise_user_reason,
+    parse_stored,
+)
 from agent.autonomy_governor import (
     get_or_create_autonomy_profile,
     record_proposal_drafted,
     record_proposal_responded,
+    record_proposal_submitted,
     record_suggestion_approved,
     record_suggestion_rejected,
     update_avg_edit_distance,
@@ -148,6 +163,175 @@ async def create_job_queue_item(
     return _to_response(item)
 
 
+# ── POST /api/v1/job-queue/ingest ──────────────────────────────────────────
+
+BELOW_THRESHOLD = PRE_FILTER_PREFIX + "below_threshold"
+
+
+@router.post("/ingest", response_model=JobQueueIngestResponse)
+@limiter.limit("30/hour")
+async def ingest_job_queue(
+    request: Request,
+    body: JobQueueIngestRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Take the jobs the extension gathered from one Upwork search page.
+
+    Each job is, in order: a duplicate (same Upwork job id, else same URL, as one of this user's
+    queue items or jobs rows or an earlier job in this batch: counted, not stored); pre-filtered
+    (app/services/job_prefilter.py with the profile's budget floors; at most
+    MAX_SCORED_PER_REQUEST jobs are scored, the rest are pre_filter:score_cap_reached); or scored
+    with run_full_analysis and stored as "suggested" when the score reaches the user's autonomy
+    score_threshold, else "pre_filtered" with pre_filter:below_threshold. A query_id the user
+    owns gets its run stats updated (another user's id is ignored).
+    """
+    from app.api.v1.search_queries import HIGH_SCORE_THRESHOLD, apply_run_stats
+    from app.services.job_analysis import run_full_analysis
+
+    profile = await _get_user_profile(current_user.id, db)
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Complete your profile first.")
+    ap = await get_or_create_autonomy_profile(current_user.id, db)
+    threshold = ap.score_threshold if ap.score_threshold is not None else job_ingest.DEFAULT_SCORE_THRESHOLD
+
+    sq = None
+    if body.query_id:
+        sq = (await db.execute(
+            select(SearchQuery).where(SearchQuery.id == body.query_id, SearchQuery.user_id == current_user.id)
+        )).scalar_one_or_none()
+
+    known_slugs, known_urls = await job_ingest.known_job_keys(
+        db, current_user.id, [j.upwork_url for j in body.jobs]
+    )
+    now = datetime.now(timezone.utc)
+    counts = {"duplicates": 0, "pre_filtered": 0, "scored": 0, "suggested": 0, "below_threshold": 0}
+    queued_ids: List[str] = []
+    scores: List[float] = []
+    analysed = 0  # scoring calls made (the cap), stored or not
+
+    for job in body.jobs:
+        slug = job_ingest.upwork_job_slug(job.upwork_url)
+        if job.upwork_url in known_urls or (slug and slug in known_slugs):
+            counts["duplicates"] += 1
+            continue
+        known_urls.add(job.upwork_url)
+        if slug:
+            known_slugs.add(slug)
+
+        client_info = job.client_info.model_dump(exclude_none=True) if job.client_info else {}
+        if job.proposals_text and "proposals" not in client_info:
+            client_info["proposals"] = job.proposals_text
+        item = JobQueueItem(
+            id=str(uuid4()),
+            user_id=current_user.id,
+            upwork_url=job.upwork_url,
+            title=job.title,
+            description=job.description,
+            skills=job.skills,
+            budget_amount=job.budget_amount,
+            budget_type=job.budget_type,
+            client_info=client_info or None,
+            chips=job_ingest.derive_chips(job.title, job.skills),
+            source=job_ingest.SOURCE,
+            source_query_id=sq.id if sq else None,
+            draft_status="none",
+            expires_at=now + timedelta(days=job_ingest.QUEUE_TTL_DAYS),
+        )
+
+        skip = pre_filter(
+            title=job.title,
+            description=job.description,
+            budget_amount=job.budget_amount,
+            budget_type=job.budget_type,
+            posted_at=job_ingest.parse_posted_at(job.posted_at),
+            posted_text=job.posted_text,
+            client_country=client_info.get("location"),
+            min_budget=profile.minimum_budget,
+            min_hourly=profile.minimum_hourly_rate,
+            avoid_keywords=profile.avoid_keywords,
+            scored=analysed,
+            score_cap=job_ingest.MAX_SCORED_PER_REQUEST,
+            now=now,
+        )
+        if skip:
+            outcome = "pre_filtered"
+            item.status = "pre_filtered"
+            item.rejection_reason = encode(*normalise_pre_filter(skip))
+        else:
+            analysed += 1
+            ar = await run_full_analysis(
+                db=db,
+                user_id=current_user.id,
+                profile=profile,
+                job_description=job.description,
+                job_skills=job.skills,
+                job_title=job.title,
+                budget_amount=job.budget_amount,
+                client_info=client_info or None,
+            )
+            item.ai_score = ar.match_score
+            item.ai_reasoning = job_ingest.analysis_reasoning(ar)
+            if ar.match_score >= threshold:
+                outcome = "suggested"
+                item.status = "suggested"
+            else:
+                outcome = "below_threshold"
+                item.status = "pre_filtered"
+                item.rejection_reason = encode(BELOW_THRESHOLD, f"{ar.match_score:g}")
+
+        try:
+            async with db.begin_nested():  # a concurrent ingest may have stored this URL
+                db.add(item)
+                await db.flush()
+        except IntegrityError:
+            counts["duplicates"] += 1
+            continue
+
+        if outcome == "pre_filtered":
+            counts["pre_filtered"] += 1
+            continue
+        counts["scored"] += 1
+        scores.append(item.ai_score)
+        if outcome == "suggested":
+            counts["suggested"] += 1
+            queued_ids.append(item.id)
+            await _record_outcome(db, current_user.id, item.id, "suggested", {"source": job_ingest.SOURCE})
+            ap.suggestions_shown += 1
+        else:
+            counts["below_threshold"] += 1
+
+    if sq is not None:
+        apply_run_stats(
+            sq,
+            jobs_found=len(scores),
+            avg_score=sum(scores) / len(scores) if scores else 0.0,
+            high_score_count=sum(1 for s in scores if s >= HIGH_SCORE_THRESHOLD),
+        )
+    await db.flush()
+
+    logger.info(
+        "Ingest for user %s (query=%s): received=%d %s threshold=%.1f",
+        current_user.id, sq.id if sq else None, len(body.jobs), counts, threshold,
+    )
+    return JobQueueIngestResponse(received=len(body.jobs), queued_ids=queued_ids, **counts)
+
+
+async def _expire_stale_suggestions(db: AsyncSession, user_id: str) -> None:
+    """Suggestions past expires_at become "expired" (run on read, so no scheduler is needed)."""
+    await db.execute(
+        update(JobQueueItem)
+        .where(
+            JobQueueItem.user_id == user_id,
+            JobQueueItem.status == "suggested",
+            JobQueueItem.expires_at.isnot(None),
+            JobQueueItem.expires_at < func.now(),
+        )
+        .values(status="expired")
+        .execution_options(synchronize_session=False)
+    )
+
+
 # ── GET /api/v1/job-queue/stats ────────────────────────────────────────────
 # Declared BEFORE /{item_id}/... routes to avoid path collision.
 
@@ -157,6 +341,7 @@ async def get_queue_stats(
     db: AsyncSession = Depends(get_db),
 ):
     """Return a learning summary: autonomy level, approval rate, top rejection reasons."""
+    await _expire_stale_suggestions(db, current_user.id)
     ap = await get_or_create_autonomy_profile(current_user.id, db)
 
     recent_result = await db.execute(
@@ -221,7 +406,8 @@ async def list_job_queue(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return the user's job queue, newest first."""
+    """Return the user's job queue, newest first (stale suggestions are expired first)."""
+    await _expire_stale_suggestions(db, current_user.id)
     stmt = (
         select(JobQueueItem)
         .where(JobQueueItem.user_id == current_user.id)
@@ -572,6 +758,8 @@ async def submit_edit(
         "word_count_final": len(body.final_text.split()),
     }
     await _record_outcome(db, current_user.id, item_id, "proposal_submitted", meta)
+    if item.draft_status != "sent":  # count each proposal once, even if submit-edit repeats
+        await record_proposal_submitted(current_user.id, db)
 
     # Update rolling avg and re-evaluate level
     level_change = await update_avg_edit_distance(current_user.id, dist, db)

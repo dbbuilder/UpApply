@@ -1,13 +1,24 @@
 """Pydantic schemas for the job_queue endpoint."""
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Annotated, List, Literal, Optional, Union
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 from app.services.skip_reasons import parse_stored
 
-from app.schemas.job import ClientTrust
+from app.schemas.job import (
+    MAX_GEN_DESCRIPTION,
+    MAX_GEN_SKILL_LENGTH,
+    MAX_GEN_SKILLS,
+    MAX_GEN_TITLE,
+    ClientTrust,
+)
+
+MAX_INGEST_JOBS = 50
+MAX_INGEST_URL = 500  # jobs.upwork_url is VARCHAR(500)
+MAX_INGEST_SHORT = 200  # budget, posted/proposals text, client_info values
 
 
 # ── Request schemas ──────────────────────────────────────────────────────────
@@ -29,6 +40,80 @@ class JobQueueCreate(BaseModel):
     source_query_id: Optional[str] = None
     # If set, item is created with status=pre_filtered; rejection_reason stores this value
     filter_reason: Optional[str] = None
+
+
+class IngestClientInfo(BaseModel):
+    """client_info on an ingested job: the known keys only (others are dropped). Numbers are kept
+    as text, as the extension's scraper and the job analysis (hire_rate "0%") read them."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    payment_verified: Optional[Union[bool, Annotated[str, Field(max_length=MAX_INGEST_SHORT)]]] = None
+    rating: Optional[Annotated[str, Field(max_length=MAX_INGEST_SHORT)]] = None
+    total_spent: Optional[Annotated[str, Field(max_length=MAX_INGEST_SHORT)]] = None
+    hire_rate: Optional[Annotated[str, Field(max_length=MAX_INGEST_SHORT)]] = None
+    jobs_posted: Optional[Annotated[str, Field(max_length=MAX_INGEST_SHORT)]] = None
+    location: Optional[Annotated[str, Field(max_length=MAX_INGEST_SHORT)]] = None
+    proposals: Optional[Annotated[str, Field(max_length=MAX_INGEST_SHORT)]] = None
+
+    @field_validator("rating", "total_spent", "hire_rate", "jobs_posted", "location", "proposals",
+                     mode="before")
+    @classmethod
+    def _number_as_text(cls, v):
+        return str(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v
+
+
+class IngestJob(BaseModel):
+    """One job the extension gathered from an Upwork search page."""
+
+    upwork_url: str = Field(..., min_length=1, max_length=MAX_INGEST_URL)
+    title: str = Field(..., min_length=1, max_length=MAX_GEN_TITLE)
+    description: str = Field("", max_length=MAX_GEN_DESCRIPTION)
+    skills: List[Annotated[str, Field(max_length=MAX_GEN_SKILL_LENGTH)]] = Field(
+        default_factory=list, max_length=MAX_GEN_SKILLS
+    )
+    budget_amount: Optional[str] = Field(None, max_length=MAX_INGEST_SHORT)
+    budget_type: Optional[Literal["fixed", "hourly"]] = None
+    posted_at: Optional[str] = Field(None, max_length=64)  # ISO-8601; unreadable values are ignored
+    posted_text: Optional[str] = Field(None, max_length=MAX_INGEST_SHORT)  # e.g. "2 hours ago"
+    client_info: Optional[IngestClientInfo] = None
+    proposals_text: Optional[str] = Field(None, max_length=MAX_INGEST_SHORT)
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _none_description(cls, v):
+        return "" if v is None else v
+
+    @field_validator("upwork_url")
+    @classmethod
+    def _upwork_url(cls, v: str) -> str:
+        v = v.strip()
+        parsed = urlparse(v)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme not in ("http", "https") or not (host == "upwork.com" or host.endswith(".upwork.com")):
+            raise ValueError("upwork_url must be an http(s) upwork.com URL")
+        return v
+
+
+class JobQueueIngestRequest(BaseModel):
+    """Body for POST /api/v1/job-queue/ingest (extension → jobs from one search page)."""
+
+    query_id: Optional[str] = Field(None, max_length=36)
+    query: Optional[str] = Field(None, max_length=MAX_INGEST_SHORT)
+    jobs: List[IngestJob] = Field(..., max_length=MAX_INGEST_JOBS)
+
+
+class JobQueueIngestResponse(BaseModel):
+    """received = duplicates + pre_filtered + scored; scored = suggested + below_threshold.
+    queued_ids are the new "suggested" items (the ones the user reviews)."""
+
+    received: int
+    duplicates: int
+    pre_filtered: int
+    scored: int
+    suggested: int
+    below_threshold: int
+    queued_ids: List[str]
 
 
 class JobQueueActionRequest(BaseModel):

@@ -154,6 +154,9 @@ The job analysis service (`api/app/services/job_analysis.py`) scores jobs agains
 - Match score calculation (0-100)
 - Client trust card (`api/app/services/client_trust.py`), separate from and never feeding the match score: deterministic rules over `client_info` (payment, spend, hire rate, rating, proposals, job age) plus title-only repost detection (30 days, jobs + job_queue) → `client_trust` {tier High Confidence | Proceed with Caution | Suspicious, signals, notes} on `POST /jobs/analyze`, `POST /jobs` and `GET /job-queue` (computed at read time); missing data is neutral
 
+### Job Queue and Job Gathering
+`job_queue` holds jobs awaiting review (`api/app/api/v1/job_queue.py`). Upwork RSS was discontinued in 2024: `agent/run_discovery.py`, `JobDiscoveryAgent.run()` and `rss_adapter.fetch_jobs_from_rss()` only log that and do nothing. Jobs arrive from the extension via `POST /api/v1/job-queue/ingest` (30/hour, ≤50 jobs): dedupe by Upwork `~0…` id (else exact URL) against the user's `job_queue` + `jobs` rows and the batch → pre-filter (`app/services/job_prefilter.py`, shared with the agent; fixed/hourly floors are the profile's `minimum_budget` / `minimum_hourly_rate` when set, else $500 / $60; `posted_text` such as "3 days ago" counts toward `too_old` when `posted_at` is missing) → `run_full_analysis` on at most 25 jobs (the rest `pre_filter:score_cap_reached`) → `suggested` when the score reaches `user_autonomy_profiles.score_threshold` (default 55), else `pre_filtered` with `pre_filter:below_threshold: <score>`. Items are `source="extension_scan"`, expire 7 days after ingest (suggested → expired when the queue or `/stats` is read; no scheduler), and a `query_id` the user owns gets its search-query run stats. Codes live in `app/services/skip_reasons.py`. Autonomy: drafts are not counted; `proposals_submitted` increments once per item on `submit-edit`. Level 5 prep (`agent/proposal_submission_agent.py`) approves items and `draft_prepped_items()` runs the queue's own draft job after commit (items never sit in `generating`).
+
 ### Cover Letter Generation
 
 Two pipelines, selected per user by `user_profiles.generation_v2` (default `false`), checked in `api/v1/jobs.py` and `api/v1/screening_answers.py`.
@@ -262,7 +265,7 @@ Located in `scripts/`:
 | `ingest_chatgpt_facts.py` | v2: send ChatGPT export conversations to `/facts/ingest` as fact candidates. Default `--source signed`: only the final message signed "Chris" / "Chris Therriault" in each conversation, sent as `chatgpt_signed_letter` (the first user message, usually the job post, travels as context only). `--source work`: the user's own turns from work conversations (cover letter in the title or any message, plus career titles); `--source all` (alias `--all`): every conversation. `--dry-run` makes no API calls, `--limit N` caps conversations |
 | `eval_generation.py` | v2 rollout gate: `build-golden` (golden jobs from scraped proposals, read-only), `generate` (blind A/B packet, legacy vs v2), `score` (pass ≥75%). `generate` also reports phrases repeated across a batch's openings or closes (`batch_sameness`) |
 | `outcome_report.py` | Read-only results report: viewed/replied/interview/hired rates of v2-engine proposals (sent letter `prompt_version='v2'`) vs the 90 days before `--since` (default: first v2 letter), by match-score band; pending (<14 days) and unknown-stage proposals listed separately, rates with n<5 hidden, median days to first reply from the stage ledger. `--email`, `--since`, `--json` |
-| `filter_audit.py` | Read-only filter audit for one user over `--days` (default 90): user skips counted by canonical skip reason (`app/services/skip_reasons.py`; free text outside the list is stored as `other: <text>` and its most common texts listed), and per pre-filter rule (`pre_filter:too_old`, `blocked_country`, `budget_too_low`, `hourly_top_too_low`, `avoid_keyword`, `score_cap_reached`) the items blocked, how many were scored via score-anyway with their score distribution, and how many blocked items scored >= 70; rules that blocked any >= 70 job are flagged. Percentages with n<5 hidden. `--email`, `--days`, `--json` |
+| `filter_audit.py` | Read-only filter audit for one user over `--days` (default 90): user skips counted by canonical skip reason (`app/services/skip_reasons.py`; free text outside the list is stored as `other: <text>` and its most common texts listed), and per pre-filter rule (`pre_filter:too_old`, `blocked_country`, `budget_too_low`, `hourly_top_too_low`, `avoid_keyword`, `score_cap_reached`, `below_threshold`) the items blocked, how many were scored via score-anyway with their score distribution, and how many blocked items scored >= 70; rules that blocked any >= 70 job are flagged. Percentages with n<5 hidden. `--email`, `--days`, `--json` |
 
 **Usage (avoid shell `!` in passwords — use Python sys.argv injection):**
 ```python
@@ -351,6 +354,12 @@ VITE_API_URL=https://upapply-api.onrender.com
 - `POST /api/v1/jobs` - Save and analyze
 - `GET /api/v1/jobs/{id}/match` - Detailed match breakdown
 - `POST /api/v1/jobs/cover-letters/generate` - Generate cover letter
+
+### Job Queue
+- `POST /api/v1/job-queue/ingest` - Jobs the extension gathered from a search page. Body `{query_id?, query?, jobs: [{upwork_url, title, description, skills, budget_amount, budget_type: fixed|hourly, posted_at (ISO-8601), posted_text, client_info, proposals_text}]}` (≤50); returns `{received, duplicates, pre_filtered, scored, suggested, below_threshold, queued_ids}` where received = duplicates + pre_filtered + scored, scored = suggested + below_threshold, `queued_ids` = the new suggested items
+- `POST /api/v1/job-queue` - Add one job (agent or manual)
+- `GET /api/v1/job-queue` - List (expires stale suggestions first); `GET /api/v1/job-queue/stats` - Autonomy summary
+- `PUT /api/v1/job-queue/{id}/action`, `POST .../{id}/draft`, `.../{id}/submit-edit`, `.../{id}/confirm-submit`, `.../{id}/score-anyway`, `.../{id}/proposal-response`
 
 ### Applications
 - `POST /api/v1/applications` - Track application

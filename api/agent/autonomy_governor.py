@@ -7,13 +7,13 @@ Called:
 Level progression thresholds:
   1 Observer  → 2 Suggester  : suggestions_shown >= 10
   2 Suggester → 3 Drafter    : approval_rate >= 0.60 AND suggestions_shown >= 20
-  3 Drafter   → 4 Assisted   : avg_edit_distance <= 15.0 AND proposals_drafted >= 10
+  3 Drafter   → 4 Assisted   : avg_edit_distance <= 15.0 AND proposals_submitted >= 10
   4 Assisted  → 5 Autonomous : response_rate >= 0.25 AND proposals_submitted >= 20
   5 → 6 Optimizing           : manual opt-in only
 
 Downgrade conditions (checked daily):
   Level 2 → 1 : approval_rate < 0.30 AND suggestions_shown >= 20
-  Level 3 → 2 : avg_edit_distance > 40.0 AND proposals_drafted >= 5
+  Level 3 → 2 : avg_edit_distance > 40.0 AND proposals_submitted >= 5
 
 Score threshold auto-adjustment:
   - approval_rate > 0.80 → lower threshold by 2 (show more, user is happy)
@@ -198,7 +198,14 @@ async def record_suggestion_rejected(user_id: str, db: AsyncSession) -> dict:
 
 
 async def record_proposal_drafted(user_id: str, db: AsyncSession) -> None:
-    """Increment proposals_submitted counter (used as drafted proxy for Level 3 gate)."""
+    """A draft was generated. Not counted: there is no drafts counter, and counting drafts as
+    proposals_submitted let Level 3 → 4 unlock on drafts nobody sent. The proposal_drafted
+    outcome event (written by the caller) is the record."""
+    await get_or_create_autonomy_profile(user_id, db)
+
+
+async def record_proposal_submitted(user_id: str, db: AsyncSession) -> None:
+    """Increment proposals_submitted (the user sent a proposal; feeds the Level 3/4 gates)."""
     ap = await get_or_create_autonomy_profile(user_id, db)
     ap.proposals_submitted += 1
     await db.flush()

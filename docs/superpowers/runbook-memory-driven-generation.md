@@ -233,3 +233,20 @@ quote. Re-running a page is safe: the facts service merges near-duplicates.
    unchanged (under 5% of words edited) counts as AI, not as a voice sample.
 4. Optional: a voice kit for them in `~/dev2/sv/writing-style` (built from their own A/B feedback).
 5. Turn the flag on for that user only (§7, with their email).
+
+### Job gathering
+Upwork discontinued its RSS feeds in 2024, so `agent/run_discovery.py` and the RSS fetch only log
+that and do nothing (the agent code is kept for reference). Jobs now arrive from the extension's
+search-page scan via `POST /api/v1/job-queue/ingest` (30/hour, at most 50 jobs per call):
+- Duplicates (same Upwork `~0…` id, else same URL, against the user's `job_queue` and `jobs` rows and
+  earlier jobs in the batch) are counted and never stored again.
+- The pre-filter (`app/services/job_prefilter.py`, shared with the retired agent) uses the profile's
+  `minimum_budget` / `minimum_hourly_rate` when set, else $500 fixed / $60 top hourly; a missing
+  `posted_at` falls back to `posted_text` ("3 days ago") for `too_old`.
+- At most 25 jobs per call are scored (`run_full_analysis`); the rest are
+  `pre_filter:score_cap_reached`. A score at or above the user's `user_autonomy_profiles.score_threshold`
+  (default 55) is `suggested` (expires after 7 days, applied when the queue or its stats are read);
+  below it is `pre_filtered` with `pre_filter:below_threshold: <score>`, so `scripts/filter_audit.py`
+  shows whether the threshold throws out jobs worth having. Score-anyway works on those items.
+- A `query_id` the user owns gets its run stats (run count, jobs found = jobs scored, rolling average
+  score, jobs scoring 70+).

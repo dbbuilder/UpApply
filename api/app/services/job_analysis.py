@@ -10,6 +10,7 @@ from app.models.user import UserProfile
 from app.models.memory import Memory
 from app.models.proposal import PENDING_PROPOSAL_STATUSES
 from app.schemas.job import SkillMatch
+from app.services.untrusted import neutralise
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +354,7 @@ async def score_job_with_llm(
     from app.core.config import settings
 
     if not settings.openai_api_key:
-        return None
+        return None, None
 
     client = AsyncOpenAI(api_key=settings.openai_api_key)
 
@@ -365,23 +366,25 @@ async def score_job_with_llm(
         win_context = "\n\nPAST JOBS THIS FREELANCER WAS HIRED FOR (calibration examples):\n"
         for i, win in enumerate(similar_wins, 1):
             sim_pct = int(win["similarity"] * 100)
-            win_context += f"{i}. \"{win['title']}\" ({sim_pct}% similar to current job)\n"
+            win_context += f"{i}. \"{neutralise(win['title'] or '', 300)}\" ({sim_pct}% similar to current job)\n"
             if win["description"]:
-                win_context += f"   {win['description'][:200]}\n"
+                win_context += f"   {neutralise(win['description'], 200)}\n"
     else:
         win_context = "\n\n(No past hired jobs recorded yet — score based on profile fit only.)\n"
 
     if highly_rated:
         highly_rated_context = "\nJobs this freelancer rated 4-5 stars (strong personal fit):\n"
         for r in highly_rated[:3]:
-            note = r.get("user_comment", "")
-            highly_rated_context += f'  - "{r["job_title"]}"' + (f' — note: "{note}"' if note else "") + "\n"
+            note = neutralise(r.get("user_comment") or "", 300)
+            highly_rated_context += f'  - "{neutralise(r["job_title"] or "", 300)}"' + (f' — note: "{note}"' if note else "") + "\n"
     else:
         highly_rated_context = ""
 
     bio_snippet = (profile.bio or "")[:400]
     goals_snippet = (profile.career_goals or "")[:200]
-    desc_snippet = job_description[:1500]
+    # Job text is untrusted (job posts, scraped pages): neutralised before it reaches the prompt
+    title_snippet = neutralise(job_title or "", 300)
+    desc_snippet = neutralise(job_description or "", 1500)
 
     prompt = f"""You are scoring a freelance Upwork job for this consultant. Be discriminating — most jobs should score 40–70, exceptional fits 85+, poor fits below 35.
 
@@ -391,7 +394,7 @@ Bio: {bio_snippet}
 Goals: {goals_snippet}
 {win_context}{highly_rated_context}
 JOB TO SCORE:
-Title: {job_title}
+Title: {title_snippet}
 Description: {desc_snippet}
 
 RUBRIC:

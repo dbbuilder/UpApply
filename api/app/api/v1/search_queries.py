@@ -55,6 +55,28 @@ router = APIRouter()
 HIGH_SCORE_THRESHOLD = 70.0
 
 
+def apply_run_stats(sq: SearchQuery, jobs_found: int, avg_score: float, high_score_count: int) -> None:
+    """Fold one run into a query's cumulative stats (also used by POST /job-queue/ingest).
+
+    Uses a weighted rolling average to accumulate avg_match_score across runs.
+    """
+    prev_total = sq.total_jobs_found
+    new_total = prev_total + jobs_found
+
+    if new_total > 0:
+        prev_avg = sq.avg_match_score or 0.0
+        # Weighted rolling average: preserve history proportionally
+        sq.avg_match_score = round(
+            (prev_avg * prev_total + avg_score * jobs_found) / new_total,
+            2,
+        )
+
+    sq.total_jobs_found = new_total
+    sq.high_score_count += high_score_count
+    sq.run_count += 1
+    sq.last_run_at = datetime.now(timezone.utc)
+
+
 def _normalize_query(q: str) -> str:
     """Lowercase and collapse whitespace for deduplication."""
     return " ".join(q.lower().split())
@@ -487,21 +509,7 @@ async def record_query_run(
     if sq is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Query not found.")
 
-    prev_total = sq.total_jobs_found
-    new_total = prev_total + record.jobs_found
-
-    if new_total > 0:
-        prev_avg = sq.avg_match_score or 0.0
-        # Weighted rolling average: preserve history proportionally
-        sq.avg_match_score = round(
-            (prev_avg * prev_total + record.avg_score * record.jobs_found) / new_total,
-            2,
-        )
-
-    sq.total_jobs_found = new_total
-    sq.high_score_count += record.high_score_count
-    sq.run_count += 1
-    sq.last_run_at = datetime.now(timezone.utc)
+    apply_run_stats(sq, record.jobs_found, record.avg_score, record.high_score_count)
 
     await db.flush()
     await db.refresh(sq)

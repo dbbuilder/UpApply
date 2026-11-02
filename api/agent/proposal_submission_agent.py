@@ -5,7 +5,8 @@ At Level 5 (Autonomous), this agent:
   2. Runs guardrail checks for each (enabled, daily cap, connects, score threshold)
   3. For items that pass all guards:
      - Auto-approves the item (status → approved)
-     - Generates a cover letter draft (draft_status → ready)
+     - Generates a cover letter draft via draft_prepped_items() once the caller has
+       committed (the job queue's own draft job; draft_status → ready, or back to none)
      - Calls confirm_submit internally (confirmed_at set)
      - Writes pendingAutoFill to the agent's output batch
   4. Records all actions to outcome_events and autonomy_profile
@@ -159,10 +160,11 @@ async def run_autonomous_prep(
                 break
             continue
 
-        # Auto-approve
+        # Auto-approve. draft_status stays "none" until the draft actually runs: the caller
+        # commits, then draft_prepped_items() generates the drafts (an item set to
+        # "generating" with no draft job behind it would be stuck).
         item.status = "approved"
         item.reviewed_at = datetime.now(timezone.utc)
-        item.draft_status = "generating"
         await db.flush()
 
         await _record_outcome(db, user_id, item.id, "approved", {"source": "autonomous"})
@@ -204,3 +206,13 @@ async def run_autonomous_prep(
         result.skipped_low_score,
     )
     return result
+
+
+async def draft_prepped_items(result: SubmissionPrepResult) -> None:
+    """Generate drafts for the items run_autonomous_prep() approved, with the same background
+    draft job the job queue uses. Call after the prep session is committed: the draft job
+    opens its own session and updates the same rows."""
+    from app.api.v1.job_queue import _generate_draft_background
+
+    for prep in result.prepped_items:
+        await _generate_draft_background(item_id=prep["item_id"], user_id=result.user_id)
