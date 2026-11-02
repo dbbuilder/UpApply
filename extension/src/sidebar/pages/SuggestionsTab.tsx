@@ -13,6 +13,8 @@ import { USER_SKIP_REASONS, UserSkipReason, filterReasonChipClass, formatFilterR
 import { useAppStore } from '../store';
 import { keepClientTrust } from '../../lib/client-trust';
 import ClientTrustCard from '../components/ClientTrustCard';
+import AutoScanPanel from '../components/AutoScanPanel';
+import { upworkApplyUrl } from '../../lib/apply-url';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -830,10 +832,7 @@ export default function SuggestionsTab() {
     });
 
     // 3. Open the apply page in a new tab
-    const applyUrl = item.upwork_url.includes('/apply')
-      ? item.upwork_url
-      : item.upwork_url.replace(/\/?$/, '/apply');
-    await chrome.tabs.create({ url: applyUrl, active: true });
+    await chrome.tabs.create({ url: upworkApplyUrl(item.upwork_url), active: true });
 
     // 4. Refresh queue in background
     apiClient.getJobQueue().then(setItems).catch(() => {});
@@ -888,6 +887,8 @@ export default function SuggestionsTab() {
           </button>
         </div>
       </div>
+
+      <AutoScanPanel onNewSuggestions={load} />
 
       {/* Digest panel — richer view when digest loaded */}
       {digest && !loading && <DigestPanel digest={digest} />}
