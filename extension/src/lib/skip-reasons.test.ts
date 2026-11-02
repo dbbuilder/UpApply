@@ -19,6 +19,7 @@ describe('skip reasons', () => {
   it('formats pre-filter chips from code + detail', () => {
     expect(formatFilterReason('pre_filter:blocked_country', 'India')).toBe('📍 India');
     expect(formatFilterReason('pre_filter:too_old', '9d')).toBe('🕐 9d old');
+    expect(formatFilterReason('pre_filter:below_threshold', '42')).toBe('📉 Score 42');
     expect(formatFilterReason('pre_filter:avoid_keyword', "'wordpress'")).toBe('🚫 "wordpress"');
     expect(formatFilterReason('pre_filter:score_cap_reached', '40')).toBe('🔢 Score cap');
     expect(formatFilterReason('other', 'new_rule (x)')).toBe('new_rule (x)');
