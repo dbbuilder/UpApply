@@ -1,6 +1,6 @@
 {
   "name": "upapply-extension",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "description": "AI-powered cover letter generation for Upwork",
   "type": "module",
   "scripts": {
