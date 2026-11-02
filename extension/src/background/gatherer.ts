@@ -183,11 +183,17 @@ export function initGatherer(deps: GathererDeps) {
       if (progress.queries_run > 0) await new Promise((r) => setTimeout(r, randomDetailDelayMs()));
       await heartbeat(progress.run_id);
 
-      const result = await deps.scrapeSearch(q.query, q.url_params, {
-        maxPages: GATHER_MAX_PAGES,
-        onTabOpened: async (tabId) => { progress.tab_id = tabId; await save(); },
-        onTabClosed: async () => { progress.tab_id = null; await save(); },
-      });
+      let result: SearchScrapeResult;
+      try {
+        result = await deps.scrapeSearch(q.query, q.url_params, {
+          maxPages: GATHER_MAX_PAGES,
+          onTabOpened: async (tabId) => { progress.tab_id = tabId; await save(); },
+          onTabClosed: async () => { progress.tab_id = null; await save(); },
+        });
+      } catch (e) {
+        // A rejected scrape (tab load timeout, tab create) is one failed query, not a stopped run.
+        result = { success: false, error: e instanceof Error ? e.message : String(e) };
+      }
 
       const cards = result.success && Array.isArray(result.data) ? (result.data as ScrapedJobCardLike[]) : [];
       const jobs = cardsToIngestJobs(cards);

@@ -145,6 +145,15 @@ describe('gatherer run', () => {
     expect(r.queries_run).toBe(3);
     expect(r.error).toMatch(/q-a.*Tab load timeout/);
   });
+
+  it('keeps going when the scraper rejects for one query', async () => {
+    const { g } = setup((q) => { if (q === 'q-a') throw new Error('Tab load timeout'); return { success: true, data: [card(1)] }; });
+    await g.startGatherRun('manual');
+    const r = await lastRun();
+    expect(r.queries_run).toBe(3);
+    expect(r.error).toMatch(/q-a.*Tab load timeout/);
+    expect(store[GATHER_KEYS.cursor]).toBe('c');
+  });
 });
 
 describe('gatherer guards', () => {
