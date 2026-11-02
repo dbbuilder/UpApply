@@ -380,3 +380,17 @@ def test_derive_chips():
         ["react", "postgresql", "llm", "saas", "mvp", "fullstack"]
     assert derive_chips("Plumbing", []) == []
     assert len(derive_chips("python fastapi react typescript sql azure aws", [])) == 6
+
+
+@pytest.mark.asyncio
+async def test_max_age_days_sets_the_lookback(client: AsyncClient, auth_headers_with_profile):
+    h = auth_headers_with_profile
+    ten_days = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    # Default (7 days): a 10-day-old job is too old
+    data = (await _post(client, h, {"jobs": [_job(1, posted_at=ten_days)]})).json()
+    assert data["pre_filtered"] == 1 and data["scored"] == 0
+    # A 14-day lookback scores it
+    data = (await _post(client, h, {"max_age_days": 14, "jobs": [_job(2, posted_at=ten_days)]})).json()
+    assert data["scored"] == 1 and data["pre_filtered"] == 0
+    # Out of range is rejected
+    assert (await _post(client, h, {"max_age_days": 31, "jobs": [_job(3)]})).status_code == 422
