@@ -215,7 +215,7 @@ export function initGatherer(deps: GathererDeps) {
       }
       if (result.blocked && cards.length === 0) {
         // Nothing read for this query: leave the cursor so it is first next time.
-        await finish(progress, blockMessage(result.blocked), result.blocked);
+        await finish(progress, result.error || blockMessage(result.blocked), result.blocked);
         return;
       }
 
@@ -225,7 +225,7 @@ export function initGatherer(deps: GathererDeps) {
       await save();
 
       if (result.blocked) {
-        await finish(progress, blockMessage(result.blocked), result.blocked);
+        await finish(progress, result.error || blockMessage(result.blocked), result.blocked);
         return;
       }
     }

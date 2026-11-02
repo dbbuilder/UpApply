@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_GATHER_SETTINGS, DEFAULT_INTERVAL_MINUTES, LOCK_STALE_MS, MAX_INTERVAL_MINUTES, MIN_INTERVAL_MINUTES,
   addIngestResult, alarmMatches, alarmPlan, backoffMs, buildSearchUrl, cardToIngestJob, cardsToIngestJobs, chunk,
+  SETTLE_EMPTY_MS, SETTLE_MAX_MS, blockMessage, settleStep,
   detectBlockedPage, emptyTotals, isLockFree, normalizeGatherSettings, parseRating, pickQueries,
 } from './job-gather';
 import { THROTTLE_PAGE_TEXT } from './proposal-scrape';
@@ -240,5 +241,35 @@ describe('addIngestResult', () => {
     addIngestResult(t, 50, { suggested: 3, duplicates: 10, pre_filtered: 7 });
     addIngestResult(t, 20, { suggested: 1, duplicates: 0, pre_filtered: 2 });
     expect(t).toEqual({ queries_run: 0, jobs_sent: 70, suggested: 4, duplicates: 10, pre_filtered: 9 });
+  });
+});
+
+describe('settleStep', () => {
+  const search = 'https://www.upwork.com/nx/search/jobs/?q=sql&sort=recency';
+  const challenge = { url: search, title: 'Challenge - Upwork', text: 'Enable JavaScript and cookies to continue' };
+
+  it('proceeds as soon as job tiles render', () => {
+    expect(settleStep({ url: search, title: 'SQL Jobs | Upwork', hasJobTiles: true }, 1500)).toEqual({ action: 'proceed' });
+  });
+
+  it('waits out a challenge that may clear itself, and stops only when it is still there at the limit', () => {
+    expect(settleStep(challenge, 1500)).toEqual({ action: 'wait' });
+    expect(settleStep(challenge, SETTLE_MAX_MS - 1)).toEqual({ action: 'wait' });
+    expect(settleStep(challenge, SETTLE_MAX_MS)).toEqual({ action: 'stop', reason: 'captcha' });
+  });
+
+  it('waits for a page that is still drawing, then treats it as an empty result page', () => {
+    const blank = { url: search, title: 'SQL Jobs | Upwork', text: '' };
+    expect(settleStep(blank, 1500)).toEqual({ action: 'wait' });
+    expect(settleStep(blank, SETTLE_EMPTY_MS)).toEqual({ action: 'proceed' });
+  });
+
+  it('stops at once on a login page', () => {
+    expect(settleStep({ url: 'https://www.upwork.com/ab/account-security/login' }, 1500)).toEqual({ action: 'stop', reason: 'login' });
+  });
+
+  it('names the page it saw when it stops', () => {
+    expect(blockMessage('captcha', 'Challenge - Upwork')).toContain('(page title: "Challenge - Upwork")');
+    expect(blockMessage('captcha')).not.toContain('page title');
   });
 });
