@@ -44,6 +44,7 @@ export default function AutoScanPanel({ onNewSuggestions }: AutoScanPanelProps) 
   const setCurrentView = useAppStore((st) => st.setCurrentView);
   const [status, setStatus] = useState<GatherStatusResponse | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [errorsAfter, setErrorsAfter] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const lastFinished = useRef<string | null>(null);
   const onNewRef = useRef(onNewSuggestions);
@@ -79,8 +80,13 @@ export default function AutoScanPanel({ onNewSuggestions }: AutoScanPanelProps) 
 
   const runNow = async () => {
     setNotice(null);
+    // Clear the previous run's error at once; only an error from a run that ends after this click shows.
+    setErrorsAfter(new Date().toISOString());
     const r = await send<{ success: boolean; reason?: string }>({ type: 'GATHER_RUN_NOW' });
-    if (!r?.success) setNotice(r?.reason || 'Could not start the scan.');
+    if (!r?.success) {
+      setErrorsAfter(null);
+      setNotice(r?.reason || 'Could not start the scan.');
+    }
     await refresh();
   };
 
@@ -134,7 +140,7 @@ export default function AutoScanPanel({ onNewSuggestions }: AutoScanPanelProps) 
           {lastRun.below_threshold != null && `, ${lastRun.below_threshold} below your score threshold`}.
         </p>
       )}
-      {lastRun?.error && (
+      {lastRun?.error && !running && (!errorsAfter || lastRun.finished_at > errorsAfter) && (
         <p className="text-[10px] text-red-500 bg-red-50 px-2 py-1 rounded-lg leading-snug">{lastRun.error}</p>
       )}
       {backoffUntil && settings.enabled && (
