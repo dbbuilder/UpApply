@@ -178,8 +178,9 @@ export interface PageSnapshot {
 
 const LOGIN_PATHS = ['/ab/account-security/login', '/account-security/login', '/login'];
 const CAPTCHA_PATH = /\/cdn-cgi\/|challenge|captcha/i;
-const CAPTCHA_TITLE = /just a moment|attention required|captcha|security check|are you a robot/i;
-const CAPTCHA_TEXT = /verify you are human|checking if the site connection is secure|complete the security check|press (and|&) hold|i'?m not a robot/i;
+// Upwork's own Cloudflare page is titled "Challenge - Upwork" (seen in a captured page).
+const CAPTCHA_TITLE = /just a moment|attention required|captcha|security check|are you a robot|^\s*challenge\s*[-–|]/i;
+const CAPTCHA_TEXT = /verify you are human|checking if the site connection is secure|complete the security check|press (and|&) hold|i'?m not a robot|enable javascript and cookies to continue|cloudflare ray id/i;
 
 /**
  * Why a loaded search tab must stop the run, or null when it looks like a normal page.

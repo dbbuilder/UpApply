@@ -143,6 +143,18 @@ describe('detectBlockedPage', () => {
     expect(detectBlockedPage({ url: search, text: 'Verify you are human by completing the action below.' })).toBe('captcha');
   });
 
+  it("stops on Upwork's own Cloudflare page (served at the search URL)", () => {
+    // Title and text from a captured Upwork challenge response (403, path unchanged).
+    expect(detectBlockedPage({ url: search, title: 'Challenge - Upwork',
+      text: 'Enable JavaScript and cookies to continue Cloudflare Ray ID: 9d90166a1f19769f' })).toBe('captcha');
+    expect(detectBlockedPage({ url: search, title: 'Challenge - Upwork' })).toBe('captcha');
+    expect(detectBlockedPage({ url: search, text: 'Cloudflare Ray ID: 9d90166a1f19769f' })).toBe('captcha');
+  });
+
+  it('does not treat a search for "challenge" as a challenge page', () => {
+    expect(detectBlockedPage({ url: search, title: 'Coding challenge Jobs | Upwork', text: 'No jobs found' })).toBeNull();
+  });
+
   it('does not treat job posts that mention captchas as a challenge', () => {
     expect(detectBlockedPage({
       url: 'https://www.upwork.com/nx/search/jobs/?q=captcha%20solver',
