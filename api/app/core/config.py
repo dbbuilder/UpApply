@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     client_review_model: str = "claude-sonnet-4-6"         # opt-in client's-eye reviewer (structured output)
     writer_effort: str = "high"                            # Opus 5.5 defaults to medium; set explicitly
     learned_rules_model: str = "claude-opus-5-5"           # rules from the user's edits: rare, user-triggered, needs judgement
+    job_fit_model: str = "claude-haiku-4-5"                # job-fit rubric (role level, stack/domain, red flags); Chris 2026-11-05
 
     # Security
     secret_key: str = "dev-secret-key-change-in-production"

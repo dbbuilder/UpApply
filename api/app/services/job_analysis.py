@@ -122,6 +122,7 @@ class AnalysisResult:
     relevant_memories: List[Dict]
     recommendation: str
     reason: Optional[str] = None
+    query_embedding: Optional[List[float]] = None  # reused by the job-fit shadow score
 
 
 # Skill synonyms for fuzzy matching
@@ -745,6 +746,7 @@ async def run_full_analysis(
         relevant_memories=relevant_memories,
         recommendation=recommendation,
         reason=reason,
+        query_embedding=query_embedding,
     )
 
 

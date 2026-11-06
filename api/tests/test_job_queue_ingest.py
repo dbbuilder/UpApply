@@ -411,3 +411,78 @@ async def test_over_long_scraped_text_is_clipped_not_rejected(client: AsyncClien
     by_url = {i.upwork_url: i for i in await _items(await _user_id(client, h))}
     assert len(by_url[_job(1)["upwork_url"]].title) == 300
     assert by_url[_job(4)["upwork_url"]].budget_type is None
+
+
+# ── Job-fit rubric in shadow (migration 029) ────────────────────────────────
+
+RUBRIC_REPLY = {
+    "role_level": {"grade": 0, "reason": "Sales role"},
+    "stack_domain": {"grade": 1, "reason": "No stack"},
+    "red_flags": ["non_technical_role"],
+}
+
+
+@pytest.mark.asyncio
+async def test_scored_jobs_get_a_shadow_breakdown_that_changes_nothing_else(
+    client: AsyncClient, auth_headers_with_profile
+):
+    from app.services import job_fit
+
+    uid = await _user_id(client, auth_headers_with_profile)
+    body = {"jobs": [_job(1, proposals_text="Less than 5"), _job(2, budget_amount="$10")]}
+    call = AsyncMock(return_value=RUBRIC_REPLY)
+    with patch.object(job_fit, "structured_call", call), \
+         patch.object(job_fit.settings, "anthropic_api_key", "sk-test"):
+        resp = await _post(client, auth_headers_with_profile, body, _scorer(80.0))
+    assert resp.status_code == 200
+    by_title = {i.title: i for i in await _items(uid)}
+
+    scored = by_title["FastAPI backend 1"]
+    # Shadow only: the current score, status and reasoning are untouched by a red flag
+    assert scored.ai_score == 80.0 and scored.status == "suggested"
+    bd = scored.score_breakdown
+    assert bd["red_flags"] == ["non_technical_role"] and bd["total"] == job_fit.RED_FLAG_CAP
+    assert bd["dimensions"]["role_level"]["grade"] == 0
+    assert bd["dimensions"]["competition_timing"]["reason"].startswith("Less than 5 proposals")
+    assert bd["rubric_version"] == job_fit.RUBRIC_VERSION
+
+    # Pre-filtered jobs are never sent to the rubric
+    assert by_title["FastAPI backend 2"].status == "pre_filtered"
+    assert by_title["FastAPI backend 2"].score_breakdown is None
+    assert call.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failed_rubric_call_leaves_the_breakdown_empty(client: AsyncClient, auth_headers_with_profile):
+    from app.services import job_fit
+    from app.services.llm import LLMError
+
+    uid = await _user_id(client, auth_headers_with_profile)
+    with patch.object(job_fit, "structured_call", AsyncMock(side_effect=LLMError("down", reason="api_error"))), \
+         patch.object(job_fit.settings, "anthropic_api_key", "sk-test"):
+        resp = await _post(client, auth_headers_with_profile, {"jobs": [_job(1)]}, _scorer(80.0))
+    assert resp.status_code == 200 and resp.json()["suggested"] == 1
+    (item,) = await _items(uid)
+    assert item.status == "suggested" and item.score_breakdown is None
+
+
+@pytest.mark.asyncio
+async def test_posted_time_is_stored_in_client_info(client: AsyncClient, auth_headers_with_profile):
+    uid = await _user_id(client, auth_headers_with_profile)
+    posted = (datetime.now(timezone.utc) - timedelta(hours=5)).replace(microsecond=0)
+    body = {"jobs": [
+        _job(1, posted_at=posted.isoformat(), posted_text="Posted 5 hours ago"),
+        _job(2, posted_text="Posted 2 days ago"),
+        _job(3),
+    ]}
+    resp = await _post(client, auth_headers_with_profile, body, _scorer(80.0))
+    assert resp.status_code == 200
+    by_title = {i.title: i for i in await _items(uid)}
+
+    one = by_title["FastAPI backend 1"].client_info
+    assert datetime.fromisoformat(one["posted_at"]) == posted and one["posted_text"] == "Posted 5 hours ago"
+    two = by_title["FastAPI backend 2"].client_info
+    age = datetime.now(timezone.utc) - datetime.fromisoformat(two["posted_at"])
+    assert timedelta(days=1, hours=23) < age < timedelta(days=2, hours=1)
+    assert two["posted_text"] == "Posted 2 days ago"
+    assert "posted_at" not in (by_title["FastAPI backend 3"].client_info or {})
