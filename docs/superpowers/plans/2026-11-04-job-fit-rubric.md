@@ -1,6 +1,6 @@
 # Job-fit rubric — plan
 
-Status: proposal (2026-11-04). Nothing here is built. Building it waits on Chris (NEXT.md, Decisions pending).
+Status: approved (2026-11-05). Chris answered the four questions (see Decisions at the end). Nothing here is built yet.
 
 ## Why the current score misleads
 
@@ -43,7 +43,7 @@ Anchors are written per dimension with two or three example job titles each, tak
 
 1. **Eval set:** the stored scanned jobs (325 on 2026-11-02), plus the jobs behind the 194 imported proposals.
 2. **Labels:** Chris marks 40 jobs apply / maybe / skip on a review page: 20 from today's top of Pending, 10 from just below the threshold, and 10 at random.
-3. **Score both ways:** today's score and the rubric, the latter with both `gpt-5.4-nano` and `claude-haiku-4-5` (pick the model on agreement and cost).
+3. **Score both ways:** today's score and the rubric, the rubric's LLM call on `claude-haiku-4-5` (Chris's choice, 2026-11-05).
 4. **Pass when:**
    - at least 14 of the rubric's top 20 are labelled apply or maybe (today's top 20 is measured the same way, for comparison);
    - no job with a sales, assistant or marketing title clears the threshold;
@@ -67,9 +67,9 @@ Done when: the script runs, the label page is filled, and the report shows both 
 
 Each phase is one PR. Done when, overall: the eval passes, the switch is live, and the threshold is reset.
 
-## Questions for Chris
+## Decisions (Chris, 2026-11-05)
 
-1. Weights: role level 30, stack and domain 20, engagement 20, evidence 15, competition and timing 15. Change any?
-2. Should competition count at all? A 50+ proposal job you are perfect for may still be worth sending.
-3. Model: keep the OpenAI nano model if it agrees with your labels, or move scoring to Claude Haiku?
-4. Migration 029 (holds the shadow score and the breakdown): yes or no? With no, there is no shadow week in production, only the offline eval.
+1. Weights: kept as proposed (role level 30, stack and domain 20, engagement 20, evidence 15, competition and timing 15).
+2. Competition counts: the competition and timing dimension stays in the rubric.
+3. Model: the rubric's LLM call runs on `claude-haiku-4-5`. The rest of job analysis stays where it is.
+4. Migration 029: yes. `job_queue.score_breakdown` holds the shadow score and the breakdown, so there is a shadow week in production.

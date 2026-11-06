@@ -37,7 +37,6 @@ v2 is live for Chris with job-queue drafts, canonical outcome stages, a results 
 - [2026-10-29] Re-run the Proposals import in the extension so the 144 'unknown' proposal stages (numeric Upwork codes) resolve; only code '7' is confirmed (Chris)
 - [2026-10-29] Client feedback: 5 quotes from profile page 1 of 21 await approval in Me → Facts; paste the other pages (or expand the two shortened quotes) to import more (Chris)
 - [2026-10-29] No v2 letters have been generated in real use yet, so the results report has nothing to compare; it fills in as Chris applies with the engine (Chris)
-- [2026-11-04] Rubric: build the per-dimension job-fit score once the step-2 plan is approved (Chris)
 - [2026-11-04] Turn on scheduled scans (Agent tab or ☰ → Settings; every 3 h). No scan has run since 2026-11-02 23:00 UTC; suggestions expire 7 days after ingest (Chris)
 - [2026-11-04] First end-to-end use: approve one scanned job and generate its v2 draft; the approve → draft → send path has never run on a scanned job (Chris)
 - [2026-11-04] Weak searches: "product lead …" (2 of 17 suggested, avg 37.6, none 70+) and "technical due diligence …" (1 of 8, avg 39.5) — keep, reword or drop; sales/assistant noise is already caught by the minimums (1 of 29 reached Pending) (Chris)
@@ -68,3 +67,4 @@ v2 is live for Chris with job-queue drafts, canonical outcome stages, a results 
 - [2026-11-02] #60 over-long scraped text is clipped instead of 422-ing a batch; a rejected batch is skipped with its reason. Full 10-search run: 356 sent, 249 seen, 60 pre-filtered, 24 below threshold, 23 new; budgets on 176 of 241 new jobs
 - [2026-11-04] Checked in production: one 422 (before #60), 16 accepted ingests, no scan since 2026-11-02 23:00 UTC; search-query stats recorded for all 10 searches; 0 items reviewed, 0 v2 letters
 - [2026-11-04] step 2 done — docs/superpowers/plans/2026-11-04-job-fit-rubric.md (proposal; awaits Chris's answers to its four questions)
+- [2026-11-05] Rubric plan approved: weights as proposed, competition counts, LLM call on claude-haiku-4-5, migration 029 yes; #63 review comments fixed in a8f021c
