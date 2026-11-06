@@ -29,7 +29,7 @@ v2 is live for Chris with job-queue drafts, canonical outcome stages, a results 
 ## Steps
 
 - [x] 1. Runbook: add a "Reviewer, trust card, rules and filters" section to `docs/superpowers/runbook-memory-driven-generation.md` covering the opt-in client's-eye reviewer (`client_review` request flag / sidebar checkbox, what the verdicts do, cost and latency, never a second repair), the client trust card (tiers, which client fields the extension captures today, that it never changes the match score), learned rules (Me → Rules, propose/accept/reject, evidence = the user's own edits and refine requests, voice-kit users copy accepted rules to the kit's feedback log), and `scripts/filter_audit.py` (skip reasons, pre-filter rule names, the n<5 rule) — Done when: `grep -c 'client_review'`, `grep -c 'trust card'`, `grep -c 'learned-rules'` and `grep -c 'filter_audit'` on the runbook are each ≥ 1
-- [ ] 2. Plan: write `docs/superpowers/plans/2026-11-04-job-fit-rubric.md` for replacing the scan score with a per-dimension rubric (role level, stack/domain, evidence from approved facts, engagement, competition/timing, red-flag caps), how it is measured against the stored scanned jobs and the proposals with traction, and the rollout (shadow scores first; whether a migration is needed) — Done when: the file exists and `grep -c 'Done when\|## '` on it is ≥ 6; no code changes
+- [x] 2. Plan: write `docs/superpowers/plans/2026-11-04-job-fit-rubric.md` for replacing the scan score with a per-dimension rubric (role level, stack/domain, evidence from approved facts, engagement, competition/timing, red-flag caps), how it is measured against the stored scanned jobs and the proposals with traction, and the rollout (shadow scores first; whether a migration is needed) — Done when: the file exists and `grep -c 'Done when\|## '` on it is ≥ 6; no code changes
 
 ## Decisions pending
 
@@ -37,7 +37,6 @@ v2 is live for Chris with job-queue drafts, canonical outcome stages, a results 
 - [2026-10-29] Re-run the Proposals import in the extension so the 144 'unknown' proposal stages (numeric Upwork codes) resolve; only code '7' is confirmed (Chris)
 - [2026-10-29] Client feedback: 5 quotes from profile page 1 of 21 await approval in Me → Facts; paste the other pages (or expand the two shortened quotes) to import more (Chris)
 - [2026-10-29] No v2 letters have been generated in real use yet, so the results report has nothing to compare; it fills in as Chris applies with the engine (Chris)
-- [2026-11-04] Rubric: build the per-dimension job-fit score once the step-2 plan is approved (Chris)
 - [2026-11-04] Turn on scheduled scans (Agent tab or ☰ → Settings; every 3 h). No scan has run since 2026-11-02 23:00 UTC; suggestions expire 7 days after ingest (Chris)
 - [2026-11-04] First end-to-end use: approve one scanned job and generate its v2 draft; the approve → draft → send path has never run on a scanned job (Chris)
 - [2026-11-04] Weak searches: "product lead …" (2 of 17 suggested, avg 37.6, none 70+) and "technical due diligence …" (1 of 8, avg 39.5) — keep, reword or drop; sales/assistant noise is already caught by the minimums (1 of 29 reached Pending) (Chris)
@@ -67,3 +66,5 @@ v2 is live for Chris with job-queue drafts, canonical outcome stages, a results 
 - [2026-11-02] #58 ingest takes max_age_days; #59 paging by &page=N to the lookback window (auto 14 days until 2026-11-05, then 7), Settings page, budget/posted/proposals read from tile text, Pending sorted by score; Chris's minimums set to $80/hr and $1,000 (were $75 / $500)
 - [2026-11-02] #60 over-long scraped text is clipped instead of 422-ing a batch; a rejected batch is skipped with its reason. Full 10-search run: 356 sent, 249 seen, 60 pre-filtered, 24 below threshold, 23 new; budgets on 176 of 241 new jobs
 - [2026-11-04] Checked in production: one 422 (before #60), 16 accepted ingests, no scan since 2026-11-02 23:00 UTC; search-query stats recorded for all 10 searches; 0 items reviewed, 0 v2 letters
+- [2026-11-04] step 2 done — docs/superpowers/plans/2026-11-04-job-fit-rubric.md (proposal; awaits Chris's answers to its four questions)
+- [2026-11-05] Rubric plan approved: weights as proposed, competition counts, LLM call on claude-haiku-4-5, migration 029 yes; #63 review comments fixed in a8f021c
