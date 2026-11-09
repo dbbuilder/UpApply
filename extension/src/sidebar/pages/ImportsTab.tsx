@@ -7,7 +7,7 @@
  */
 import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '../../lib/api-client';
-import { savedImportItems, type SavedJobCard } from '../../lib/saved-jobs';
+import { chunk, SAVED_IMPORT_BATCH, savedImportItems, type SavedJobCard } from '../../lib/saved-jobs';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -189,9 +189,19 @@ async function runSavedJobs(
     throw new Error(scrapeResult?.error || 'No saved jobs found.');
   }
 
-  setMsg(`Importing ${scrapeResult.data.length} saved jobs…`);
   const items = savedImportItems(scrapeResult.data as SavedJobCard[]);
-  const imported = await apiClient.importBulkJobs(items, 'saved');
+  const imported: Awaited<ReturnType<typeof apiClient.importBulkJobs>> = [];
+  let sent = 0;
+  for (const batch of chunk(items, SAVED_IMPORT_BATCH)) {
+    setMsg(`Importing ${sent + 1}–${sent + batch.length} of ${items.length} saved jobs…`);
+    try {
+      imported.push(...await apiClient.importBulkJobs(batch, 'saved'));
+    } catch (err) {
+      // Imports deduplicate, so a re-run picks up where this one stopped.
+      throw new Error(`Stopped after ${sent} of ${items.length} saved jobs (run again to continue): ${String(err)}`);
+    }
+    sent += batch.length;
+  }
   const older = imported.filter((j) => j.source === 'saved_signal').length;
   const olderNote = older > 0 ? ` (${older} older, kept to guide scoring and searches)` : '';
   return `${imported.length} new saved jobs${olderNote} · ${items.length - imported.length} already known`;
