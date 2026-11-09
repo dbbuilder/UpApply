@@ -72,6 +72,7 @@ class QueryCoverage(BaseModel):
     coverage_count: int        # how many target jobs this query's keywords match
     coverage_pct: float        # percentage of target jobs covered
     sample_matches: list[str]  # up to 3 matched job titles
+    saved_count: int = 0       # of coverage_count, how many are jobs the user saved on Upwork
 
 
 class SuggestedQuery(BaseModel):
@@ -85,6 +86,7 @@ class SuggestedQuery(BaseModel):
 class SearchLabResult(BaseModel):
     """Full output of POST /search-queries/evaluate."""
     total_target_jobs: int
+    saved_target_jobs: int = 0    # of total_target_jobs, jobs the user saved on Upwork
     covered_count: int
     coverage_pct: float
     query_coverage: list[QueryCoverage]
