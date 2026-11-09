@@ -6,6 +6,7 @@ the router file focused on HTTP concerns.
 """
 import json
 import logging
+import re
 from typing import Optional
 
 from openai import AsyncOpenAI
@@ -39,9 +40,10 @@ _OPT_LOW_QUALITY = 0.30    # hit-rate below this = low quality
 class TargetJob:
     """Lightweight job record used for coverage scoring."""
 
-    def __init__(self, title: str, description: str = "") -> None:
+    def __init__(self, title: str, description: str = "", saved: bool = False) -> None:
         self.title = title
         self.description = description
+        self.saved = saved  # a job the user saved on Upwork (else a win or a reply)
 
 
 def tokenize_query(query: str) -> list[str]:
@@ -52,9 +54,10 @@ def tokenize_query(query: str) -> list[str]:
 
 
 def job_matches_query(title: str, description: str, tokens: list[str]) -> bool:
-    """Return True if any token appears in the job title or description."""
+    """Return True if any token appears as a whole word in the job title or description
+    ("ai" matches "AI engineer", not "maintain"; ".net" and "c#" keep their symbols)."""
     text = (title + " " + (description or "")).lower()
-    return any(t in text for t in tokens)
+    return any(re.search(rf"(?<!\w){re.escape(t)}(?!\w)", text) for t in tokens)
 
 
 # ---------------------------------------------------------------------------

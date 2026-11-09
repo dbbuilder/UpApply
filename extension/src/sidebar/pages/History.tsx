@@ -1351,7 +1351,7 @@ export default function HistoryPage() {
               {/* Coverage analysis result */}
               {labLoading && (
                 <div className="text-xs text-gray-400 animate-pulse text-center py-3">
-                  Comparing searches against your winning jobs…
+                  Comparing searches against your winning and saved jobs…
                 </div>
               )}
 
@@ -1359,7 +1359,8 @@ export default function HistoryPage() {
                 <div className="space-y-3">
                   <div className={`rounded-lg p-2.5 text-xs ${labResult.coverage_pct >= 80 ? 'bg-emerald-50 text-emerald-800' : labResult.coverage_pct >= 50 ? 'bg-amber-50 text-amber-800' : 'bg-red-50 text-red-800'}`}>
                     <span className="font-semibold">{labResult.coverage_pct}% covered</span>
-                    {' '}— {labResult.covered_count}/{labResult.total_target_jobs} winning jobs matched by current searches
+                    {' '}— {labResult.covered_count}/{labResult.total_target_jobs} winning and saved jobs matched by current searches
+                    {labResult.saved_target_jobs ? ` (${labResult.saved_target_jobs} saved)` : ''}
                   </div>
 
                   {labResult.query_coverage.filter(c => c.coverage_count > 0).length > 0 && (
@@ -1373,6 +1374,9 @@ export default function HistoryPage() {
                               <div className="h-full bg-violet-400 rounded-sm" style={{ width: `${Math.min(cov.coverage_pct, 100)}%` }} />
                             </div>
                             <span className="text-[10px] text-gray-500 w-8 text-right flex-shrink-0">{cov.coverage_pct}%</span>
+                            {!!cov.saved_count && (
+                              <span className="text-[10px] text-amber-600 flex-shrink-0" title="Saved jobs this search would have found">★{cov.saved_count}</span>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1382,7 +1386,7 @@ export default function HistoryPage() {
                   {labResult.gap_jobs.length > 0 && (
                     <div>
                       <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                        Uncovered Wins ({labResult.gap_jobs.length})
+                        Not found by any search ({labResult.gap_jobs.length})
                       </p>
                       <div className="space-y-0.5">
                         {labResult.gap_jobs.slice(0, 5).map((title) => (
@@ -1433,7 +1437,7 @@ export default function HistoryPage() {
 
                   {labResult.gap_jobs.length === 0 && labResult.suggestions.length === 0 && (
                     <p className="text-xs text-emerald-600 text-center py-2">
-                      ✓ All winning jobs are covered by existing searches
+                      ✓ All winning and saved jobs are covered by existing searches
                     </p>
                   )}
                 </div>
