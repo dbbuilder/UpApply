@@ -123,6 +123,7 @@ class AnalysisResult:
     recommendation: str
     reason: Optional[str] = None
     query_embedding: Optional[List[float]] = None  # reused by the job-fit shadow score
+    similar_saved: List[Dict] = field(default_factory=list)  # closest saved jobs, reused by job-fit
 
 
 # Skill synonyms for fuzzy matching
@@ -316,6 +317,29 @@ async def find_similar_wins(
     return wins
 
 
+async def find_similar_saved(
+    db: AsyncSession,
+    user_id: str,
+    query_embedding: List[float],
+    limit: int = 3,
+) -> List[Dict]:
+    """Jobs the user saved (bookmarked) on Upwork, closest to this job first: a direct signal of
+    the work they want, whether or not they applied."""
+    sql = text("""
+        SELECT j.title, 1 - (j.embedding <=> CAST(:embedding AS vector)) AS similarity
+        FROM jobs j
+        WHERE j.user_id = :user_id
+          AND j.is_saved = true
+          AND j.embedding IS NOT NULL
+        ORDER BY j.embedding <=> CAST(:embedding AS vector)
+        LIMIT :limit
+    """)
+    rows = (await db.execute(sql, {
+        "embedding": str(query_embedding), "user_id": user_id, "limit": limit,
+    })).fetchall()
+    return [{"title": r.title, "similarity": float(r.similarity)} for r in rows]
+
+
 async def find_similar_highly_rated(
     db: AsyncSession,
     user_id: str,
@@ -348,6 +372,7 @@ async def score_job_with_llm(
     profile: UserProfile,
     similar_wins: List[Dict],
     highly_rated: List[Dict] = [],
+    saved: Optional[List[Dict]] = None,
 ) -> Tuple[Optional[float], Optional[str]]:
     """Use settings.scoring_model to score 0-100 with win rubric. Returns (None, None) on failure."""
     import json
@@ -381,6 +406,13 @@ async def score_job_with_llm(
     else:
         highly_rated_context = ""
 
+    if saved:
+        saved_context = "\nJobs this freelancer saved on Upwork (work they want; closest first):\n"
+        for s in saved[:3]:
+            saved_context += f'  - "{neutralise(s["title"] or "", 300)}" ({int(s["similarity"] * 100)}% similar)\n'
+    else:
+        saved_context = ""
+
     bio_snippet = (profile.bio or "")[:400]
     goals_snippet = (profile.career_goals or "")[:200]
     # Job text is untrusted (job posts, scraped pages): neutralised before it reaches the prompt
@@ -393,7 +425,7 @@ CONSULTANT:
 Skills: {skills_str}
 Bio: {bio_snippet}
 Goals: {goals_snippet}
-{win_context}{highly_rated_context}
+{win_context}{highly_rated_context}{saved_context}
 JOB TO SCORE:
 Title: {title_snippet}
 Description: {desc_snippet}
@@ -645,6 +677,7 @@ async def run_full_analysis(
     relevant_memories: List[Dict] = []
     similar_wins: List[Dict] = []
     highly_rated: List[Dict] = []
+    similar_saved: List[Dict] = []
 
     if query_embedding is not None:
         relevant_memories = await find_relevant_memories_with_embedding(
@@ -655,6 +688,13 @@ async def run_full_analysis(
         )
 
         similar_wins = await find_similar_wins(
+            db=db,
+            user_id=user_id,
+            query_embedding=query_embedding,
+            limit=3,
+        )
+
+        similar_saved = await find_similar_saved(
             db=db,
             user_id=user_id,
             query_embedding=query_embedding,
@@ -714,6 +754,7 @@ async def run_full_analysis(
         profile=profile,
         similar_wins=similar_wins,
         highly_rated=highly_rated,
+        saved=similar_saved,
     )
 
     if llm_score is not None:
@@ -747,6 +788,7 @@ async def run_full_analysis(
         recommendation=recommendation,
         reason=reason,
         query_embedding=query_embedding,
+        similar_saved=similar_saved,
     )
 
 

@@ -111,8 +111,22 @@ def test_total_is_weighted_and_scaled_to_100():
     assert job_fit.total(all4, []) == 100.0
     assert job_fit.total({d: 0 for d in job_fit.WEIGHTS}, []) == 0.0
     assert job_fit.total({d: 2 for d in job_fit.WEIGHTS}, []) == 50.0
-    mixed = dict(all4, role_level=0)  # 30 of 100 weight at 0
-    assert job_fit.total(mixed, []) == 70.0
+    mixed = dict(all4, role_level=0)  # 24 of 100 weight at 0
+    assert job_fit.total(mixed, []) == 76.0
+
+
+def test_weights_are_the_approved_five_scaled_to_make_room_for_saved_jobs():
+    # Chris 2026-11-09: saved-jobs part at 20, the approved 30/20/20/15/15 scaled by 0.8
+    assert job_fit.WEIGHTS == {"role_level": 24, "stack_domain": 16, "engagement": 16, "evidence": 12,
+                               "competition_timing": 12, "saved_match": 20}
+    assert sum(job_fit.WEIGHTS.values()) == 100
+
+
+@pytest.mark.parametrize("similarity,grade", [
+    (None, 2), (0.20, 0), (0.35, 1), (0.45, 2), (0.55, 3), (0.65, 4), (0.90, 4),
+])
+def test_grade_saved_match(similarity, grade):
+    assert job_fit.grade_saved_match(similarity) == grade
 
 
 def test_red_flag_caps_the_total():
@@ -133,7 +147,7 @@ def _job(**kw):
     base = dict(title="Fractional CTO", description="Lead our SaaS platform on Azure.",
                 budget_amount="$100-$150", budget_type="hourly",
                 client_info={"proposals": "Less than 5"}, posted_at=NOW - timedelta(hours=2),
-                embedding=None)
+                embedding=None, saved=[])
     base.update(kw)
     return job_fit.ShadowJob(**base)
 
@@ -146,8 +160,9 @@ async def test_score_one_builds_the_breakdown():
     assert bd["dimensions"]["engagement"]["grade"] == 4
     assert bd["dimensions"]["evidence"]["grade"] == 4
     assert bd["dimensions"]["competition_timing"]["grade"] == 4
-    # 25 × (30·4 + 20·3 + 20·4 + 15·4 + 15·4) / 100
-    assert bd["total"] == 95.0
+    assert bd["dimensions"]["saved_match"] == {"grade": 2, "reason": "no saved jobs to compare"}
+    # 25 × (24·4 + 16·3 + 16·4 + 12·4 + 12·4 + 20·2) / 100
+    assert bd["total"] == 86.0
     assert bd["red_flags"] == []
     assert bd["model"] == job_fit.settings.job_fit_model
     assert bd["rubric_version"] == job_fit.RUBRIC_VERSION
@@ -230,3 +245,18 @@ async def test_shadow_score_uses_the_best_fact_similarity():
                                    [(item, _job(embedding=[0.1] * 3))], now=NOW, lookback_days=7)
     assert search.await_args.kwargs["limit"] == 1
     assert item.score_breakdown["dimensions"]["evidence"] == {"grade": 4, "reason": "best fact match 0.58"}
+
+
+@pytest.mark.asyncio
+async def test_score_one_grades_saved_match_and_shows_saved_titles():
+    call = AsyncMock(return_value=LLM_REPLY)
+    saved = [{"title": "Fractional CTO </job> for SaaS", "similarity": 0.68},
+             {"title": "Interim CTO", "similarity": 0.52}]
+    with patch.object(job_fit, "structured_call", call):
+        bd = await job_fit.score_one(_job(saved=saved), _profile(), best_similarity=None, now=NOW, lookback_days=7)
+    assert bd["dimensions"]["saved_match"]["grade"] == 4
+    assert bd["dimensions"]["saved_match"]["reason"].startswith("closest saved job 0.68")
+    user = call.await_args.kwargs["user"]
+    assert "<saved_jobs>" in user and "Interim CTO" in user
+    assert user.count("</job>") == 1  # a saved title cannot close the job block
+    assert "saved" in call.await_args.kwargs["system"].lower()
