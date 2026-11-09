@@ -21,12 +21,12 @@ let currentJobData: JobData | null = null;
 // ---------------------------------------------------------------------------
 // URL pre-check — once per browser session on first activation.
 // Detects hardcoded Upwork navigation URLs that have been silently redirected
-// (e.g. /nx/search/jobs/saved/ → /nx/find-work/), which would cause import
+// (Upwork has moved the saved-jobs page before), which would cause import
 // operations to scrape the wrong page.
 // ---------------------------------------------------------------------------
 
 const URL_CHECKS: Array<{ label: string; url: string; expectedPath: string }> = [
-  { label: 'Saved Jobs',         url: 'https://www.upwork.com/nx/find-work/saved/',       expectedPath: '/nx/find-work/saved' },
+  { label: 'Saved Jobs',         url: 'https://www.upwork.com/nx/search/jobs/saved/',     expectedPath: '/nx/search/jobs/saved' },
   { label: 'Proposals',          url: 'https://www.upwork.com/nx/proposals/',              expectedPath: '/nx/proposals' },
   { label: 'Archived Proposals', url: 'https://www.upwork.com/nx/proposals/archived',      expectedPath: '/nx/proposals' },
   { label: 'Find Work',          url: 'https://www.upwork.com/nx/find-work/',              expectedPath: '/nx/find-work' },
@@ -552,7 +552,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'IMPORT_SAVED_JOBS':
       // Navigate to saved jobs page in background tab, scrape, close, return cards
       (async () => {
-        const savedUrl = 'https://www.upwork.com/nx/find-work/saved/';
+        // Upwork serves saved jobs here again (2026-11-09); /nx/find-work/saved/ no longer lists them.
+        const savedUrl = 'https://www.upwork.com/nx/search/jobs/saved/';
         logger.log('UpApply Background: Opening saved jobs tab:', savedUrl);
         let savedTabId: number | null = null;
         try {
@@ -628,7 +629,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           });
 
           if (!tilesReady) {
-            sendResponse({ success: false, error: 'No saved jobs found — page may not have loaded or you have no bookmarked jobs.' });
+            const landed = await chrome.tabs.get(savedTab.id!).then((t) => t.url || '').catch(() => '');
+            sendResponse({ success: false, error: `No saved jobs found on ${landed || savedUrl} — page may not have loaded, Upwork may have moved it, or you have no bookmarked jobs.` });
             return;
           }
 
