@@ -2,6 +2,8 @@ import type { JobImportItem } from './api-client';
 
 /** Saved jobs posted within this many days go to the Queue; older ones are kept as a signal only. */
 export const SAVED_JOBS_QUEUE_DAYS = 14;
+/** Saved jobs per import request: the server embeds each one, so a 500-save list goes in steps. */
+export const SAVED_IMPORT_BATCH = 25;
 
 export interface SavedJobCard {
   upworkJobId: string;
@@ -20,6 +22,7 @@ export function parseDaysAgo(raw: string | null | undefined): number {
   const s = raw.toLowerCase();
   if (s.includes('just now') || s.includes('minute') || s.includes('hour')) return 0;
   if (s.includes('yesterday')) return 1;
+  if (s.includes('last week')) return 7;
   const daysMatch = s.match(/(\d+)\s*day/);
   if (daysMatch) return parseInt(daysMatch[1], 10);
   const weeksMatch = s.match(/(\d+)\s*week/);
@@ -42,4 +45,10 @@ export function savedImportItems(cards: SavedJobCard[]): JobImportItem[] {
     client_info: c.clientInfo,
     signal_only: parseDaysAgo(c.postedDateRaw) > SAVED_JOBS_QUEUE_DAYS,
   }));
+}
+
+export function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }
