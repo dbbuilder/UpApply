@@ -368,10 +368,13 @@ class ApiClient {
     });
   }
 
-  async generateScreeningAnswer(question: string, jobTitle?: string, jobDescription?: string, jobSkills?: string[], coverLetterId?: string) {
+  async generateScreeningAnswer(
+    question: string, jobTitle?: string, jobDescription?: string, jobSkills?: string[], coverLetterId?: string,
+    prompt?: ScreeningAnswerPrompt,
+  ) {
     return this.request<{ answer: string; verify_warnings?: string[] | null; claims_verified?: boolean | null }>('/api/v1/screening-answers/generate', {
       method: 'POST',
-      body: { question, job_title: jobTitle, job_description: jobDescription, job_skills: jobSkills, cover_letter_id: coverLetterId },
+      body: { question, job_title: jobTitle, job_description: jobDescription, job_skills: jobSkills, cover_letter_id: coverLetterId, ...prompt },
     });
   }
 
@@ -980,6 +983,16 @@ export interface Job {
   expires_at?: string;
   scraped_at: string;
   created_at: string;
+}
+
+/** The Apply panel's per-question prompt (v2): what to say, a one-tap tweak, the answer being
+ *  revised, the other answers on this application and the letter being sent. */
+export interface ScreeningAnswerPrompt {
+  instruction?: string;
+  tweak?: 'shorter' | 'specific' | 'link' | 'number';
+  current_answer?: string;
+  other_answers?: { question: string; answer: string }[];
+  cover_letter_text?: string;
 }
 
 export interface JobImportItem {
