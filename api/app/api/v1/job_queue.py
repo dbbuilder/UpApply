@@ -44,8 +44,8 @@ from app.schemas.job_queue import (
     JobQueueItemResponse,
     ProposalResponseRequest,
 )
-from app.services import job_ingest
-from app.services.job_prefilter import pre_filter
+from app.services import job_fit, job_ingest
+from app.services.job_prefilter import MAX_JOB_AGE_DAYS, parse_posted_text, pre_filter
 from app.services.skip_reasons import (
     PRE_FILTER_PREFIX,
     encode,
@@ -209,6 +209,7 @@ async def ingest_job_queue(
     queued_ids: List[str] = []
     scores: List[float] = []
     analysed = 0  # scoring calls made (the cap), stored or not
+    shadow: List[tuple] = []  # (item, job_fit.ShadowJob) for the job-fit rubric, scored after the loop
 
     for job in body.jobs:
         slug = job_ingest.upwork_job_slug(job.upwork_url)
@@ -222,6 +223,11 @@ async def ingest_job_queue(
         client_info = job.client_info.model_dump(exclude_none=True) if job.client_info else {}
         if job.proposals_text and "proposals" not in client_info:
             client_info["proposals"] = job.proposals_text
+        posted = job_ingest.parse_posted_at(job.posted_at) or parse_posted_text(job.posted_text, now)
+        if posted is not None:
+            client_info.setdefault("posted_at", posted.isoformat())
+        if job.posted_text:
+            client_info.setdefault("posted_text", job.posted_text)
         item = JobQueueItem(
             id=str(uuid4()),
             user_id=current_user.id,
@@ -294,6 +300,11 @@ async def ingest_job_queue(
             continue
         counts["scored"] += 1
         scores.append(item.ai_score)
+        shadow.append((item, job_fit.ShadowJob(
+            title=job.title, description=job.description, budget_amount=job.budget_amount,
+            budget_type=job.budget_type, client_info=client_info, posted_at=posted,
+            embedding=getattr(ar, "query_embedding", None),
+        )))
         if outcome == "suggested":
             counts["suggested"] += 1
             queued_ids.append(item.id)
@@ -301,6 +312,10 @@ async def ingest_job_queue(
             ap.suggestions_shown += 1
         else:
             counts["below_threshold"] += 1
+
+    # Shadow week: stored beside ai_score, never changes the score, the threshold or the status.
+    await job_fit.shadow_score(db, current_user.id, profile, shadow, now=now,
+                               lookback_days=body.max_age_days or MAX_JOB_AGE_DAYS)
 
     if sq is not None:
         apply_run_stats(

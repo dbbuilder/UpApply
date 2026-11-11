@@ -10,7 +10,7 @@ when set, else FIXED_BUDGET_MIN / HOURLY_MIN_TOP_RATE.
 """
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, Optional
+from typing import Iterable, List, Optional
 
 MAX_JOB_AGE_DAYS = 7  # skip jobs older than this
 
@@ -80,6 +80,13 @@ def is_blocked_country(country: Optional[str]) -> bool:
     return bool(country) and _BLOCKED_COUNTRY_RE.search(country.lower()) is not None
 
 
+def budget_values(budget_amount: Optional[str]) -> List[float]:
+    """Dollar figures in a budget string ("$80.00-$120.00" -> [80.0, 120.0]); [] when none."""
+    if not budget_amount:
+        return []
+    return [float(v.replace(",", "")) for v in _BUDGET_VALUE_RE.findall(budget_amount)]
+
+
 def pre_filter(
     *,
     title: str,
@@ -124,7 +131,7 @@ def pre_filter(
 
     # 3 & 4. Budget gate
     if budget_amount:
-        all_values = [float(v.replace(",", "")) for v in _BUDGET_VALUE_RE.findall(budget_amount)]
+        all_values = budget_values(budget_amount)
         if all_values:
             min_val, max_val = min(all_values), max(all_values)
             if budget_type == "hourly":
