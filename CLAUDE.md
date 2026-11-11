@@ -150,6 +150,7 @@ sql = text("""
 The job analysis service (`api/app/services/job_analysis.py`) scores jobs against user profiles:
 - Skill matching (exact + synonyms)
 - Deal breaker detection
+- Client must-haves (`api/app/services/job_requirements.py`, Chris 2026-11-11): beside the score call, one `job_fit_model` (`claude-haiku-4-5`) structured call lists the post's stated must-haves (must / required / only / at least; never nice-to-haves), each with a verbatim quote (checked in code) and a status against the profile (`freelancer_location`, timezone, stack, certifications) and the 12 closest approved facts: met, unmet or unknown. An unmet must-have caps the live match score at 45 and prefixes the reason with "Doesn't meet: '<quote>'"; the ingest files it as `pre_filter:requirement_unmet: <quote>` (Score anyway rescues it); unknown never penalises; no Anthropic key or a failed call leaves the score as it was. The rubric's shadow total is capped the same way
 - Saved jobs: `run_full_analysis` finds the user's 3 closest saved jobs (`find_similar_saved`) and the current LLM score sees them as examples of wanted work, beside past wins and 4-5 star ratings
 - Memory relevance scoring
 - Match score calculation (0-100)
@@ -311,6 +312,7 @@ exec(open('scripts/import_chatgpt_corpus.py').read())
 | 027 | Canonical proposal stages: `proposals.stage` (backfilled from `status` via the alias map in `app/services/proposal_status.py`) + append-only `proposal_stage_events` transition ledger |
 | 028 | Add learned_rules table (rules proposed from the user's own edits; proposed → accepted/rejected once, by the user) |
 | 029 | Add job_queue.score_breakdown JSONB (job-fit rubric breakdown, shadow beside ai_score) |
+| 030 | Add user_profiles.freelancer_location (where the freelancer is, for "U.S. only"-style must-haves) |
 
 ## Environment Variables
 

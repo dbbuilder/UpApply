@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Tuple
 
 from app.core.config import settings
 from app.services.facts import search_facts
+from app.services.job_requirements import REQUIREMENT_CAP
 from app.services.job_prefilter import (
     FIXED_BUDGET_MIN,
     FIXED_BUDGET_PLACEHOLDERS,
@@ -74,6 +75,7 @@ class ShadowJob:
     posted_at: Optional[datetime]
     embedding: Optional[List[float]]
     saved: List[dict] = field(default_factory=list)  # [{title, similarity}] closest saved jobs first
+    unmet: List[dict] = field(default_factory=list)  # unmet client must-haves from the live analysis
 
 
 def _grade_from_steps(value: float, steps: Tuple[float, ...]) -> int:
@@ -298,8 +300,12 @@ async def score_one(job: ShadowJob, profile, *, best_similarity: Optional[float]
         if code in RED_FLAG_CODES and code not in flags:
             flags.append(code)
 
+    score = total({d: v["grade"] for d, v in dims.items()}, flags)
+    if job.unmet:
+        score = min(score, REQUIREMENT_CAP)
     return {
-        "total": total({d: v["grade"] for d, v in dims.items()}, flags),
+        "total": score,
+        "unmet_requirements": [u.get("quote", "") for u in job.unmet],
         "dimensions": dims,
         "red_flags": flags,
         "model": settings.job_fit_model,

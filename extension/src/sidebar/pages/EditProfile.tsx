@@ -103,6 +103,7 @@ export default function EditProfilePage() {
   const [industries, setIndustries] = useState<string[]>([]);
   const [clientTypes, setClientTypes] = useState<string[]>([]);
   const [clientLocations, setClientLocations] = useState<string[]>([]);
+  const [freelancerLocation, setFreelancerLocation] = useState('');
   const [teamSize, setTeamSize] = useState('');
   const [duration, setDuration] = useState('');
 
@@ -138,6 +139,7 @@ export default function EditProfilePage() {
     setIndustries(profile.preferred_industries || []);
     setClientTypes(profile.preferred_client_types || []);
     setClientLocations(profile.preferred_client_locations || []);
+    setFreelancerLocation(profile.freelancer_location || '');
     setTeamSize(profile.preferred_team_size || '');
     setDuration(profile.project_duration_preference || '');
     setAvoidKeywords(profile.avoid_keywords || []);
@@ -202,6 +204,7 @@ export default function EditProfilePage() {
         preferred_industries: industries,
         preferred_client_types: clientTypes,
         preferred_client_locations: clientLocations,
+        freelancer_location: freelancerLocation.trim() || undefined,
         preferred_team_size: teamSize || undefined,
         project_duration_preference: duration || undefined,
       });
@@ -379,6 +382,11 @@ export default function EditProfilePage() {
                 <label className="text-xs font-medium text-gray-600 mb-1 block">Preferred Client Locations</label>
                 <p className="text-xs text-gray-400 mb-1">Countries/regions that get a score boost (e.g. "United States", "Canada")</p>
                 <TagInput values={clientLocations} onChange={setClientLocations} placeholder="Add country or region…" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Your Location</label>
+                <p className="text-xs text-gray-400 mb-1">Where you are, so jobs limited to another country (e.g. "U.S. only") score low instead of high</p>
+                <input type="text" value={freelancerLocation} onChange={e => setFreelancerLocation(e.target.value)} className="input text-sm w-full" placeholder="e.g. United States" />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 mb-1 block">Team Size</label>

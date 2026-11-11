@@ -166,6 +166,7 @@ async def create_job_queue_item(
 # ── POST /api/v1/job-queue/ingest ──────────────────────────────────────────
 
 BELOW_THRESHOLD = PRE_FILTER_PREFIX + "below_threshold"
+REQUIREMENT_UNMET = PRE_FILTER_PREFIX + "requirement_unmet"
 
 
 @router.post("/ingest", response_model=JobQueueIngestResponse)
@@ -285,7 +286,9 @@ async def ingest_job_queue(
             else:
                 outcome = "below_threshold"
                 item.status = "pre_filtered"
-                item.rejection_reason = encode(BELOW_THRESHOLD, f"{ar.match_score:g}")
+                unmet = getattr(ar, "unmet_requirements", None)
+                item.rejection_reason = (encode(REQUIREMENT_UNMET, unmet[0]["quote"]) if unmet
+                                         else encode(BELOW_THRESHOLD, f"{ar.match_score:g}"))
 
         try:
             async with db.begin_nested():  # a concurrent ingest may have stored this URL
@@ -305,6 +308,7 @@ async def ingest_job_queue(
             budget_type=job.budget_type, client_info=client_info, posted_at=posted,
             embedding=getattr(ar, "query_embedding", None),
             saved=getattr(ar, "similar_saved", None) or [],
+            unmet=getattr(ar, "unmet_requirements", None) or [],
         )))
         if outcome == "suggested":
             counts["suggested"] += 1

@@ -507,3 +507,20 @@ async def test_saved_jobs_found_by_the_analysis_reach_the_rubric(client: AsyncCl
     (item,) = await _items(uid)
     assert item.score_breakdown["dimensions"]["saved_match"]["grade"] == 4
     assert "Fractional CTO for SaaS" in call.await_args.kwargs["user"]
+
+
+@pytest.mark.asyncio
+async def test_a_capped_job_is_filed_as_requirement_unmet(client: AsyncClient, auth_headers_with_profile):
+    uid = await _user_id(client, auth_headers_with_profile)
+
+    async def scorer(**kwargs):
+        ar = _analysis(45.0)
+        ar.unmet_requirements = [{"requirement": "Located in the U.S.", "quote": "U.S. only", "kind": "location",
+                                  "why": "Profile location is Canada"}]
+        return ar
+
+    resp = await _post(client, auth_headers_with_profile, {"jobs": [_job(1)]}, scorer)
+    assert resp.status_code == 200 and resp.json()["below_threshold"] == 1
+    (item,) = await _items(uid)
+    assert item.status == "pre_filtered"
+    assert item.rejection_reason == "pre_filter:requirement_unmet: U.S. only"
