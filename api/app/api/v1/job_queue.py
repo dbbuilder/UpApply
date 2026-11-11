@@ -280,13 +280,14 @@ async def ingest_job_queue(
             )
             item.ai_score = ar.match_score
             item.ai_reasoning = job_ingest.analysis_reasoning(ar)
-            if ar.match_score >= threshold:
+            unmet = getattr(ar, "unmet_requirements", None)
+            if ar.match_score >= threshold and not unmet:
                 outcome = "suggested"
                 item.status = "suggested"
             else:
+                # An unmet must-have is never suggested, whatever the user's threshold
                 outcome = "below_threshold"
                 item.status = "pre_filtered"
-                unmet = getattr(ar, "unmet_requirements", None)
                 item.rejection_reason = (encode(REQUIREMENT_UNMET, unmet[0]["quote"]) if unmet
                                          else encode(BELOW_THRESHOLD, f"{ar.match_score:g}"))
 

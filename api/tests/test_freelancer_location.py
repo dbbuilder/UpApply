@@ -10,3 +10,14 @@ async def test_location_round_trips_through_preferences(client: AsyncClient, aut
     assert resp.status_code == 200
     profile = (await client.get("/api/v1/profile", headers=auth_headers_with_profile)).json()
     assert profile["freelancer_location"] == "United States"
+
+
+@pytest.mark.asyncio
+async def test_location_can_be_cleared_with_null(client: AsyncClient, auth_headers_with_profile):
+    await client.put("/api/v1/profile/preferences", headers=auth_headers_with_profile,
+                     json={"freelancer_location": "United States"})
+    resp = await client.put("/api/v1/profile/preferences", headers=auth_headers_with_profile,
+                            json={"freelancer_location": None})
+    assert resp.status_code == 200
+    profile = (await client.get("/api/v1/profile", headers=auth_headers_with_profile)).json()
+    assert profile["freelancer_location"] is None

@@ -816,7 +816,7 @@ export interface Profile {
   preferred_team_size?: string;
   preferred_client_types?: string[];
   preferred_client_locations?: string[];
-  freelancer_location?: string;  // where the freelancer is, for "U.S. only"-style must-haves
+  freelancer_location?: string | null;  // where the freelancer is, for "U.S. only"-style must-haves
   project_duration_preference?: string;
   avoid_keywords?: string[];
   avoid_industries?: string[];
@@ -851,7 +851,7 @@ export interface ProfilePreferences {
   preferred_team_size?: string;
   preferred_client_types?: string[];
   preferred_client_locations?: string[];
-  freelancer_location?: string;  // where the freelancer is, for "U.S. only"-style must-haves
+  freelancer_location?: string | null;  // where the freelancer is, for "U.S. only"-style must-haves
   project_duration_preference?: string;
 }
 

@@ -754,7 +754,7 @@ async def run_full_analysis(
     # Use LLM scoring blended with rule-based (70/30) when available
     # The must-have check sees the freelancer's closest approved facts; it runs beside the
     # score call, so it adds no wait.
-    fact_statements: List[str] = []
+    fact_statements: Optional[List[str]] = None  # None = lookup unavailable, absence proves nothing
     if query_embedding is not None:
         from app.services.facts import search_facts
         try:

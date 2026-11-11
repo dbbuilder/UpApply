@@ -96,3 +96,15 @@ async def test_run_full_analysis_caps_the_live_score_on_an_unmet_must_have():
     assert ar.unmet_requirements == [{"requirement": "Located in the U.S.", "quote": "U.S. only", "kind": "location",
                                       "why": "x"}]
     assert ar.reason.startswith("Doesn't meet: 'U.S. only'")
+
+
+@pytest.mark.asyncio
+async def test_unavailable_facts_mean_absence_proves_nothing():
+    call = AsyncMock(return_value={"must_haves": []})
+    with patch.object(jr, "structured_call", call), patch.object(jr.settings, "anthropic_api_key", "sk-test"):
+        await jr.check_requirements(title="t", description=POST, profile=_profile(), facts=None)
+        unavailable = call.await_args.kwargs["system"]
+        await jr.check_requirements(title="t", description=POST, profile=_profile(), facts=[])
+        none_approved = call.await_args.kwargs["system"]
+    assert "could not be looked up" in unavailable and "only a contradiction counts" in unavailable
+    assert "could not be looked up" not in none_approved

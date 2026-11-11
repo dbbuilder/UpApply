@@ -204,7 +204,7 @@ export default function EditProfilePage() {
         preferred_industries: industries,
         preferred_client_types: clientTypes,
         preferred_client_locations: clientLocations,
-        freelancer_location: freelancerLocation.trim() || undefined,
+        freelancer_location: freelancerLocation.trim() || null,  // null clears it (undefined would keep the old value)
         preferred_team_size: teamSize || undefined,
         project_duration_preference: duration || undefined,
       });
