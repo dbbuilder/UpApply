@@ -23,6 +23,7 @@ export default function GeneratorPage() {
     savedJobId,
     applicationId,
     analyzeCurrentJob,
+    cancelAnalysis,
     generateCoverLetter,
     fillCoverLetter,
     fillScreeningQuestion,
@@ -589,6 +590,7 @@ export default function GeneratorPage() {
               analysisLoading={analysisLoading}
               analysisError={analysisError}
               onAnalyze={() => analyzeCurrentJob()}
+              onCancelAnalysis={cancelAnalysis}
               addedSkills={addedSkills}
               addingSkill={addingSkill}
               onAddMissingSkill={handleAddMissingSkill}
