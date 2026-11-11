@@ -234,11 +234,12 @@ class ApiClient {
     });
   }
 
-  async getJobs(minScore?: number, source?: string, isSaved?: boolean) {
+  async getJobs(minScore?: number, source?: string, isSaved?: boolean, excludeSource?: string) {
     const p = new URLSearchParams();
     if (minScore !== undefined) p.set('min_score', String(minScore));
     if (source) p.set('source', source);
     if (isSaved !== undefined) p.set('is_saved', String(isSaved));
+    if (excludeSource) p.set('exclude_source', excludeSource);
     const qs = p.toString();
     return this.request<Job[]>(`/api/v1/jobs${qs ? `?${qs}` : ''}`);
   }
@@ -989,6 +990,7 @@ export interface JobImportItem {
   posted_date_raw?: string;
   client_info?: Record<string, unknown>;
   skills?: string[];
+  signal_only?: boolean;  // saved job too old to queue: stored only as a scoring/search signal
 }
 
 export interface CoverLetterGenerateRequest {

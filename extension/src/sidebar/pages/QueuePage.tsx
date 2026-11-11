@@ -170,7 +170,7 @@ export default function QueuePage() {
     setError(null);
     try {
       const [jobs, applications, letters] = await Promise.all([
-        apiClient.getJobs(),
+        apiClient.getJobs(undefined, undefined, undefined, 'saved_signal'),  // old saves are a signal, not work
         apiClient.getApplications(),
         apiClient.getCoverLetters(),
       ]);
