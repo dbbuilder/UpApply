@@ -304,6 +304,7 @@ async def ingest_job_queue(
             title=job.title, description=job.description, budget_amount=job.budget_amount,
             budget_type=job.budget_type, client_info=client_info, posted_at=posted,
             embedding=getattr(ar, "query_embedding", None),
+            saved=getattr(ar, "similar_saved", None) or [],
         )))
         if outcome == "suggested":
             counts["suggested"] += 1

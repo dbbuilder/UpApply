@@ -486,3 +486,24 @@ async def test_posted_time_is_stored_in_client_info(client: AsyncClient, auth_he
     assert timedelta(days=1, hours=23) < age < timedelta(days=2, hours=1)
     assert two["posted_text"] == "Posted 2 days ago"
     assert "posted_at" not in (by_title["FastAPI backend 3"].client_info or {})
+
+
+@pytest.mark.asyncio
+async def test_saved_jobs_found_by_the_analysis_reach_the_rubric(client: AsyncClient, auth_headers_with_profile):
+    from app.services import job_fit
+
+    uid = await _user_id(client, auth_headers_with_profile)
+
+    async def scorer(**kwargs):
+        ar = _analysis(80.0)
+        ar.similar_saved = [{"title": "Fractional CTO for SaaS", "similarity": 0.7}]
+        return ar
+
+    call = AsyncMock(return_value=RUBRIC_REPLY | {"red_flags": []})
+    with patch.object(job_fit, "structured_call", call), \
+         patch.object(job_fit.settings, "anthropic_api_key", "sk-test"):
+        resp = await _post(client, auth_headers_with_profile, {"jobs": [_job(1)]}, scorer)
+    assert resp.status_code == 200
+    (item,) = await _items(uid)
+    assert item.score_breakdown["dimensions"]["saved_match"]["grade"] == 4
+    assert "Fractional CTO for SaaS" in call.await_args.kwargs["user"]
