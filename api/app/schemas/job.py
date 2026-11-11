@@ -349,6 +349,9 @@ class JobImportItem(BaseModel):
     posted_date_raw: Optional[str] = None  # relative string like "2 hours ago"
     client_info: Optional[dict] = None
     skills: Optional[List[str]] = None
+    # Saved job too old to apply to: stored (with its embedding) as a preference signal for
+    # scoring and searches, never analysed or shown in the Queue (source "saved_signal").
+    signal_only: bool = False
 
 
 class JobBulkImportRequest(BaseModel):
