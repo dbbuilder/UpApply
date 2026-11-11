@@ -260,3 +260,12 @@ async def test_score_one_grades_saved_match_and_shows_saved_titles():
     assert "<saved_jobs>" in user and "Interim CTO" in user
     assert user.count("</job>") == 1  # a saved title cannot close the job block
     assert "saved" in call.await_args.kwargs["system"].lower()
+
+
+@pytest.mark.asyncio
+async def test_unmet_must_haves_cap_the_rubric_total_too():
+    unmet = [{"requirement": "U.S. based", "quote": "U.S. only", "kind": "location", "why": "Canada"}]
+    with patch.object(job_fit, "structured_call", AsyncMock(return_value=LLM_REPLY)):
+        bd = await job_fit.score_one(_job(unmet=unmet), _profile(), best_similarity=0.6, now=NOW, lookback_days=7)
+    assert bd["total"] == job_fit.REQUIREMENT_CAP
+    assert bd["unmet_requirements"] == ["U.S. only"]

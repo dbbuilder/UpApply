@@ -507,3 +507,40 @@ async def test_saved_jobs_found_by_the_analysis_reach_the_rubric(client: AsyncCl
     (item,) = await _items(uid)
     assert item.score_breakdown["dimensions"]["saved_match"]["grade"] == 4
     assert "Fractional CTO for SaaS" in call.await_args.kwargs["user"]
+
+
+@pytest.mark.asyncio
+async def test_a_capped_job_is_filed_as_requirement_unmet(client: AsyncClient, auth_headers_with_profile):
+    uid = await _user_id(client, auth_headers_with_profile)
+
+    async def scorer(**kwargs):
+        ar = _analysis(45.0)
+        ar.unmet_requirements = [{"requirement": "Located in the U.S.", "quote": "U.S. only", "kind": "location",
+                                  "why": "Profile location is Canada"}]
+        return ar
+
+    resp = await _post(client, auth_headers_with_profile, {"jobs": [_job(1)]}, scorer)
+    assert resp.status_code == 200 and resp.json()["below_threshold"] == 1
+    (item,) = await _items(uid)
+    assert item.status == "pre_filtered"
+    assert item.rejection_reason == "pre_filter:requirement_unmet: U.S. only"
+
+
+@pytest.mark.asyncio
+async def test_an_unmet_must_have_is_never_suggested_even_above_the_threshold(
+    client: AsyncClient, auth_headers_with_profile
+):
+    uid = await _user_id(client, auth_headers_with_profile)
+    async with TestSessionLocal() as db:  # a threshold under the cap must not let it through
+        db.add(UserAutonomyProfile(user_id=uid, score_threshold=40.0))
+        await db.commit()
+
+    async def scorer(**kwargs):
+        ar = _analysis(45.0)
+        ar.unmet_requirements = [{"requirement": "UK based", "quote": "UK only", "kind": "location", "why": "US"}]
+        return ar
+
+    resp = await _post(client, auth_headers_with_profile, {"jobs": [_job(1)]}, scorer)
+    assert resp.status_code == 200 and resp.json()["suggested"] == 0
+    (item,) = await _items(uid)
+    assert item.status == "pre_filtered" and item.rejection_reason == "pre_filter:requirement_unmet: UK only"

@@ -10,6 +10,7 @@ from app.models.user import UserProfile
 from app.models.memory import Memory
 from app.models.proposal import PENDING_PROPOSAL_STATUSES
 from app.schemas.job import SkillMatch
+from app.services import job_requirements
 from app.services.untrusted import neutralise
 
 
@@ -124,6 +125,9 @@ class AnalysisResult:
     reason: Optional[str] = None
     query_embedding: Optional[List[float]] = None  # reused by the job-fit shadow score
     similar_saved: List[Dict] = field(default_factory=list)  # closest saved jobs, reused by job-fit
+    # Client must-haves (app/services/job_requirements.py): unmet ones cap match_score
+    unmet_requirements: List[Dict] = field(default_factory=list)
+    unknown_requirements: List[Dict] = field(default_factory=list)
 
 
 # Skill synonyms for fuzzy matching
@@ -748,13 +752,31 @@ async def run_full_analysis(
     )
 
     # Use LLM scoring blended with rule-based (70/30) when available
-    llm_score, llm_reason = await score_job_with_llm(
-        job_title=job_title or job_description[:80],
-        job_description=job_description,
-        profile=profile,
-        similar_wins=similar_wins,
-        highly_rated=highly_rated,
-        saved=similar_saved,
+    # The must-have check sees the freelancer's closest approved facts; it runs beside the
+    # score call, so it adds no wait.
+    fact_statements: Optional[List[str]] = None  # None = lookup unavailable, absence proves nothing
+    if query_embedding is not None:
+        from app.services.facts import search_facts
+        try:
+            async with db.begin_nested():  # a failed query must not abort the caller's transaction
+                hits = await search_facts(db, user_id, query_embedding, limit=job_requirements.MAX_FACTS)
+            fact_statements = [f.statement for f, _ in hits]
+        except Exception as exc:
+            logger.warning("Fact search for the requirement check failed: %s", type(exc).__name__)
+
+    import asyncio
+    (llm_score, llm_reason), requirement_check = await asyncio.gather(
+        score_job_with_llm(
+            job_title=job_title or job_description[:80],
+            job_description=job_description,
+            profile=profile,
+            similar_wins=similar_wins,
+            highly_rated=highly_rated,
+            saved=similar_saved,
+        ),
+        job_requirements.check_requirements(
+            title=job_title or "", description=job_description, profile=profile, facts=fact_statements,
+        ),
     )
 
     if llm_score is not None:
@@ -775,6 +797,12 @@ async def run_full_analysis(
         prefix = " | ".join(modifier_notes)
         reason = f"{prefix} — {reason}" if reason else prefix
 
+    # An unmet client must-have caps the score below the threshold, whatever the fit
+    match_score = job_requirements.apply_cap(match_score, requirement_check)
+    unmet_note = job_requirements.unmet_note(requirement_check)
+    if unmet_note:
+        reason = f"{unmet_note} — {reason}" if reason else unmet_note
+
     recommendation = generate_recommendation(match_score, deal_breakers, concerns)
 
     return AnalysisResult(
@@ -789,6 +817,8 @@ async def run_full_analysis(
         reason=reason,
         query_embedding=query_embedding,
         similar_saved=similar_saved,
+        unmet_requirements=job_requirements.as_dicts(requirement_check.unmet) if requirement_check else [],
+        unknown_requirements=job_requirements.as_dicts(requirement_check.unknown) if requirement_check else [],
     )
 
 
