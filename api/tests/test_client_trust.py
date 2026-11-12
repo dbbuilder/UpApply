@@ -228,3 +228,9 @@ def test_total_spent_reads_the_amount_next_to_spent(value, shown):
 def test_page_text_without_a_spend_is_no_data_not_the_rating():
     blob = "Payment method verified 4.8 4.84 of 12 reviews USA New York 32 jobs posted 100% hire rate"
     assert _spent_signal(blob) is None
+
+
+def test_a_spend_claim_in_the_description_does_not_beat_the_client_section():
+    blob = ("Summary Trusted client with $900K total spent on Upwork! Build our CRM. "
+            "About the client Payment method verified 4.8 of 12 reviews $15K total spent 43 hires")
+    assert _spent_signal(blob) == "$15K on Upwork"
