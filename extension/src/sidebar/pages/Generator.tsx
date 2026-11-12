@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../store';
 import { apiClient, ScreeningAnswerSearchResult, AttachmentData, MilestoneSuggestion, RefineMessage } from '../../lib/api-client';
+import { currentAnswer, otherAnswers, type AnswerTweak } from '../../lib/screening-context';
 import { loadInclusions, saveInclusions } from '../../lib/job-inclusions';
 import JobHeader from '../components/generator/JobHeader';
 import AnalysisPanel from '../components/generator/AnalysisPanel';
@@ -35,6 +36,7 @@ export default function GeneratorPage() {
 
   // Screening question state
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
+  const [answerPrompts, setAnswerPrompts] = useState<Record<string, string>>({});
   // Keys of AI answers whose claim check was skipped (claims_verified === false).
   const [unverifiedAnswers, setUnverifiedAnswers] = useState<Record<string, boolean>>({});
   const [suggestedAnswers, setSuggestedAnswers] = useState<Record<string, ScreeningAnswerSearchResult[]>>({});
@@ -384,16 +386,33 @@ export default function GeneratorPage() {
     setUnverifiedAnswers(prev => ({ ...prev, [`q${index}`]: false }));
   };
 
-  const handleGenerateAnswer = async (question: string, index: number) => {
+  // What is typed in Upwork's own question boxes (answers written there count as context)
+  const readPageAnswers = (selectors: string[]) => new Promise<string[]>((resolve) => {
+    chrome.runtime.sendMessage({ type: 'READ_SCREENING_ANSWERS', selectors }, (resp) => {
+      resolve(chrome.runtime.lastError ? [] : (resp?.values ?? []));
+    });
+  });
+
+  const handleGenerateAnswer = async (question: string, index: number, tweak?: AnswerTweak) => {
     const key = `q${index}`;
     setGeneratingAnswers(prev => ({ ...prev, [key]: true }));
     try {
+      const questions = currentJob?.screeningQuestions ?? [];
+      const pageValues = await readPageAnswers(questions.map(q => q.inputSelector));
+      const existing = currentAnswer(index, questionAnswers, pageValues);
       const result = await apiClient.generateScreeningAnswer(
         question,
         currentJob?.title ?? undefined,
         currentJob?.description ?? undefined,
         currentJob?.skills ?? undefined,
         useAppStore.getState().coverLetterId ?? undefined,
+        {
+          instruction: answerPrompts[key]?.trim() || undefined,
+          tweak,
+          current_answer: existing || undefined,  // there is an answer: revise it rather than start over
+          other_answers: otherAnswers(questions, index, questionAnswers, pageValues),
+          cover_letter_text: useAppStore.getState().coverLetter ?? undefined,
+        },
       );
       setQuestionAnswers(prev => ({ ...prev, [key]: result.answer }));
       setUnverifiedAnswers(prev => ({ ...prev, [key]: result.claims_verified === false }));
@@ -676,6 +695,8 @@ export default function GeneratorPage() {
                 suggestedAnswers={suggestedAnswers}
                 loadingSuggestions={loadingSuggestions}
                 generatingAnswers={generatingAnswers}
+                answerPrompts={answerPrompts}
+                onPromptChange={(index, value) => setAnswerPrompts(prev => ({ ...prev, [`q${index}`]: value }))}
                 onAnswerChange={handleAnswerChange}
                 onQuestionFocus={handleQuestionFocus}
                 onUseSuggestedAnswer={handleUseSuggestedAnswer}

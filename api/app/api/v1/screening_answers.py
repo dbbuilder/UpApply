@@ -1,5 +1,5 @@
 """Screening answer endpoints with pgvector semantic search."""
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from app.core.rate_limit import limiter
@@ -16,7 +16,7 @@ from app.models.user import User, UserProfile
 from app.models.screening_answer import ScreeningAnswer
 from app.models.cover_letter import CoverLetter
 from app.schemas.job import MAX_GEN_DESCRIPTION, MAX_GEN_TITLE, MAX_SCREENING_QUESTION
-from app.services.generation import generate_application
+from app.services.generation.answer import TWEAKS, write_answer
 from app.services.generation.evidence import EvidenceUnavailable
 from app.services.generation.brief import JobBrief
 from app.services.llm import LLMError
@@ -30,12 +30,25 @@ from app.schemas.screening_answer import (
 )
 
 
+class OtherAnswer(BaseModel):
+    question: str = Field(..., max_length=MAX_SCREENING_QUESTION)
+    answer: str = Field("", max_length=4000)
+
+
 class ScreeningAnswerGenerateRequest(BaseModel):
     question: str = Field(..., max_length=MAX_SCREENING_QUESTION)
     job_title: Optional[str] = Field(None, max_length=MAX_GEN_TITLE)
     job_description: Optional[str] = Field(None, max_length=MAX_GEN_DESCRIPTION)
     job_skills: Optional[List[Annotated[str, Field(max_length=200)]]] = Field(None, max_length=50)
     cover_letter_id: Optional[str] = Field(None, max_length=36)  # v2: reuse this letter's stored brief (spec §2.3)
+    # v2 per-question prompt (Apply panel): what Chris wants said, a one-tap tweak, the answer
+    # being revised, the answers already in the other boxes, and the letter being sent
+    instruction: Optional[str] = Field(None, max_length=600)
+    tweak: Optional[Literal[tuple(TWEAKS)]] = None  # type: ignore[valid-type]
+    current_answer: Optional[str] = Field(None, max_length=4000)
+    other_answers: Optional[List[OtherAnswer]] = Field(None, max_length=10)
+    cover_letter_text: Optional[str] = Field(None, max_length=8000)
+
 
 
 class ScreeningAnswerGenerateResponse(BaseModel):
@@ -250,7 +263,7 @@ async def search_screening_answers(
 
 
 @router.post("/generate", response_model=ScreeningAnswerGenerateResponse)
-@limiter.limit("5/hour")
+@limiter.limit("60/hour")  # per question, with re-asks and tweaks: 5/hour ran out on one application
 async def generate_screening_answer(
     request: Request,
     body: ScreeningAnswerGenerateRequest,
@@ -268,6 +281,7 @@ async def generate_screening_answer(
         cached_brief = None
         title = body.job_title or ""
         description = body.job_description or ""
+        letter_text = body.cover_letter_text
         if body.cover_letter_id:
             letter = (await db.execute(
                 select(CoverLetter).where(
@@ -279,18 +293,21 @@ async def generate_screening_answer(
                 cached_brief = JobBrief.model_validate({**letter.brief, "questions": [body.question]})
                 title = title or cached_brief.title
                 description = description or cached_brief.description
+            if letter is not None and not letter_text:
+                letter_text = letter.final_text or letter.content
         try:
-            result = await generate_application(
-                db=db,
-                user=current_user,
-                profile=profile,
+            result = await write_answer(
+                db, current_user, profile,
+                question=body.question,
                 title=title,
                 description=description,
                 skills=body.job_skills or [],
-                questions=[body.question],
                 brief=cached_brief,
-                credit_usage=False,  # the letter written alongside this answer is discarded
-                answers_only=True,  # so it is neither verified, repaired for, nor warned about
+                cover_letter=letter_text,
+                other_answers=[o.model_dump() for o in (body.other_answers or [])],
+                instruction=body.instruction,
+                tweak=body.tweak,
+                current_answer=body.current_answer,
             )
         except EvidenceUnavailable as exc:
             return generation_unavailable(
@@ -302,9 +319,8 @@ async def generate_screening_answer(
                 exc, status.HTTP_502_BAD_GATEWAY,
                 "Answer generation is temporarily unavailable. Please try again shortly.",
             )
-        answers = result.draft.screening_answers
         return ScreeningAnswerGenerateResponse(
-            answer=answers[0]["answer"] if answers else "",
+            answer=result.answer,
             verify_warnings=result.warnings,
             claims_verified=result.claims_verified,
         )

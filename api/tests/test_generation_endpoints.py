@@ -198,10 +198,12 @@ async def test_cover_letter_generate_rejects_oversized_or_bad_input(
 
 @pytest.mark.asyncio
 async def test_screening_generate_routes_to_v2_when_flag_on(client: AsyncClient, auth_headers_with_profile):
+    from app.services.generation.answer import AnswerResult
+
     await _enable_v2()
     question = "How would you handle the cutover?"
-    engine = AsyncMock(return_value=_result([question]))
-    with patch("app.api.v1.screening_answers.generate_application", engine):
+    engine = AsyncMock(return_value=AnswerResult(answer=f"Answer to {question}", warnings=[WARNING]))
+    with patch("app.api.v1.screening_answers.write_answer", engine):
         resp = await client.post(
             "/api/v1/screening-answers/generate",
             headers=auth_headers_with_profile,
@@ -210,22 +212,34 @@ async def test_screening_generate_routes_to_v2_when_flag_on(client: AsyncClient,
                 "job_title": JOB_DATA["title"],
                 "job_description": JOB_DATA["description"],
                 "job_skills": JOB_DATA["skills_required"],
+                "instruction": "mention the Azure cutover runbook",
+                "tweak": "shorter",
+                "current_answer": "A long answer.",
+                "other_answers": [{"question": "Payments?", "answer": "Integrated FIS and Stripe."}],
+                "cover_letter_text": "The letter.",
             },
         )
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"answer": f"Answer to {question}", "verify_warnings": [WARNING], "claims_verified": True}
     kwargs = engine.call_args.kwargs
-    assert kwargs["questions"] == [question]
+    assert kwargs["question"] == question
     assert kwargs["title"] == JOB_DATA["title"]
     assert kwargs["description"] == JOB_DATA["description"]
     assert kwargs["skills"] == JOB_DATA["skills_required"]
     assert kwargs["brief"] is None
-    assert kwargs["credit_usage"] is False
-    assert kwargs["answers_only"] is True
+    assert kwargs["instruction"] == "mention the Azure cutover runbook"
+    assert kwargs["tweak"] == "shorter"
+    assert kwargs["current_answer"] == "A long answer."
+    assert kwargs["other_answers"] == [{"question": "Payments?", "answer": "Integrated FIS and Stripe."}]
+    assert kwargs["cover_letter"] == "The letter."
 
 
 @pytest.mark.asyncio
-async def test_screening_generate_reuses_stored_brief_of_the_users_letter(client: AsyncClient, auth_headers_with_profile):
+async def test_screening_generate_reuses_stored_brief_and_letter_of_the_users_letter(
+    client: AsyncClient, auth_headers_with_profile
+):
+    from app.services.generation.answer import AnswerResult
+
     await _enable_v2()
     letter_engine = AsyncMock(return_value=_result(["Describe a similar migration."]))
     with patch("app.api.v1.jobs.run_full_analysis", AsyncMock(return_value=_analysis())), \
@@ -239,8 +253,8 @@ async def test_screening_generate_reuses_stored_brief_of_the_users_letter(client
     assert letter.status_code == 200, letter.text
 
     question = "How would you handle the cutover?"
-    engine = AsyncMock(return_value=_result([question]))
-    with patch("app.api.v1.screening_answers.generate_application", engine):
+    engine = AsyncMock(return_value=AnswerResult(answer="a"))
+    with patch("app.api.v1.screening_answers.write_answer", engine):
         resp = await client.post(
             "/api/v1/screening-answers/generate",
             headers=auth_headers_with_profile,
@@ -248,10 +262,10 @@ async def test_screening_generate_reuses_stored_brief_of_the_users_letter(client
         )
     assert resp.status_code == 200, resp.text
     kwargs = engine.call_args.kwargs
-    assert kwargs["credit_usage"] is False
     assert kwargs["brief"].needs == ["Has migrated SQL Server to Azure"]
     assert kwargs["brief"].questions == [question]
     assert kwargs["title"] == JOB_DATA["title"]
+    assert kwargs["cover_letter"] == letter.json()["content"]  # the stored letter when none is sent
 
 
 @pytest.mark.asyncio
@@ -263,7 +277,7 @@ async def test_screening_generate_keeps_legacy_path_when_flag_off(client: AsyncC
         choices=[SimpleNamespace(message=SimpleNamespace(content="Legacy answer"))]
     ))
     engine = AsyncMock()
-    with patch("app.api.v1.screening_answers.generate_application", engine), \
+    with patch("app.api.v1.screening_answers.write_answer", engine), \
          patch("app.api.v1.screening_answers.generate_embedding", AsyncMock(side_effect=RuntimeError("no quota"))), \
          patch("app.api.v1.screening_answers.get_openai_client", return_value=openai_client):
         resp = await client.post(
@@ -284,11 +298,16 @@ async def test_screening_generate_keeps_legacy_path_when_flag_off(client: AsyncC
     {"job_skills": ["s"] * 51},
     {"job_skills": ["s" * 201]},
     {"cover_letter_id": "c" * 37},
+    {"instruction": "i" * 601},
+    {"tweak": "funnier"},
+    {"current_answer": "a" * 4001},
+    {"cover_letter_text": "l" * 8001},
+    {"other_answers": [{"question": "q", "answer": "a"}] * 11},
 ])
 async def test_screening_generate_rejects_oversized_input(client: AsyncClient, auth_headers_with_profile, override):
     await _enable_v2()
     engine = AsyncMock()
-    with patch("app.api.v1.screening_answers.generate_application", engine):
+    with patch("app.api.v1.screening_answers.write_answer", engine):
         resp = await client.post(
             "/api/v1/screening-answers/generate",
             headers=auth_headers_with_profile,
@@ -327,7 +346,7 @@ async def test_screening_generate_v2_evidence_unavailable_is_503(client: AsyncCl
 
     await _enable_v2()
     engine = AsyncMock(side_effect=EvidenceUnavailable("embeddings: quota sk-secret"))
-    with patch("app.api.v1.screening_answers.generate_application", engine):
+    with patch("app.api.v1.screening_answers.write_answer", engine):
         resp = await client.post(
             "/api/v1/screening-answers/generate",
             headers=auth_headers_with_profile,
@@ -356,7 +375,9 @@ async def test_v2_responses_report_claims_not_verified_when_the_check_was_skippe
             headers=auth_headers_with_profile,
             json={"job_data": JOB_DATA, "screening_questions": [question]},
         )
-    with patch("app.api.v1.screening_answers.generate_application", AsyncMock(return_value=skipped)):
+    from app.services.generation.answer import AnswerResult
+    skipped_answer = AnswerResult(answer="a", warnings=[CLAIM_CHECK_SKIPPED], claims_verified=False)
+    with patch("app.api.v1.screening_answers.write_answer", AsyncMock(return_value=skipped_answer)):
         answer = await client.post(
             "/api/v1/screening-answers/generate",
             headers=auth_headers_with_profile,
@@ -431,7 +452,7 @@ async def test_screening_v2_failures_disclose_no_exception_text(
     exc = LLMError("API error from claude-x: sk-ant-SECRET") if error == "llm" \
         else EvidenceUnavailable("needs/anchors embedding failed sk-ant-SECRET")
     caplog.set_level(logging.INFO)
-    with patch("app.api.v1.screening_answers.generate_application", AsyncMock(side_effect=exc)):
+    with patch("app.api.v1.screening_answers.write_answer", AsyncMock(side_effect=exc)):
         resp = await client.post(
             "/api/v1/screening-answers/generate",
             headers=auth_headers_with_profile,

@@ -337,6 +337,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       return true;
 
+    case 'READ_SCREENING_ANSWERS':
+      // Relay to the active Upwork tab without re-injecting the content script (read-only)
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tab = tabs[0];
+        if (!tab?.id || !tab?.url?.includes('upwork.com')) {
+          sendResponse({ values: [] });
+          return;
+        }
+        chrome.tabs.sendMessage(tab.id, { type: 'READ_SCREENING_ANSWERS', selectors: message.selectors }, (resp) => {
+          sendResponse(chrome.runtime.lastError ? { values: [] } : (resp || { values: [] }));
+        });
+      });
+      return true;
+
     case 'FILL_ALL_QUESTIONS':
       chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
         const tab = tabs[0];

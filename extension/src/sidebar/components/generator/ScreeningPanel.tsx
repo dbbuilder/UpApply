@@ -1,5 +1,6 @@
 import type { ScreeningQuestion } from '../../../types';
 import type { ScreeningAnswerSearchResult } from '../../../lib/api-client';
+import { TWEAK_LABELS, type AnswerTweak } from '../../../lib/screening-context';
 
 interface ScreeningPanelProps {
   questions: ScreeningQuestion[];
@@ -8,10 +9,12 @@ interface ScreeningPanelProps {
   suggestedAnswers: Record<string, ScreeningAnswerSearchResult[]>;
   loadingSuggestions: Record<string, boolean>;
   generatingAnswers: Record<string, boolean>;
+  answerPrompts: Record<string, string>;
+  onPromptChange: (index: number, value: string) => void;
   onAnswerChange: (index: number, value: string) => void;
   onQuestionFocus: (question: string, index: number) => void;
   onUseSuggestedAnswer: (index: number, answer: string) => void;
-  onGenerateAnswer: (question: string, index: number) => void;
+  onGenerateAnswer: (question: string, index: number, tweak?: AnswerTweak) => void;
   onFillQuestion: (selector: string, index: number, question: string) => void;
   onFillAll: () => void;
 }
@@ -23,6 +26,8 @@ export default function ScreeningPanel({
   suggestedAnswers,
   loadingSuggestions,
   generatingAnswers,
+  answerPrompts,
+  onPromptChange,
   onAnswerChange,
   onQuestionFocus,
   onUseSuggestedAnswer,
@@ -46,6 +51,15 @@ export default function ScreeningPanel({
         {questions.map((q, index) => (
           <div key={index} className="border-b border-gray-100 pb-3 last:border-0">
             <p className="text-sm text-gray-700 mb-2">{q.question}</p>
+            <input
+              type="text"
+              className="input text-xs w-full mb-2"
+              placeholder="What to say (optional), e.g. mention UpApply's pgvector stack, link GitHub"
+              value={answerPrompts[`q${index}`] || ''}
+              onChange={e => onPromptChange(index, e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !generatingAnswers[`q${index}`]) onGenerateAnswer(q.question, index); }}
+              maxLength={600}
+            />
             {unverifiedAnswers[`q${index}`] && questionAnswers[`q${index}`] && (
               <div role="alert" className="mb-2 rounded-lg border border-red-300 bg-red-50 p-2 text-xs font-medium text-red-800">
                 Claims not verified — review specifics before sending
@@ -88,7 +102,7 @@ export default function ScreeningPanel({
                 disabled={generatingAnswers[`q${index}`]}
                 className="btn-outline text-xs py-1 px-3 disabled:opacity-60"
               >
-                {generatingAnswers[`q${index}`] ? 'Generating...' : 'AI Answer'}
+                {generatingAnswers[`q${index}`] ? 'Writing...' : questionAnswers[`q${index}`] ? 'Rewrite' : 'Write'}
               </button>
               <button
                 type="button"
@@ -99,6 +113,21 @@ export default function ScreeningPanel({
                 Fill &amp; Save
               </button>
             </div>
+            {questionAnswers[`q${index}`] && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {(Object.keys(TWEAK_LABELS) as AnswerTweak[]).map(tweak => (
+                  <button
+                    key={tweak}
+                    type="button"
+                    onClick={() => onGenerateAnswer(q.question, index, tweak)}
+                    disabled={generatingAnswers[`q${index}`]}
+                    className="text-[11px] px-2 py-0.5 rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    {TWEAK_LABELS[tweak]}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ))}
       </div>

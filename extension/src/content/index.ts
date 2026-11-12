@@ -648,6 +648,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       });
       break;
 
+    case 'READ_SCREENING_ANSWERS': {
+      // Read-only: what is typed in each question's box (answers written on Upwork count as context)
+      const values = ((message.selectors as string[]) || []).map((sel) => {
+        try {
+          return (document.querySelector<HTMLTextAreaElement | HTMLInputElement>(sel)?.value ?? '').slice(0, 4000);
+        } catch {
+          return '';
+        }
+      });
+      sendResponse({ values });
+      break;
+    }
+
     case 'FILL_SCREENING_QUESTION':
       const questionFilled = fillScreeningQuestion(message.selector, message.answer);
       sendResponse({ success: questionFilled });
