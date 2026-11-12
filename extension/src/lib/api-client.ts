@@ -10,6 +10,7 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   body?: unknown;
   headers?: Record<string, string>;
+  signal?: AbortSignal;  // aborts the fetch (e.g. Cancel on "Analyzing job...")
 }
 
 class ApiClient {
@@ -44,7 +45,7 @@ class ApiClient {
   }
 
   private async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-    const { method = 'GET', body, headers = {} } = options;
+    const { method = 'GET', body, headers = {}, signal } = options;
 
     const token = await this.getToken();
     if (token) {
@@ -59,6 +60,7 @@ class ApiClient {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      signal,
     });
 
     if (!response.ok) {
@@ -220,10 +222,11 @@ class ApiClient {
   }
 
   // Jobs
-  async analyzeJob(data: JobAnalysisRequest) {
+  async analyzeJob(data: JobAnalysisRequest, signal?: AbortSignal) {
     return this.request<JobAnalysisResponse>('/api/v1/jobs/analyze', {
       method: 'POST',
       body: data,
+      signal,
     });
   }
 

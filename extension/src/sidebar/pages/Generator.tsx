@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../store';
 import { apiClient, ScreeningAnswerSearchResult, AttachmentData, MilestoneSuggestion, RefineMessage } from '../../lib/api-client';
 import { currentAnswer, otherAnswers, type AnswerTweak } from '../../lib/screening-context';
+import { loadInclusions, saveInclusions } from '../../lib/job-inclusions';
 import JobHeader from '../components/generator/JobHeader';
 import AnalysisPanel from '../components/generator/AnalysisPanel';
 import CoverLetterPanel from '../components/generator/CoverLetterPanel';
@@ -24,6 +25,7 @@ export default function GeneratorPage() {
     savedJobId,
     applicationId,
     analyzeCurrentJob,
+    cancelAnalysis,
     generateCoverLetter,
     fillCoverLetter,
     fillScreeningQuestion,
@@ -73,6 +75,23 @@ export default function GeneratorPage() {
 
   // Cover letter options state
   const [inclusions, setInclusions] = useState('');
+  // "Include in cover letter" belongs to the job: load it when the job changes, save as it is typed
+  const inclusionsJobUrl = useRef<string | null>(null);
+  useEffect(() => {
+    const url = currentJob?.url ?? null;
+    inclusionsJobUrl.current = null;  // no saves until this job's text has loaded
+    let cancelled = false;
+    loadInclusions(url).then((text) => {
+      if (cancelled) return;
+      setInclusions(text);
+      inclusionsJobUrl.current = url;
+    });
+    return () => { cancelled = true; };
+  }, [currentJob?.url]);
+  const updateInclusions = useCallback((text: string) => {
+    setInclusions(text);
+    if (inclusionsJobUrl.current) void saveInclusions(inclusionsJobUrl.current, text);
+  }, []);
   const [prototypeUrl, setPrototypeUrl] = useState('');
   const [includeCallOffer, setIncludeCallOffer] = useState(true);
   const [clientReview, setClientReview] = useState(false);
@@ -608,6 +627,7 @@ export default function GeneratorPage() {
               analysisLoading={analysisLoading}
               analysisError={analysisError}
               onAnalyze={() => analyzeCurrentJob()}
+              onCancelAnalysis={cancelAnalysis}
               addedSkills={addedSkills}
               addingSkill={addingSkill}
               onAddMissingSkill={handleAddMissingSkill}
@@ -617,7 +637,7 @@ export default function GeneratorPage() {
               coverLetter={coverLetter || ''}
               jobAnalysis={jobAnalysis}
               inclusions={inclusions}
-              setInclusions={setInclusions}
+              setInclusions={updateInclusions}
               prototypeUrl={prototypeUrl}
               setPrototypeUrl={setPrototypeUrl}
               includeCallOffer={includeCallOffer}
