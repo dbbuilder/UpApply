@@ -200,3 +200,31 @@ def test_non_finite_numbers_are_treated_as_missing():
     from app.services.client_trust import _parse_number
     assert _parse_number(float("inf")) is None and _parse_number(float("nan")) is None
     assert _parse_number(True) is None and _parse_number(12.5) == 12.5
+
+
+# --- total spent: the amount next to "spent", never the first number on a scraped page ---
+
+PAGE_TEXT = ("Payment method verified Phone number verified 4.8 4.84 of 12 reviews USA New York 8:36 PM "
+             "32 jobs posted 100% hire rate, 4 open jobs $15K total spent 43 hires, 24 active "
+             "$5.99 /hr avg hourly rate paid 2,417 hours")
+
+
+def _spent_signal(value):
+    card = assess_client_trust({"total_spent": value})
+    return next((s["value"] for s in card["signals"] if s["label"] == "Total spent"), None)
+
+
+@pytest.mark.parametrize("value,shown", [
+    ("$15K", "$15K on Upwork"),
+    ("$10K+", "$10K on Upwork"),
+    ("$15K total spent", "$15K on Upwork"),
+    ("$8.2K total spent", "$8.2K on Upwork"),
+    (PAGE_TEXT, "$15K on Upwork"),  # a whole-page scrape still reads the right amount
+])
+def test_total_spent_reads_the_amount_next_to_spent(value, shown):
+    assert _spent_signal(value) == shown
+
+
+def test_page_text_without_a_spend_is_no_data_not_the_rating():
+    blob = "Payment method verified 4.8 4.84 of 12 reviews USA New York 32 jobs posted 100% hire rate"
+    assert _spent_signal(blob) is None
