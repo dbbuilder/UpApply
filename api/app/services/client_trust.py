@@ -93,6 +93,26 @@ def _parse_number(value: Any) -> Optional[float]:
     return number * {"k": 1_000, "m": 1_000_000}.get(suffix, 1)
 
 
+# "$15K total spent": the amount right before "spent". A long value is scraped page text (an old
+# extension read the whole page for "total spent", whose first number was unrelated, e.g. the
+# client's 4.8 rating shown as "$5"), so only that amount counts there; anything else is no data.
+# The LAST such amount is used: the job description (the poster's own text) comes before About the
+# client on the page, so an earlier "$900K total spent" there must not win.
+_SPENT_RE = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)\s*([kKmM])?\+?\s*(?:total\s+)?spent", re.IGNORECASE)
+MAX_PLAIN_SPEND_CHARS = 40
+
+
+def _parse_spend(value: Any) -> Optional[float]:
+    if isinstance(value, str) and (len(value) > MAX_PLAIN_SPEND_CHARS or "spent" in value.lower()):
+        matches = list(_SPENT_RE.finditer(value))
+        if not matches:
+            return None
+        match = matches[-1]
+        number = float(match.group(1).replace(",", ""))
+        return number * {"k": 1_000, "m": 1_000_000}.get((match.group(2) or "").lower(), 1)
+    return _parse_number(value)
+
+
 def _parse_rating(value: Any) -> Optional[float]:
     rating = _parse_number(value)
     return rating if rating is not None and 0 <= rating <= 5 else None
@@ -148,7 +168,7 @@ def assess_client_trust(
         add("Payment method", "Not verified yet", CAUTION)
 
     hires = _parse_number(_first(info, "total_hires", "totalHires", "hires"))
-    spent = _parse_number(_first(info, "total_spent", "totalSpent"))
+    spent = _parse_spend(_first(info, "total_spent", "totalSpent"))
     if spent is not None:
         if spent >= HIGH_SPEND_USD:
             add("Total spent", f"{_fmt_usd(spent)} on Upwork", POSITIVE)
