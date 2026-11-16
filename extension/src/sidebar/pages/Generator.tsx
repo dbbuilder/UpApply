@@ -37,6 +37,16 @@ export default function GeneratorPage() {
   // Screening question state
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
   const [answerPrompts, setAnswerPrompts] = useState<Record<string, string>>({});
+
+  // Screening questions live only on the apply page: ask the active tab when this job has none yet
+  // (covers a sidebar opened after the apply page loaded; the page also reports them itself)
+  useEffect(() => {
+    if (!currentJob?.url || currentJob.screeningQuestions?.length) return;
+    chrome.runtime.sendMessage({ type: 'REQUEST_SCREENING_QUESTIONS' }, (resp) => {
+      if (chrome.runtime.lastError || !resp?.url) return;
+      useAppStore.getState().mergeScreeningQuestions(resp.url, resp.questions ?? []);
+    });
+  }, [currentJob?.url, currentJob?.screeningQuestions?.length]);
   // Keys of AI answers whose claim check was skipped (claims_verified === false).
   const [unverifiedAnswers, setUnverifiedAnswers] = useState<Record<string, boolean>>({});
   const [suggestedAnswers, setSuggestedAnswers] = useState<Record<string, ScreeningAnswerSearchResult[]>>({});

@@ -16,6 +16,7 @@ import { expandJobDescription, extractAllProposals, readJobDescription, scrapePr
 import { extractOutcomeItems } from './outcome-sync';
 import { isSubmitButton, readSubmission } from './submit-capture';
 import { isApplyPage, isProposalsListPage } from './page-match';
+import { findScreeningQuestions, watchScreeningQuestions } from './screening-questions';
 import { findTitleLink, jobIdFromUrl, readTileDescription } from './job-cards';
 import { parseTileText } from '../lib/job-gather';
 import { scrapeAllContracts } from './scrapers/contracts';
@@ -24,31 +25,21 @@ import './scoring';
 /**
  * Extract screening questions from the page.
  */
-function extractScreeningQuestions(): ScreeningQuestion[] {
-  const questions: ScreeningQuestion[] = [];
-
-  // Find all question containers
-  const questionContainers = document.querySelectorAll(
-    '.fe-proposal-job-questions .form-group, .questions-area .form-group'
-  );
-
-  questionContainers.forEach((container, index) => {
-    const label = container.querySelector('label, .label');
-    const input = container.querySelector('textarea, input[type="text"]');
-
-    if (label && input) {
-      const questionText = label.textContent?.trim() || '';
-      if (questionText) {
-        // Create a unique selector for this input
-        questions.push({
-          question: questionText,
-          inputSelector: input.id ? `#${input.id}` : `.fe-proposal-job-questions .form-group:nth-child(${index + 1}) textarea, .fe-proposal-job-questions .form-group:nth-child(${index + 1}) input`,
-        });
-      }
-    }
+/** On the apply page, tell the sidebar which screening questions Upwork shows (they exist only
+ *  there; the job page has none). The sidebar attaches them to the job it already has. */
+let stopQuestionWatch: (() => void) | null = null;
+function reportScreeningQuestions(): void {
+  stopQuestionWatch?.();
+  stopQuestionWatch = null;
+  if (!isApplyPage(window.location.pathname)) return;
+  const url = window.location.href;
+  stopQuestionWatch = watchScreeningQuestions((questions) => {
+    chrome.runtime.sendMessage({ type: 'SCREENING_QUESTIONS_FOUND', url, questions }).catch(() => {});
   });
+}
 
-  return questions;
+function extractScreeningQuestions(): ScreeningQuestion[] {
+  return findScreeningQuestions();
 }
 
 /**
@@ -648,6 +639,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       });
       break;
 
+    case 'GET_SCREENING_QUESTIONS':
+      // The sidebar opened after the apply page loaded: hand it the questions on the page now
+      sendResponse({ url: window.location.href, questions: isApplyPage(window.location.pathname) ? findScreeningQuestions() : [] });
+      break;
+
     case 'READ_SCREENING_ANSWERS': {
       // Read-only: what is typed in each question's box (answers written on Upwork count as context)
       const values = ((message.selectors as string[]) || []).map((sel) => {
@@ -675,7 +671,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       );
       let filled = 0;
       for (const { index, answer } of message.answers as { index: number; answer: string }[]) {
-        const ta = textareas[index];
+        // The box tagged by findScreeningQuestions for this question, else its position
+        const ta = document.querySelector<HTMLTextAreaElement>(`[data-upapply-q="${index}"]`) ?? textareas[index];
         if (!ta || !answer) continue;
         ta.value = answer;
         ta.dispatchEvent(new Event('input', { bubbles: true }));
@@ -941,6 +938,7 @@ function init() {
 
   // Initialize draft saver on proposal/apply pages
   initDraftSaver();
+  reportScreeningQuestions();
 
   // Submit-click capture (capture phase so it runs before Upwork's own handlers)
   document.addEventListener('click', handleSubmitClick, true);
@@ -973,6 +971,7 @@ function init() {
 
       // Re-initialize draft saver if navigated to apply page
       initDraftSaver();
+      reportScreeningQuestions();
 
       // Check for pending Quick Apply fill after SPA navigation
       checkPendingAutoFill().catch(() => {});
