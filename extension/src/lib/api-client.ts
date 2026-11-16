@@ -1380,6 +1380,7 @@ export interface JobReview {
   user_comment?: string;
   scored_at?: string;
   created_at: string;
+  details?: import('./job-details').JobDetails | null;
 }
 
 export interface JobReviewListResponse {

@@ -313,6 +313,7 @@ exec(open('scripts/import_chatgpt_corpus.py').read())
 | 028 | Add learned_rules table (rules proposed from the user's own edits; proposed → accepted/rejected once, by the user) |
 | 029 | Add job_queue.score_breakdown JSONB (job-fit rubric breakdown, shadow beside ai_score) |
 | 030 | Add user_profiles.freelancer_location (where the freelancer is, for "U.S. only"-style must-haves) |
+| 031 | Add job_reviews.details JSON (what the job card showed when scored: posted time, client country/spend/rating, proposals, level; Find tab) |
 
 ## Environment Variables
 
