@@ -140,7 +140,6 @@ export const SELECTORS = {
 
   clientSpent: [
     '[data-test="total-spent"]',
-    ':has-text("total spent")',
   ],
 
   clientHireRate: [
@@ -264,12 +263,17 @@ export function querySelector(selectors: readonly string[]): Element | null {
         if (match) {
           const text = match[1];
           const baseSelector = selector.replace(/:has-text\("[^"]+"\)/, '');
-          const elements = document.querySelectorAll(baseSelector || '*');
-          for (const el of elements) {
-            if (el.textContent?.toLowerCase().includes(text.toLowerCase())) {
-              return el;
+          // The smallest element containing the text: in document order the first match is
+          // <html> itself, whose text is the whole page.
+          let best: Element | null = null;
+          for (const el of document.querySelectorAll(baseSelector || '*')) {
+            const content = el.textContent;
+            if (content?.toLowerCase().includes(text.toLowerCase())
+                && (!best || content.length < (best.textContent?.length ?? Infinity))) {
+              best = el;
             }
           }
+          if (best) return best;
         }
         continue;
       }
