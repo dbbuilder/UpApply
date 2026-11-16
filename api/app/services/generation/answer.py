@@ -73,13 +73,14 @@ class AnswerResult:
 
 def your_words_facts(instruction: Optional[str], other_answers: Sequence[dict]) -> list[Fact]:
     """Chris's own words as transient evidence entries (never stored): his instruction and the
-    answers he already has in the other boxes."""
+    other answers he typed himself (user_written). AI-written answers are context only: as
+    evidence they would let an unsupported claim pass from one answer into the next."""
     notes = []
     if instruction and instruction.strip():
         notes.append(instruction.strip()[:MAX_INSTRUCTION])
     for item in list(other_answers)[:MAX_OTHER_ANSWERS]:
         answer = str(item.get("answer") or "").strip()
-        if answer:
+        if answer and item.get("user_written") is True:
             notes.append(answer[:MAX_ANSWER])
     return [Fact(id=f"yours-{i}", kind=YOUR_WORDS, statement=note) for i, note in enumerate(notes, 1)]
 

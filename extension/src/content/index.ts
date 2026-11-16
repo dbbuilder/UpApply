@@ -653,7 +653,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           return '';
         }
       });
-      sendResponse({ values });
+      sendResponse({ values, url: window.location.href });
       break;
     }
 

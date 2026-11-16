@@ -10,6 +10,7 @@ interface ScreeningPanelProps {
   loadingSuggestions: Record<string, boolean>;
   generatingAnswers: Record<string, boolean>;
   answerPrompts: Record<string, string>;
+  promptsEnabled: boolean;  // v2 only: the legacy answer path ignores prompts and tweaks
   onPromptChange: (index: number, value: string) => void;
   onAnswerChange: (index: number, value: string) => void;
   onQuestionFocus: (question: string, index: number) => void;
@@ -27,6 +28,7 @@ export default function ScreeningPanel({
   loadingSuggestions,
   generatingAnswers,
   answerPrompts,
+  promptsEnabled,
   onPromptChange,
   onAnswerChange,
   onQuestionFocus,
@@ -51,7 +53,7 @@ export default function ScreeningPanel({
         {questions.map((q, index) => (
           <div key={index} className="border-b border-gray-100 pb-3 last:border-0">
             <p className="text-sm text-gray-700 mb-2">{q.question}</p>
-            <input
+            {promptsEnabled && <input
               type="text"
               className="input text-xs w-full mb-2"
               placeholder="What to say (optional), e.g. mention UpApply's pgvector stack, link GitHub"
@@ -59,7 +61,7 @@ export default function ScreeningPanel({
               onChange={e => onPromptChange(index, e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !generatingAnswers[`q${index}`]) onGenerateAnswer(q.question, index); }}
               maxLength={600}
-            />
+            />}
             {unverifiedAnswers[`q${index}`] && questionAnswers[`q${index}`] && (
               <div role="alert" className="mb-2 rounded-lg border border-red-300 bg-red-50 p-2 text-xs font-medium text-red-800">
                 Claims not verified — review specifics before sending
@@ -113,7 +115,7 @@ export default function ScreeningPanel({
                 Fill &amp; Save
               </button>
             </div>
-            {questionAnswers[`q${index}`] && (
+            {promptsEnabled && questionAnswers[`q${index}`] && (
               <div className="flex flex-wrap gap-1 mt-2">
                 {(Object.keys(TWEAK_LABELS) as AnswerTweak[]).map(tweak => (
                   <button

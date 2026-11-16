@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { findScreeningQuestions } from './screening-questions';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { findScreeningQuestions, watchScreeningQuestions } from './screening-questions';
 
 // Trimmed from a saved Upwork apply page (working/SubmitProposal.html, 2026-03)
 const APPLY_PAGE = `
@@ -44,5 +44,17 @@ describe('screening questions on the apply page', () => {
   it('a page with no questions has none', () => {
     document.body.innerHTML = '<textarea aria-labelledby="cover_letter_label"></textarea>';
     expect(findScreeningQuestions()).toEqual([]);
+  });
+
+  it('waits for the list to settle, so questions drawn in two steps are reported together', async () => {
+    vi.useFakeTimers();
+    const group = (q: string) => `<div class="form-group"><label>${q}</label><textarea></textarea></div>`;
+    document.body.innerHTML = `<div class="fe-proposal-job-questions">${group('First?')}</div>`;
+    const seen: string[][] = [];
+    watchScreeningQuestions((qs) => seen.push(qs.map((q) => q.question)), 15_000, 800);
+    document.querySelector('.fe-proposal-job-questions')!.insertAdjacentHTML('beforeend', group('Second?'));
+    await vi.advanceTimersByTimeAsync(900);
+    expect(seen).toEqual([['First?', 'Second?']]);
+    vi.useRealTimers();
   });
 });

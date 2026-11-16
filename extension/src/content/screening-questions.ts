@@ -42,26 +42,29 @@ export function findScreeningQuestions(doc: Document = document): ScreeningQuest
 }
 
 /** On the apply page, report the questions once they render (Upwork draws them late), for up to
- *  `timeoutMs`. Calls `report` with the questions found, or [] when there are none. */
-export function watchScreeningQuestions(report: (q: ScreeningQuestion[]) => void, timeoutMs = 15_000): () => void {
+ *  `timeoutMs`. Calls `report` with the questions found, or [] when there are none. Once some are
+ *  found it waits `settleMs` for more to render before reporting, so a partly drawn list is not sent. */
+export function watchScreeningQuestions(
+  report: (q: ScreeningQuestion[]) => void, timeoutMs = 15_000, settleMs = 800,
+): () => void {
   let done = false;
+  let settle: ReturnType<typeof setTimeout> | null = null;
   const finish = (q: ScreeningQuestion[]) => {
     if (done) return;
     done = true;
     observer.disconnect();
     clearTimeout(timer);
+    if (settle) clearTimeout(settle);
     report(q);
   };
   const observer = new MutationObserver(() => {
-    const q = findScreeningQuestions();
-    if (q.length) finish(q);
+    if (findScreeningQuestions().length) {
+      if (settle) clearTimeout(settle);
+      settle = setTimeout(() => finish(findScreeningQuestions()), settleMs);
+    }
   });
   const timer = setTimeout(() => finish(findScreeningQuestions()), timeoutMs);
-  const now = findScreeningQuestions();
-  if (now.length) {
-    finish(now);
-  } else {
-    observer.observe(document.body, { childList: true, subtree: true });
-  }
+  observer.observe(document.body, { childList: true, subtree: true });
+  if (findScreeningQuestions().length) settle = setTimeout(() => finish(findScreeningQuestions()), settleMs);
   return () => finish([]);
 }

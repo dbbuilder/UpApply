@@ -215,7 +215,7 @@ async def test_screening_generate_routes_to_v2_when_flag_on(client: AsyncClient,
                 "instruction": "mention the Azure cutover runbook",
                 "tweak": "shorter",
                 "current_answer": "A long answer.",
-                "other_answers": [{"question": "Payments?", "answer": "Integrated FIS and Stripe."}],
+                "other_answers": [{"question": "Payments?", "answer": "Integrated FIS and Stripe.", "user_written": True}],
                 "cover_letter_text": "The letter.",
             },
         )
@@ -230,7 +230,7 @@ async def test_screening_generate_routes_to_v2_when_flag_on(client: AsyncClient,
     assert kwargs["instruction"] == "mention the Azure cutover runbook"
     assert kwargs["tweak"] == "shorter"
     assert kwargs["current_answer"] == "A long answer."
-    assert kwargs["other_answers"] == [{"question": "Payments?", "answer": "Integrated FIS and Stripe."}]
+    assert kwargs["other_answers"] == [{"question": "Payments?", "answer": "Integrated FIS and Stripe.", "user_written": True}]
     assert kwargs["cover_letter"] == "The letter."
 
 

@@ -26,9 +26,12 @@ def _fact(i, statement):
     return SimpleNamespace(id=f"f{i}", kind="project", statement=statement, detail=None)
 
 
-def test_your_words_become_evidence_entries():
+def test_your_words_become_evidence_entries_but_ai_answers_do_not():
     facts = aw.your_words_facts("Mention UpApply's pgvector stack", [
-        {"question": "Payments?", "answer": "Integrated FIS, Genius and Stripe."}, {"question": "x", "answer": "  "}])
+        {"question": "Payments?", "answer": "Integrated FIS, Genius and Stripe.", "user_written": True},
+        {"question": "x", "answer": "  ", "user_written": True},
+        {"question": "AI drafted", "answer": "Cut cutover time 70%."},  # AI text: context only
+        {"question": "AI drafted 2", "answer": "Led 40 engineers.", "user_written": False}])
     assert [(f.id, f.kind, f.statement) for f in facts] == [
         ("yours-1", aw.YOUR_WORDS, "Mention UpApply's pgvector stack"),
         ("yours-2", aw.YOUR_WORDS, "Integrated FIS, Genius and Stripe."),

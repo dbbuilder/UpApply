@@ -33,6 +33,9 @@ from app.schemas.screening_answer import (
 class OtherAnswer(BaseModel):
     question: str = Field(..., max_length=MAX_SCREENING_QUESTION)
     answer: str = Field("", max_length=4000)
+    # True only for text the user typed (in the sidebar or in Upwork's box); AI-written answers
+    # are context, never evidence, so an unsupported claim cannot pass from one answer to the next
+    user_written: bool = False
 
 
 class ScreeningAnswerGenerateRequest(BaseModel):

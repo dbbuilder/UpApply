@@ -802,6 +802,7 @@ export class ApiError extends Error {
 // Types
 export interface Profile {
   id: string;
+  generation_v2?: boolean;  // read-only: v2-only Apply controls (answer prompts, tweaks)
   user_id: string;
   full_name?: string;
   professional_title?: string;
@@ -994,7 +995,7 @@ export interface ScreeningAnswerPrompt {
   instruction?: string;
   tweak?: 'shorter' | 'specific' | 'link' | 'number';
   current_answer?: string;
-  other_answers?: { question: string; answer: string }[];
+  other_answers?: { question: string; answer: string; user_written?: boolean }[];
   cover_letter_text?: string;
 }
 

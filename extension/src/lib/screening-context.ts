@@ -10,16 +10,22 @@ export const TWEAK_LABELS: Record<AnswerTweak, string> = {
   number: 'Add a number',
 };
 
+/** user_written: the sidebar text was typed or edited by the user (`userEdited`), or the
+ *  answer exists only in Upwork's own box (typed there). AI-written sidebar text is context
+ *  only on the server, never evidence. */
 export function otherAnswers(
   questions: { question: string }[],
   index: number,
   sidebarAnswers: Record<string, string>,
   pageValues: string[],
-): { question: string; answer: string }[] {
+  userEdited: Record<string, boolean> = {},
+): { question: string; answer: string; user_written: boolean }[] {
   return questions.flatMap((q, i) => {
     if (i === index) return [];
-    const answer = (sidebarAnswers[`q${i}`] || pageValues[i] || '').trim();
-    return answer ? [{ question: q.question, answer: answer.slice(0, 4000) }] : [];
+    const sidebar = (sidebarAnswers[`q${i}`] || '').trim();
+    const answer = sidebar || (pageValues[i] || '').trim();
+    if (!answer) return [];
+    return [{ question: q.question, answer: answer.slice(0, 4000), user_written: sidebar ? !!userEdited[`q${i}`] : true }];
   }).slice(0, 10);
 }
 
