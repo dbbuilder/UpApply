@@ -204,7 +204,7 @@ def test_non_finite_numbers_are_treated_as_missing():
 
 # --- total spent: the amount next to "spent", never the first number on a scraped page ---
 
-PAGE_TEXT = ("Payment method verified Phone number verified 4.8 4.84 of 12 reviews USA New York 8:36 PM "
+PAGE_TEXT = ("About the client Payment method verified Phone number verified 4.8 4.84 of 12 reviews USA New York 8:36 PM "
              "32 jobs posted 100% hire rate, 4 open jobs $15K total spent 43 hires, 24 active "
              "$5.99 /hr avg hourly rate paid 2,417 hours")
 
@@ -234,3 +234,13 @@ def test_a_spend_claim_in_the_description_does_not_beat_the_client_section():
     blob = ("Summary Trusted client with $900K total spent on Upwork! Build our CRM. "
             "About the client Payment method verified 4.8 of 12 reviews $15K total spent 43 hires")
     assert _spent_signal(blob) == "$15K on Upwork"
+
+
+def test_a_description_claim_with_no_client_spend_after_it_is_no_data():
+    blob = "Summary We have $900K total spent. About the client Payment method verified 4.8 of 12 reviews"
+    assert _spent_signal(blob) is None
+
+
+def test_long_page_text_without_about_the_client_is_no_data():
+    blob = "Summary Trusted client with $900K total spent on Upwork! " + "Build our CRM. " * 5
+    assert _spent_signal(blob) is None

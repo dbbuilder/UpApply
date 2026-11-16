@@ -96,14 +96,20 @@ def _parse_number(value: Any) -> Optional[float]:
 # "$15K total spent": the amount right before "spent". A long value is scraped page text (an old
 # extension read the whole page for "total spent", whose first number was unrelated, e.g. the
 # client's 4.8 rating shown as "$5"), so only that amount counts there; anything else is no data.
-# The LAST such amount is used: the job description (the poster's own text) comes before About the
-# client on the page, so an earlier "$900K total spent" there must not win.
+# Only an amount after the last "About the client" counts: the job description (the poster's own
+# text) comes before it on the page, so a "$900K total spent" there must never win. Long text
+# without that marker is no data.
 _SPENT_RE = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)\s*([kKmM])?\+?\s*(?:total\s+)?spent", re.IGNORECASE)
 MAX_PLAIN_SPEND_CHARS = 40
 
 
 def _parse_spend(value: Any) -> Optional[float]:
     if isinstance(value, str) and (len(value) > MAX_PLAIN_SPEND_CHARS or "spent" in value.lower()):
+        if len(value) > MAX_PLAIN_SPEND_CHARS:
+            marker = value.lower().rfind("about the client")
+            if marker < 0:
+                return None
+            value = value[marker:]
         matches = list(_SPENT_RE.finditer(value))
         if not matches:
             return None

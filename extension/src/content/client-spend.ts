@@ -5,6 +5,8 @@
  * section found means no data. (The old fallback matched the whole <html> element, so the card
  * showed an unrelated number, e.g. the 4.8 rating as "$5".)
  */
+import { SELECTORS } from './upwork-selectors';
+
 const SPENT_RE = /(\$\s?\d[\d,]*(?:\.\d+)?\s*[KkMm]?\+?)\s*total\s+spent/gi;
 
 /** The last "$N total spent" amount in `text` (the client section lists its own spend once). */
@@ -20,8 +22,13 @@ const CLIENT_SECTION_SELECTORS = [
   '[data-test="client-info"]',
 ];
 
-/** The About the client section: a tagged container, else the nearest ancestor of the
- *  "About the client" heading that holds a "total spent" line. Null when there is none. */
+const DESCRIPTION_SELECTORS = SELECTORS.jobDescription.join(', ');
+const MAX_SECTION_CHARS = 4000;  // the client panel is short; a page-sized block is not it
+
+/** The About the client section: a tagged container, else the widest ancestor of the
+ *  "About the client" heading that still excludes the job description (its boundary is found
+ *  without looking for spend text, so an empty client panel never reaches the description).
+ *  Null when there is no heading. */
 export function clientSection(doc: Document = document): Element | null {
   for (const selector of CLIENT_SECTION_SELECTORS) {
     const el = doc.querySelector(selector);
@@ -29,10 +36,14 @@ export function clientSection(doc: Document = document): Element | null {
   }
   const heading = Array.from(doc.querySelectorAll('h1, h2, h3, h4, h5, h6'))
     .find((h) => /^\s*about the client\s*$/i.test(h.textContent || ''));
-  for (let node = heading?.parentElement ?? null; node && node !== doc.body; node = node.parentElement) {
-    if (/total\s+spent/i.test(node.textContent || '')) return node;
+  if (!heading?.parentElement) return null;
+  const descriptions = Array.from(doc.querySelectorAll(DESCRIPTION_SELECTORS));
+  let node: Element = heading.parentElement;
+  for (let up = node.parentElement; up && up !== doc.body && up !== doc.documentElement; up = up.parentElement) {
+    if (descriptions.some((d) => up!.contains(d)) || (up.textContent || '').length > MAX_SECTION_CHARS) break;
+    node = up;
   }
-  return null;
+  return node;
 }
 
 export function clientTotalSpent(doc: Document = document): string | null {

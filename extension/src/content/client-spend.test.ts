@@ -4,7 +4,7 @@ import { querySelector } from './upwork-selectors';
 
 const PAGE = (client: string, description = 'Build our CRM.') => `
   <main>
-    <section class="description"><h2>Summary</h2><p>${description}</p></section>
+    <section class="description"><h2>Summary</h2><p data-test="Description">${description}</p></section>
     <aside><div class="client">
       <h4>About the client</h4>
       <p>Payment method verified</p><p>4.8 of 12 reviews</p>
@@ -28,6 +28,11 @@ describe('client total spent', () => {
     document.body.innerHTML = PAGE('<p><strong>$15K</strong> total spent</p>',
       'Trusted client: $900K total spent on Upwork!');
     expect(clientTotalSpent()).toBe('$15K');
+  });
+
+  it('a client section without a spend line does not reach the description', () => {
+    document.body.innerHTML = PAGE('', 'Trusted client: $900K total spent on Upwork!');
+    expect(clientTotalSpent()).toBeNull();
   });
 
   it('a description claim with no client section is no data', () => {
