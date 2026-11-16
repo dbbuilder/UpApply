@@ -21,6 +21,8 @@ class JobReview(Base):
     chips: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
     budget_amount: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     budget_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # What the card showed when scored: posted time, client country/spend/rating, proposals... (031)
+    details: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     user_rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     user_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     scored_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

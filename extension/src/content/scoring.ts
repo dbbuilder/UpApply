@@ -3,6 +3,7 @@
  * Self-contained: sets up its own MutationObserver on import.
  */
 
+import { cardFacts, type JobDetails } from '../lib/job-details';
 import { logger } from '../lib/logger';
 import { detectNotifChips } from '../lib/notif-chips';
 import { scrapeProposalDetail } from './scrapers/proposals';
@@ -1198,17 +1199,25 @@ function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[]
     }
   }
 
+  // What the card shows (pay, posted time, client country/spend, proposals...) for the Find tab
+  const facts = cardFacts(item.row);
+
   // Persist to scoredJobsCache for the sidebar's Find view
   if (chrome?.storage?.local) {
     chrome.storage.local.get('scoredJobsCache', (data) => {
-      const cache: Record<string, { url: string; title: string; score: number; chips: string[]; scored_at: string }> =
-        data.scoredJobsCache || {};
+      const cache: Record<string, {
+        url: string; title: string; score: number; chips: string[]; scored_at: string;
+        budget_amount?: string | null; budget_type?: string | null; details?: JobDetails;
+      }> = data.scoredJobsCache || {};
       cache[item.jobUrl] = {
         url: item.jobUrl,
         title: item.title || '',
         score: rounded,
         chips,
         scored_at: new Date().toISOString(),
+        budget_amount: facts.budgetAmount,
+        budget_type: facts.budgetType,
+        details: facts.details,
       };
       // Cap at 500 entries — evict oldest by scored_at
       const entries = Object.values(cache).sort((a, b) => b.scored_at.localeCompare(a.scored_at));
@@ -1222,9 +1231,9 @@ function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[]
   _getAuthToken().then(token => {
     if (!token) return;
     const apiBase = (import.meta.env as Record<string, string>)['VITE_API_URL'] || 'https://upapply-api.onrender.com';
-    // Parse budget from chips
+    // The card's own budget, else the one in the chips
     const budgetChip = chips.find(c => c.startsWith('$'));
-    const budgetType = budgetChip?.includes('/hr') ? 'hourly' : budgetChip ? 'fixed' : undefined;
+    const budgetType = facts.budgetType ?? (budgetChip?.includes('/hr') ? 'hourly' : budgetChip ? 'fixed' : undefined);
     fetch(`${apiBase}/api/v1/job-reviews`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -1233,8 +1242,9 @@ function _applyBadgeResult(item: _NotifQueueItem, score: number, chips: string[]
         job_title: item.title || '',
         ai_score: score,
         chips,
-        budget_amount: budgetChip || null,
+        budget_amount: facts.budgetAmount || budgetChip || null,
         budget_type: budgetType || null,
+        details: Object.keys(facts.details).length ? facts.details : undefined,
         scored_at: new Date().toISOString(),
       }),
       signal: AbortSignal.timeout(10_000),
