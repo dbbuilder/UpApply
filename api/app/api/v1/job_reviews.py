@@ -35,6 +35,8 @@ async def upsert_job_review(
         review.chips = data.chips
         review.budget_amount = data.budget_amount
         review.budget_type = data.budget_type
+        if data.details is not None:  # a re-score without card details keeps the earlier ones
+            review.details = data.details.model_dump(mode="json", exclude_none=True)
         review.scored_at = data.scored_at or datetime.now(timezone.utc)
         if data.upwork_job_id:
             review.upwork_job_id = data.upwork_job_id
@@ -48,6 +50,7 @@ async def upsert_job_review(
             chips=data.chips,
             budget_amount=data.budget_amount,
             budget_type=data.budget_type,
+            details=data.details.model_dump(mode="json", exclude_none=True) if data.details else None,
             scored_at=data.scored_at or datetime.now(timezone.utc),
         )
         db.add(review)
