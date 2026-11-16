@@ -2,6 +2,7 @@
  * Content script for extracting job data from Upwork pages.
  */
 
+import { clientTotalSpent } from './client-spend';
 import {
   SELECTORS,
   extractText,
@@ -98,7 +99,9 @@ function extractJobData(): JobData {
   // Extract client info
   const clientRating = extractText(SELECTORS.clientRating);
   const clientLocation = extractText(SELECTORS.clientLocation);
-  const clientSpent = extractText(SELECTORS.clientSpent);
+  // The tagged element if Upwork has one, else the amount before "total spent" in the About the
+  // client section only (the description is the poster's own text)
+  const clientSpent = extractText(SELECTORS.clientSpent) ?? clientTotalSpent();
   const clientHireRate = extractText(SELECTORS.clientHireRate);
 
   // Extract screening questions
