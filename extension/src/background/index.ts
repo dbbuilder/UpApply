@@ -337,6 +337,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       return true;
 
+    case 'REQUEST_SCREENING_QUESTIONS':
+      // The sidebar asks the active Upwork tab for its screening questions (read-only)
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tab = tabs[0];
+        if (!tab?.id || !tab?.url?.includes('upwork.com')) { sendResponse({ questions: [] }); return; }
+        chrome.tabs.sendMessage(tab.id, { type: 'GET_SCREENING_QUESTIONS' }, (resp) => {
+          sendResponse(chrome.runtime.lastError ? { questions: [] } : (resp || { questions: [] }));
+        });
+      });
+      return true;
+
+    case 'READ_SCREENING_ANSWERS':
+      // Relay to the active Upwork tab without re-injecting the content script (read-only)
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tab = tabs[0];
+        if (!tab?.id || !tab?.url?.includes('upwork.com')) {
+          sendResponse({ values: [] });
+          return;
+        }
+        chrome.tabs.sendMessage(tab.id, { type: 'READ_SCREENING_ANSWERS', selectors: message.selectors }, (resp) => {
+          sendResponse(chrome.runtime.lastError ? { values: [] } : (resp || { values: [] }));
+        });
+      });
+      return true;
+
     case 'FILL_ALL_QUESTIONS':
       chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
         const tab = tabs[0];

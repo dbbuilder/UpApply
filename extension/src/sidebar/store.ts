@@ -3,7 +3,8 @@
  */
 import { create } from 'zustand';
 import { apiClient, Profile, JobAnalysisResponse, ApplicationOutcome, ClientReview } from '../lib/api-client';
-import type { JobData } from '../types';
+import type { JobData, ScreeningQuestion } from '../types';
+import { jobIdFromUrl } from '../content/job-cards';
 
 interface User {
   id: string;
@@ -70,6 +71,7 @@ interface AppState {
   loadProfile: () => Promise<void>;
   analyzeCurrentJob: () => Promise<void>;
   cancelAnalysis: () => void;
+  mergeScreeningQuestions: (url: string, questions: ScreeningQuestion[]) => void;
   generateCoverLetter: (
     inclusions?: string, prototypeUrl?: string, includeCallOffer?: boolean, clientReview?: boolean,
   ) => Promise<void>;
@@ -240,6 +242,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch {
       set({ profileLoading: false });
     }
+  },
+
+  // Questions found on the apply page belong to the job of the same Upwork id: attach them
+  // without resetting the analysis or the letter. Another job's questions are ignored.
+  mergeScreeningQuestions: (url, questions) => {
+    const { currentJob } = get();
+    if (!currentJob || !questions.length) return;
+    const id = jobIdFromUrl(url);
+    if (!id || jobIdFromUrl(currentJob.url) !== id) return;
+    set({ currentJob: { ...currentJob, screeningQuestions: questions } });
   },
 
   // Analyze current job
@@ -484,6 +496,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
 // Listen for job data updates from background script
 chrome.runtime.onMessage.addListener((message) => {
+  if (message.type === 'SCREENING_QUESTIONS_FOUND') {
+    useAppStore.getState().mergeScreeningQuestions(message.url, message.questions ?? []);
+  }
   if (message.type === 'JOB_DATA_UPDATED') {
     useAppStore.getState().setCurrentJob(message.data);
     // Auto-analyze if authenticated
