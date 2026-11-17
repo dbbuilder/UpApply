@@ -17,6 +17,7 @@ export interface JobData {
   experienceLevel: string | null;
   projectLength: string | null;
   screeningQuestions?: ScreeningQuestion[];
+  locationRestriction?: string | null;  // "Only freelancers located in the U.S. may apply."
   clientInfo: {
     rating: string | null;
     location: string | null;

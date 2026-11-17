@@ -18,6 +18,7 @@ import { extractOutcomeItems } from './outcome-sync';
 import { isSubmitButton, readSubmission } from './submit-capture';
 import { isApplyPage, isProposalsListPage } from './page-match';
 import { findScreeningQuestions, watchScreeningQuestions } from './screening-questions';
+import { locationRestriction } from './location-restriction';
 import { findTitleLink, jobIdFromUrl, readTileDescription } from './job-cards';
 import { parseTileText } from '../lib/job-gather';
 import { scrapeAllContracts } from './scrapers/contracts';
@@ -108,6 +109,7 @@ function extractJobData(): JobData {
     experienceLevel,
     projectLength,
     screeningQuestions,
+    locationRestriction: locationRestriction(),
     clientInfo: {
       rating: clientRating,
       location: clientLocation,

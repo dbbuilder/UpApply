@@ -279,6 +279,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           total_spent: currentJob.clientInfo.totalSpent || undefined,
         },
         upwork_url: currentJob.url,
+        location_restriction: currentJob.locationRestriction || undefined,
       }, analysisController.signal);
       if (run !== analysisRun) return;  // cancelled, or a newer analysis started
       set({ jobAnalysis: analysis, analysisLoading: false });
