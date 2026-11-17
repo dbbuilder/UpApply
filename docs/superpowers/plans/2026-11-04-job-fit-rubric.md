@@ -1,6 +1,6 @@
 # Job-fit rubric — plan
 
-Status: approved (2026-11-05). Chris answered the four questions (see Decisions at the end). Nothing here is built yet.
+Status (2026-11-16): approved 2026-11-05. Phase 2 (shadow) is live since 2026-11-11: `api/app/services/job_fit.py`, migration 029 `job_queue.score_breakdown`, posted time stored in `client_info` (#64); a sixth part, `saved_match`, added 2026-11-09 (#65); unmet client must-haves cap it at 45 (#69). The shadow week has not started collecting: no scan has run since 2026-11-02, so phase 1 (the eval) waits on scan data. Phases 3 and 4 are not built.
 
 ## Why the current score misleads
 
@@ -19,13 +19,16 @@ A score whose order matches Chris's own judgement: the top of Pending should be 
 
 Each dimension is graded 0–4 against written anchors. The final score is `25 × Σ(weight × grade) / Σ(weight)`, so 0–100. A dimension with no data is graded 2 (neutral), never 4.
 
+Weights as built (Chris 2026-11-09): the approved 30/20/20/15/15 scaled by 0.8 to make room for `saved_match` at 20, so role 24, stack 16, engagement 16, evidence 12, competition 12, saved 20.
+
 | Dimension | Weight | Graded by | 4 means | 0 means |
 |---|---|---|---|---|
-| Role level | 30 | LLM | the role the user targets (from `preferred_project_types` / `career_goals`; for Chris: fractional/interim CTO, technical co-founder, advisory, due diligence) | not a technical role (sales, assistant, marketing) |
-| Stack and domain | 20 | LLM (plus skill match when the job has skills) | core of the user's stack and a domain they have shipped in | a stack or field the user has never worked in |
-| Evidence | 15 | code: best cosine between the job and the user's approved facts | strong match (≥ 0.55) | none (< 0.30); thresholds set from the eval |
-| Engagement | 20 | code: budget against the user's minimums | hourly top ≥ 1.5 × minimum, or fixed ≥ 3 × minimum | below the minimum (already pre-filtered) |
-| Competition and timing | 15 | code: proposals bucket and posted age | under 5 proposals, posted within a day | 50+ proposals, or near the lookback limit |
+| Saved match | 20 | code: best cosine between the job and a job the user saved on Upwork (`jobs.is_saved`); the 3 closest saved titles are also shown to the LLM as examples | close to a saved job (≥ 0.65) | nothing like a saved job (< 0.35); no saved jobs = 2 |
+| Role level | 24 | LLM | the role the user targets (from `preferred_project_types` / `career_goals`; for Chris: fractional/interim CTO, technical co-founder, advisory, due diligence) | not a technical role (sales, assistant, marketing) |
+| Stack and domain | 16 | LLM (plus skill match when the job has skills) | core of the user's stack and a domain they have shipped in | a stack or field the user has never worked in |
+| Evidence | 12 | code: best cosine between the job and the user's approved facts | strong match (≥ 0.55) | none (< 0.30); thresholds set from the eval |
+| Engagement | 16 | code: budget against the user's minimums | hourly top ≥ 1.5 × minimum, or fixed ≥ 3 × minimum | below the minimum (already pre-filtered) |
+| Competition and timing | 12 | code: proposals bucket and posted age | under 5 proposals, posted within a day | 50+ proposals, or near the lookback limit |
 
 Data for competition and timing: the scan reads both from the search tile (#59, 2026-11-02), but only the proposals text is stored (`client_info.proposals`, set at ingest). The posted time goes to the pre-filter and is then dropped. So phase 2 also stores `posted_at` and `posted_text` in `client_info` at ingest (JSONB, no migration). Until then, and for jobs scanned before #59, the dimension has no data and grades 2. The eval reports how many jobs have each input and ranks with and without this dimension; if fewer than half the eval jobs have it, the switch leaves it out (its weight drops from the sum) until a week of scans has filled it. The missing trust-card fields in NEXT.md are a different source (the job detail page, not the search tile).
 
@@ -73,3 +76,9 @@ Each phase is one PR. Done when, overall: the eval passes, the switch is live, a
 2. Competition counts: the competition and timing dimension stays in the rubric.
 3. Model: the rubric's LLM call runs on `claude-haiku-4-5`. The rest of job analysis stays where it is.
 4. Migration 029: yes. `job_queue.score_breakdown` holds the shadow score and the breakdown, so there is a shadow week in production.
+
+## Decisions (Chris, 2026-11-09 and 2026-11-11)
+
+- 2026-11-09: saved Upwork jobs count, with at least the weight of the other signals: a `saved_match` part at 20 (others scaled by 0.8), saved titles as examples for the LLM, and saved jobs as examples for the current live score too (#65). Older saves are kept as a signal only (`source="saved_signal"`, #67).
+- 2026-11-11: a client must-have the user does not meet caps the live score at 45 and is never suggested (`pre_filter:requirement_unmet`), and caps this rubric's total the same way (`api/app/services/job_requirements.py`, #69).
+

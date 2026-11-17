@@ -6,8 +6,9 @@ tweak. Context: the job brief, the cover letter being sent, the answers already 
 boxes (including ones Chris typed himself), his one-line instruction or a tweak chip, the current
 answer when revising, and his past answers to similar questions (style only).
 
-Chris's own words (his instruction and the other answers) join the evidence as "your_words"
-entries, so a detail he asks for is not stripped by the claim check as unsupported.
+Chris's own words join the evidence as "your_words" entries, so a detail he asks for is not
+stripped by the claim check as unsupported: his instruction, and only those other answers he
+typed himself (user_written). AI-written answers are context, never evidence.
 """
 import logging
 from dataclasses import dataclass, field
