@@ -34,6 +34,7 @@ PRE_FILTER_RULES = (
     "avoid_keyword",
     "score_cap_reached",
     "below_threshold",
+    "requirement_unmet",  # an unmet client must-have capped the score (app/services/job_requirements.py)
 )
 PRE_FILTER_PREFIX = "pre_filter:"
 PRE_FILTER_CODES = tuple(PRE_FILTER_PREFIX + r for r in PRE_FILTER_RULES)

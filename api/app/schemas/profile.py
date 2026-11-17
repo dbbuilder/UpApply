@@ -60,6 +60,7 @@ class ProfilePreferences(BaseModel):
     preferred_team_size: Optional[str] = None
     preferred_client_types: Optional[List[str]] = None
     preferred_client_locations: Optional[List[str]] = None
+    freelancer_location: Optional[str] = None  # where the freelancer is, for "U.S. only"-style must-haves
     project_duration_preference: Optional[str] = None
 
 
@@ -145,6 +146,7 @@ class ProfileCreate(BaseModel):
     preferred_team_size: Optional[str] = None
     preferred_client_types: Optional[List[str]] = None
     preferred_client_locations: Optional[List[str]] = None
+    freelancer_location: Optional[str] = None  # where the freelancer is, for "U.S. only"-style must-haves
     project_duration_preference: Optional[str] = None
 
     # Deal breakers
@@ -194,6 +196,7 @@ class ProfileResponse(BaseModel):
     """Schema for profile response."""
 
     id: str
+    generation_v2: bool = False  # read-only here: the Apply panel shows v2-only controls when on
     user_id: str
 
     # Identity
@@ -221,6 +224,7 @@ class ProfileResponse(BaseModel):
     preferred_team_size: Optional[str] = None
     preferred_client_types: Optional[List[str]] = None
     preferred_client_locations: Optional[List[str]] = None
+    freelancer_location: Optional[str] = None  # where the freelancer is, for "U.S. only"-style must-haves
     project_duration_preference: Optional[str] = None
 
     # Deal breakers

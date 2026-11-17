@@ -123,6 +123,8 @@ class UserProfile(Base):
     communication_style: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     response_time_expectation: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     timezone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # Where the freelancer is (country or region), for client must-haves such as "U.S. only"
+    freelancer_location: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     working_hours_preference: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     preferred_closing: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # e.g. "Best regards,\nChris"
 

@@ -294,3 +294,63 @@ async def test_score_job_with_llm_sends_max_completion_tokens():
     assert kwargs["model"] == settings.scoring_model
     assert kwargs["max_completion_tokens"] == 80
     assert "max_tokens" not in kwargs
+
+
+# --- saved jobs as a preference signal ---
+
+def _unit(i: int) -> list:
+    v = [0.0] * 1536
+    v[i] = 1.0
+    return v
+
+
+@pytest.mark.asyncio
+async def test_find_similar_saved_returns_only_this_users_saved_jobs(db_session, test_user):
+    from app.models.job import Job
+    from app.models.user import User
+    from app.services.job_analysis import find_similar_saved
+
+    other = User(email="someone-else@example.com", hashed_password="x")
+    db_session.add(other)
+    await db_session.flush()
+    near = [0.0] * 1536
+    near[0], near[1] = 0.8, 0.6  # cosine 0.8 with _unit(0)
+    db_session.add_all([
+        Job(user_id=test_user.id, upwork_url="https://u/~a", title="Fractional CTO", description="d",
+            is_saved=True, embedding=_unit(0)),
+        Job(user_id=test_user.id, upwork_url="https://u/~b", title="Interim CTO", description="d",
+            is_saved=True, embedding=near),
+        Job(user_id=test_user.id, upwork_url="https://u/~c", title="Not saved", description="d",
+            is_saved=False, embedding=_unit(0)),
+        Job(user_id=test_user.id, upwork_url="https://u/~d", title="Saved, no embedding", description="d",
+            is_saved=True, embedding=None),
+        Job(user_id=other.id, upwork_url="https://u/~e", title="Other user's save", description="d",
+            is_saved=True, embedding=_unit(0)),
+    ])
+    await db_session.flush()
+
+    saved = await find_similar_saved(db_session, test_user.id, _unit(0), limit=3)
+    assert [s["title"] for s in saved] == ["Fractional CTO", "Interim CTO"]
+    assert saved[0]["similarity"] == pytest.approx(1.0) and saved[1]["similarity"] == pytest.approx(0.8)
+
+
+@pytest.mark.asyncio
+async def test_score_job_with_llm_shows_saved_jobs_as_examples():
+    from unittest.mock import AsyncMock, patch
+    from app.core.config import settings
+    from app.services.job_analysis import score_job_with_llm
+
+    response = MagicMock()
+    response.choices = [MagicMock(message=MagicMock(content='{"score": 80, "reason": "Like saved"}'))]
+    client = MagicMock()
+    client.chat.completions.create = AsyncMock(return_value=response)
+    profile = MagicMock(skills=[{"name": "Azure"}], bio="", career_goals="")
+    saved = [{"title": "Fractional CTO <b>now</b>", "similarity": 0.71}]
+
+    with patch.object(settings, "openai_api_key", "sk-test"), \
+            patch("openai.AsyncOpenAI", return_value=client):
+        await score_job_with_llm("CTO", "Lead tech", profile, [], [], saved=saved)
+
+    prompt = client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+    assert "Jobs this freelancer saved on Upwork" in prompt
+    assert "Fractional CTO" in prompt and "<b>" not in prompt  # neutralised

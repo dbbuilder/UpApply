@@ -7,6 +7,7 @@
  */
 import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '../../lib/api-client';
+import { chunk, SAVED_IMPORT_BATCH, savedImportItems, type SavedJobCard } from '../../lib/saved-jobs';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -188,28 +189,22 @@ async function runSavedJobs(
     throw new Error(scrapeResult?.error || 'No saved jobs found.');
   }
 
-  setMsg(`Analyzing ${scrapeResult.data.length} jobs…`);
-  const rawCards = scrapeResult.data as Array<{
-    upworkJobId: string; upworkUrl: string; title: string; description: string;
-    jobType?: string; experienceLevel?: string; postedDateRaw?: string;
-    clientInfo?: Record<string, unknown>;
-  }>;
-  const SAVED_JOBS_MAX_AGE_DAYS = 14;
-  const recentCards = rawCards.filter((c) => parseDaysAgo(c.postedDateRaw) <= SAVED_JOBS_MAX_AGE_DAYS);
-  const skipped = rawCards.length - recentCards.length;
-  const items = recentCards.map((c) => ({
-    upwork_job_id: c.upworkJobId,
-    upwork_url: c.upworkUrl,
-    title: c.title,
-    description: c.description,
-    job_type: c.jobType,
-    experience_level: c.experienceLevel,
-    posted_date_raw: c.postedDateRaw,
-    client_info: c.clientInfo,
-  }));
-  const imported = await apiClient.importBulkJobs(items, 'saved');
-  const skipNote = skipped > 0 ? ` · ${skipped} older than 14d skipped` : '';
-  return `${imported.length} new jobs added to Queue${skipNote}`;
+  const items = savedImportItems(scrapeResult.data as SavedJobCard[]);
+  const imported: Awaited<ReturnType<typeof apiClient.importBulkJobs>> = [];
+  let sent = 0;
+  for (const batch of chunk(items, SAVED_IMPORT_BATCH)) {
+    setMsg(`Importing ${sent + 1}–${sent + batch.length} of ${items.length} saved jobs…`);
+    try {
+      imported.push(...await apiClient.importBulkJobs(batch, 'saved'));
+    } catch (err) {
+      // Imports deduplicate, so a re-run picks up where this one stopped.
+      throw new Error(`Stopped after ${sent} of ${items.length} saved jobs (run again to continue): ${String(err)}`);
+    }
+    sent += batch.length;
+  }
+  const older = imported.filter((j) => j.source === 'saved_signal').length;
+  const olderNote = older > 0 ? ` (${older} older, kept to guide scoring and searches)` : '';
+  return `${imported.length} new saved jobs${olderNote} · ${items.length - imported.length} already known`;
 }
 
 async function runBackfill(
@@ -246,18 +241,6 @@ async function runSavedSearches(
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Parse relative date strings to approximate days ago
-function parseDaysAgo(raw: string | undefined): number {
-  if (!raw) return 0;
-  const s = raw.toLowerCase();
-  if (s.includes('just now') || s.includes('minute') || s.includes('hour')) return 0;
-  if (s.includes('yesterday')) return 1;
-  const daysMatch = s.match(/(\d+)\s*day/);
-  if (daysMatch) return parseInt(daysMatch[1], 10);
-  const weeksMatch = s.match(/(\d+)\s*week/);
-  if (weeksMatch) return parseInt(weeksMatch[1], 10) * 7;
-  if (s.includes('month') || s.includes('year')) return 999;
-  return 0;
-}
 
 // ── Import definitions ────────────────────────────────────────────────────────
 
@@ -290,7 +273,7 @@ const IMPORT_DEFS: ImportDef[] = [
     id: 'saved_jobs',
     icon: '⭐',
     title: 'Saved Jobs',
-    description: 'Jobs you\'ve bookmarked on Upwork. Only imports jobs posted in the last 14 days. Adds them to your Queue for scoring.',
+    description: 'Jobs you\'ve bookmarked on Upwork. Ones posted in the last 14 days go to your Queue; all of them guide job scoring and searches.',
     run: runSavedJobs,
   },
   {

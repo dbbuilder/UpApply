@@ -3,7 +3,8 @@
  */
 import { create } from 'zustand';
 import { apiClient, Profile, JobAnalysisResponse, ApplicationOutcome, ClientReview } from '../lib/api-client';
-import type { JobData } from '../types';
+import type { JobData, ScreeningQuestion } from '../types';
+import { jobIdFromUrl } from '../content/job-cards';
 
 interface User {
   id: string;
@@ -69,6 +70,8 @@ interface AppState {
   logout: () => Promise<void>;
   loadProfile: () => Promise<void>;
   analyzeCurrentJob: () => Promise<void>;
+  cancelAnalysis: () => void;
+  mergeScreeningQuestions: (url: string, questions: ScreeningQuestion[]) => void;
   generateCoverLetter: (
     inclusions?: string, prototypeUrl?: string, includeCallOffer?: boolean, clientReview?: boolean,
   ) => Promise<void>;
@@ -80,6 +83,17 @@ interface AppState {
   addSkillToProfile: (skillName: string, level?: string) => Promise<boolean>;
   removeSkillFromProfile: (skillName: string) => Promise<boolean>;
   updateSkillInProfile: (skillName: string, level: string, years?: number) => Promise<boolean>;
+}
+
+// The running job analysis: Cancel aborts its fetch, and the run number lets a late reply from a
+// cancelled or superseded analysis be ignored.
+let analysisController: AbortController | null = null;
+let analysisRun = 0;
+
+function stopAnalysis(): void {
+  analysisRun++;
+  analysisController?.abort();
+  analysisController = null;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -111,7 +125,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { currentJob } = get();
     // Only reset analysis/letter if it's a different job (different URL)
     if (currentJob?.url !== job?.url) {
+      stopAnalysis();  // a running analysis belongs to the job we are leaving
       set({
+        analysisLoading: false,
         currentJob: job,
         jobAnalysis: null,
         coverLetter: null,
@@ -228,6 +244,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  // Questions found on the apply page belong to the job of the same Upwork id: attach them
+  // without resetting the analysis or the letter. Another job's questions are ignored.
+  mergeScreeningQuestions: (url, questions) => {
+    const { currentJob } = get();
+    if (!currentJob || !questions.length) return;
+    const id = jobIdFromUrl(url);
+    if (!id || jobIdFromUrl(currentJob.url) !== id) return;
+    set({ currentJob: { ...currentJob, screeningQuestions: questions } });
+  },
+
   // Analyze current job
   analyzeCurrentJob: async () => {
     const { currentJob } = get();
@@ -235,6 +261,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
+    stopAnalysis();
+    const run = ++analysisRun;
+    analysisController = new AbortController();
     set({ analysisLoading: true, analysisError: null });
     try {
       const analysis = await apiClient.analyzeJob({
@@ -250,15 +279,23 @@ export const useAppStore = create<AppState>((set, get) => ({
           total_spent: currentJob.clientInfo.totalSpent || undefined,
         },
         upwork_url: currentJob.url,
-      });
+      }, analysisController.signal);
+      if (run !== analysisRun) return;  // cancelled, or a newer analysis started
       set({ jobAnalysis: analysis, analysisLoading: false });
     } catch (error) {
+      if (run !== analysisRun) return;  // cancelled: the Cancel button already reset the panel
       console.error('Analysis error:', error);
       const message = error instanceof TypeError
         ? 'Server unavailable. The API may be starting up (Render cold start can take ~30s). Please retry.'
         : error instanceof Error ? error.message : 'Analysis failed';
       set({ analysisLoading: false, analysisError: message });
     }
+  },
+
+  // Stop waiting for the running analysis and go back to the Analyze button (no error shown)
+  cancelAnalysis: () => {
+    stopAnalysis();
+    set({ analysisLoading: false, analysisError: null });
   },
 
   // Save current job to backend and get a job_id
@@ -459,6 +496,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
 // Listen for job data updates from background script
 chrome.runtime.onMessage.addListener((message) => {
+  if (message.type === 'SCREENING_QUESTIONS_FOUND') {
+    useAppStore.getState().mergeScreeningQuestions(message.url, message.questions ?? []);
+  }
   if (message.type === 'JOB_DATA_UPDATED') {
     useAppStore.getState().setCurrentJob(message.data);
     // Auto-analyze if authenticated

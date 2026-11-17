@@ -10,6 +10,7 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   body?: unknown;
   headers?: Record<string, string>;
+  signal?: AbortSignal;  // aborts the fetch (e.g. Cancel on "Analyzing job...")
 }
 
 class ApiClient {
@@ -44,7 +45,7 @@ class ApiClient {
   }
 
   private async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-    const { method = 'GET', body, headers = {} } = options;
+    const { method = 'GET', body, headers = {}, signal } = options;
 
     const token = await this.getToken();
     if (token) {
@@ -59,6 +60,7 @@ class ApiClient {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      signal,
     });
 
     if (!response.ok) {
@@ -220,10 +222,11 @@ class ApiClient {
   }
 
   // Jobs
-  async analyzeJob(data: JobAnalysisRequest) {
+  async analyzeJob(data: JobAnalysisRequest, signal?: AbortSignal) {
     return this.request<JobAnalysisResponse>('/api/v1/jobs/analyze', {
       method: 'POST',
       body: data,
+      signal,
     });
   }
 
@@ -234,11 +237,12 @@ class ApiClient {
     });
   }
 
-  async getJobs(minScore?: number, source?: string, isSaved?: boolean) {
+  async getJobs(minScore?: number, source?: string, isSaved?: boolean, excludeSource?: string) {
     const p = new URLSearchParams();
     if (minScore !== undefined) p.set('min_score', String(minScore));
     if (source) p.set('source', source);
     if (isSaved !== undefined) p.set('is_saved', String(isSaved));
+    if (excludeSource) p.set('exclude_source', excludeSource);
     const qs = p.toString();
     return this.request<Job[]>(`/api/v1/jobs${qs ? `?${qs}` : ''}`);
   }
@@ -367,10 +371,13 @@ class ApiClient {
     });
   }
 
-  async generateScreeningAnswer(question: string, jobTitle?: string, jobDescription?: string, jobSkills?: string[], coverLetterId?: string) {
+  async generateScreeningAnswer(
+    question: string, jobTitle?: string, jobDescription?: string, jobSkills?: string[], coverLetterId?: string,
+    prompt?: ScreeningAnswerPrompt,
+  ) {
     return this.request<{ answer: string; verify_warnings?: string[] | null; claims_verified?: boolean | null }>('/api/v1/screening-answers/generate', {
       method: 'POST',
-      body: { question, job_title: jobTitle, job_description: jobDescription, job_skills: jobSkills, cover_letter_id: coverLetterId },
+      body: { question, job_title: jobTitle, job_description: jobDescription, job_skills: jobSkills, cover_letter_id: coverLetterId, ...prompt },
     });
   }
 
@@ -795,6 +802,7 @@ export class ApiError extends Error {
 // Types
 export interface Profile {
   id: string;
+  generation_v2?: boolean;  // read-only: v2-only Apply controls (answer prompts, tweaks)
   user_id: string;
   full_name?: string;
   professional_title?: string;
@@ -815,6 +823,7 @@ export interface Profile {
   preferred_team_size?: string;
   preferred_client_types?: string[];
   preferred_client_locations?: string[];
+  freelancer_location?: string | null;  // where the freelancer is, for "U.S. only"-style must-haves
   project_duration_preference?: string;
   avoid_keywords?: string[];
   avoid_industries?: string[];
@@ -849,6 +858,7 @@ export interface ProfilePreferences {
   preferred_team_size?: string;
   preferred_client_types?: string[];
   preferred_client_locations?: string[];
+  freelancer_location?: string | null;  // where the freelancer is, for "U.S. only"-style must-haves
   project_duration_preference?: string;
 }
 
@@ -979,6 +989,16 @@ export interface Job {
   created_at: string;
 }
 
+/** The Apply panel's per-question prompt (v2): what to say, a one-tap tweak, the answer being
+ *  revised, the other answers on this application and the letter being sent. */
+export interface ScreeningAnswerPrompt {
+  instruction?: string;
+  tweak?: 'shorter' | 'specific' | 'link' | 'number';
+  current_answer?: string;
+  other_answers?: { question: string; answer: string; user_written?: boolean }[];
+  cover_letter_text?: string;
+}
+
 export interface JobImportItem {
   upwork_job_id: string;
   upwork_url: string;
@@ -989,6 +1009,7 @@ export interface JobImportItem {
   posted_date_raw?: string;
   client_info?: Record<string, unknown>;
   skills?: string[];
+  signal_only?: boolean;  // saved job too old to queue: stored only as a scoring/search signal
 }
 
 export interface CoverLetterGenerateRequest {
@@ -1375,6 +1396,7 @@ export interface JobReview {
   user_comment?: string;
   scored_at?: string;
   created_at: string;
+  details?: import('./job-details').JobDetails | null;
 }
 
 export interface JobReviewListResponse {

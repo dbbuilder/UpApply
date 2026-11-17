@@ -20,6 +20,7 @@ interface AnalysisPanelProps {
   analysisLoading: boolean;
   analysisError: string | null;
   onAnalyze: () => void;
+  onCancelAnalysis: () => void;
   addedSkills: Set<string>;
   addingSkill: string | null;
   onAddMissingSkill: (skill: string) => void;
@@ -28,6 +29,7 @@ interface AnalysisPanelProps {
 export default function AnalysisPanel({
   jobAnalysis,
   analysisLoading,
+  onCancelAnalysis,
   analysisError,
   onAnalyze,
   addedSkills,
@@ -58,6 +60,9 @@ export default function AnalysisPanel({
       {analysisLoading && (
         <div className="card text-center py-6">
           <div className="animate-pulse-slow text-gray-500">Analyzing job...</div>
+          <button type="button" onClick={onCancelAnalysis} className="mt-3 text-xs text-gray-500 underline hover:text-gray-700">
+            Cancel
+          </button>
         </div>
       )}
 
