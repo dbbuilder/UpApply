@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from app.core.rate_limit import limiter
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -286,10 +286,12 @@ async def list_jobs(
     min_score: Optional[float] = None,
     source: Optional[str] = None,
     is_saved: Optional[bool] = None,
+    exclude_source: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List user's saved jobs."""
+    """List user's saved jobs. `exclude_source=saved_signal` leaves out the old saves kept only
+    as a scoring signal (the Queue does this)."""
     query = select(Job).where(Job.user_id == current_user.id)
 
     if min_score is not None:
@@ -298,6 +300,8 @@ async def list_jobs(
         query = query.where(Job.source == source)
     if is_saved is not None:
         query = query.where(Job.is_saved == is_saved)
+    if exclude_source is not None:
+        query = query.where(or_(Job.source.is_(None), Job.source != exclude_source))
 
     # Exclude expired search results
     query = query.where(
@@ -372,7 +376,10 @@ async def import_bulk_jobs(
                 Job.upwork_job_id == item.upwork_job_id,
             )
         )
-        if existing.scalar_one_or_none():
+        known = existing.scalar_one_or_none()
+        if known is not None:
+            if request.source == "saved" and not known.is_saved:
+                known.is_saved = True  # saved after we first saw it: now a preference signal
             continue
 
         # Generate embedding (best-effort)
@@ -385,24 +392,27 @@ async def import_bulk_jobs(
         except (RetryError, Exception):
             embedding = None
 
-        # Run analysis
-        ar = await run_full_analysis(
-            db=db,
-            user_id=current_user.id,
-            profile=profile,
-            job_description=item.description,
-            job_skills=item.skills or [],
-            client_info=item.client_info,
-        )
-
-        analysis = {
-            "skill_matches": [m.model_dump() for m in ar.skill_matches],
-            "missing_skills": ar.missing_skills,
-            "strengths": ar.strengths,
-            "concerns": ar.concerns,
-            "deal_breaker_warnings": ar.deal_breaker_warnings,
-            "recommendation": ar.recommendation,
-        }
+        signal_only = request.source == "saved" and item.signal_only
+        if signal_only:
+            ar, analysis = None, None
+        else:
+            ar = await run_full_analysis(
+                db=db,
+                user_id=current_user.id,
+                profile=profile,
+                job_description=item.description,
+                job_skills=item.skills or [],
+                client_info=item.client_info,
+                precomputed_embedding=embedding,
+            )
+            analysis = {
+                "skill_matches": [m.model_dump() for m in ar.skill_matches],
+                "missing_skills": ar.missing_skills,
+                "strengths": ar.strengths,
+                "concerns": ar.concerns,
+                "deal_breaker_warnings": ar.deal_breaker_warnings,
+                "recommendation": ar.recommendation,
+            }
 
         job = Job(
             user_id=current_user.id,
@@ -415,10 +425,10 @@ async def import_bulk_jobs(
             experience_level=item.experience_level,
             client_info=item.client_info,
             embedding=embedding,
-            match_score=ar.match_score,
+            match_score=ar.match_score if ar else None,
             analysis=analysis,
             is_saved=request.source == "saved",
-            source=request.source,
+            source="saved_signal" if signal_only else request.source,
             expires_at=expires_at,
             scraped_at=datetime.now(timezone.utc),
         )

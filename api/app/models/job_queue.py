@@ -48,6 +48,8 @@ class JobQueueItem(Base):
     ai_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     ai_reasoning: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     chips: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True, default=list)
+    # Job-fit rubric breakdown (app/services/job_fit.py); shadow only, never changes ai_score
+    score_breakdown: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     # Status / lifecycle
     # suggested | approved | rejected | applied | expired

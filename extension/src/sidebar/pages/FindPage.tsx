@@ -1,5 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '../../lib/api-client';
+import {
+  countryMatches, payMatches, PAY_LABELS, postedLabel, postedWithin, POSTED_LABELS,
+  type JobDetails, type PayFilter, type PostedFilter,
+} from '../../lib/job-details';
 
 interface ScoredJobEntry {
   id?: string;
@@ -10,6 +14,31 @@ interface ScoredJobEntry {
   scored_at: string;
   user_rating?: number;
   user_comment?: string;
+  budget_amount?: string | null;
+  budget_type?: string | null;
+  details?: JobDetails | null;
+}
+
+/** "$80-$120/hr", "$3,000 fixed", or null when the card showed no pay. */
+function payLabel(job: ScoredJobEntry): string | null {
+  if (!job.budget_amount) return job.budget_type === 'hourly' ? 'Hourly' : job.budget_type === 'fixed' ? 'Fixed price' : null;
+  const amount = job.budget_amount.replace(/\.00\b/g, '').replace(/\s*-\s*/, '–');
+  return job.budget_type === 'hourly' ? `${amount}/hr` : job.budget_type === 'fixed' ? `${amount} fixed` : amount;
+}
+
+/** The facts line under a result: pay, posted, country, proposals, client spend, verified, level. */
+function detailParts(job: ScoredJobEntry): string[] {
+  const d = job.details || {};
+  return [
+    payLabel(job),
+    postedLabel(d),
+    d.client_country,
+    d.proposals ? `${d.proposals} proposals` : null,
+    d.client_spent ? `${d.client_spent} spent` : null,
+    d.client_rating ? `★ ${d.client_rating}` : null,
+    d.payment_verified === true ? 'Payment verified' : d.payment_verified === false ? 'Payment unverified' : null,
+    d.experience_level,
+  ].filter((p): p is string => !!p);
 }
 
 const SCORE_COLOR = (s: number) =>
@@ -39,7 +68,7 @@ function StarRating({ rating, onRate }: { rating?: number; onRate: (r: number) =
   );
 }
 
-type SortKey = 'score' | 'recent' | 'rating';
+type SortKey = 'score' | 'recent' | 'posted' | 'rating';
 type ScoreFilter = 'all' | 90 | 70 | 50;
 
 export default function FindPage() {
@@ -52,6 +81,9 @@ export default function FindPage() {
   // Filters
   const [scoreFilter, setScoreFilter] = useState<ScoreFilter>('all');
   const [chipFilter, setChipFilter] = useState<Set<string>>(new Set());
+  const [postedFilter, setPostedFilter] = useState<PostedFilter>('any');
+  const [payFilter, setPayFilter] = useState<PayFilter>('any');
+  const [countryFilter, setCountryFilter] = useState('');
   const [sort, setSort] = useState<SortKey>('score');
 
   const load = useCallback(async () => {
@@ -73,6 +105,7 @@ export default function FindPage() {
           merged[url] = { ...entry };
         });
       }
+      const local = (url: string) => (localData.status === 'fulfilled' ? localData.value[url] : undefined);
 
       // Overlay API reviews (they have ratings and are persisted across sessions)
       if (apiReviews.status === 'fulfilled') {
@@ -86,6 +119,10 @@ export default function FindPage() {
             scored_at: r.scored_at ?? r.created_at,
             user_rating: r.user_rating ?? undefined,
             user_comment: r.user_comment ?? undefined,
+            // The server keeps card details across devices; this browser's copy fills any gap
+            budget_amount: r.budget_amount ?? local(r.upwork_job_url)?.budget_amount ?? null,
+            budget_type: r.budget_type ?? local(r.upwork_job_url)?.budget_type ?? null,
+            details: r.details ?? local(r.upwork_job_url)?.details ?? null,
           };
         });
       }
@@ -99,12 +136,18 @@ export default function FindPage() {
   useEffect(() => { load(); }, [load]);
 
   const allChips = Array.from(new Set(jobs.flatMap(j => j.chips))).sort();
+  const countries = Array.from(new Set(jobs.map(j => j.details?.client_country).filter((c): c is string => !!c))).sort();
+  const postedTime = (j: ScoredJobEntry) => (j.details?.posted_at ? Date.parse(j.details.posted_at) : 0);
 
   const filtered = jobs
     .filter(j => scoreFilter === 'all' || j.score >= scoreFilter)
     .filter(j => chipFilter.size === 0 || j.chips.some(c => chipFilter.has(c)))
+    .filter(j => postedWithin(j, postedFilter))
+    .filter(j => payMatches(j, payFilter))
+    .filter(j => countryMatches(j, countryFilter))
     .sort((a, b) => {
       if (sort === 'recent') return b.scored_at.localeCompare(a.scored_at);
+      if (sort === 'posted') return postedTime(b) - postedTime(a);
       if (sort === 'rating') return (b.user_rating ?? 0) - (a.user_rating ?? 0) || b.score - a.score;
       return b.score - a.score;
     });
@@ -175,8 +218,26 @@ export default function FindPage() {
             className="text-xs border border-gray-200 rounded px-1 py-0.5 text-gray-600 bg-white"
           >
             <option value="score">Score</option>
-            <option value="recent">Recent</option>
+            <option value="recent">Recently scored</option>
+            <option value="posted">Newest posted</option>
             <option value="rating">My Rating</option>
+          </select>
+        </div>
+
+        {/* Posted / pay / country filters */}
+        <div className="flex gap-1">
+          <select value={postedFilter} onChange={e => setPostedFilter(e.target.value as PostedFilter)}
+            className="flex-1 min-w-0 text-xs border border-gray-200 rounded px-1 py-0.5 text-gray-600 bg-white" aria-label="Posted">
+            {(Object.keys(POSTED_LABELS) as PostedFilter[]).map(k => <option key={k} value={k}>{POSTED_LABELS[k]}</option>)}
+          </select>
+          <select value={payFilter} onChange={e => setPayFilter(e.target.value as PayFilter)}
+            className="flex-1 min-w-0 text-xs border border-gray-200 rounded px-1 py-0.5 text-gray-600 bg-white" aria-label="Pay">
+            {(Object.keys(PAY_LABELS) as PayFilter[]).map(k => <option key={k} value={k}>{PAY_LABELS[k]}</option>)}
+          </select>
+          <select value={countryFilter} onChange={e => setCountryFilter(e.target.value)}
+            className="flex-1 min-w-0 text-xs border border-gray-200 rounded px-1 py-0.5 text-gray-600 bg-white" aria-label="Client country">
+            <option value="">Any country</option>
+            {countries.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
 
@@ -209,8 +270,17 @@ export default function FindPage() {
         {!loading && filtered.length === 0 && (
           <div className="text-center py-12 text-gray-400">
             <div className="text-3xl mb-2">🔍</div>
-            <p className="text-sm font-medium text-gray-500">No scored jobs yet</p>
-            <p className="text-xs mt-1">Use the Score button on Upwork notifications or saved jobs</p>
+            {jobs.length === 0 ? (
+              <>
+                <p className="text-sm font-medium text-gray-500">No scored jobs yet</p>
+                <p className="text-xs mt-1">Use the Score button on Upwork notifications or saved jobs</p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-medium text-gray-500">No jobs match these filters</p>
+                <p className="text-xs mt-1">Date, pay and country filters leave out jobs whose card did not show them</p>
+              </>
+            )}
           </div>
         )}
         {filtered.map(job => (
@@ -237,6 +307,10 @@ export default function FindPage() {
                 >
                   {job.title}
                 </button>
+
+                {detailParts(job).length > 0 && (
+                  <p className="text-[11px] text-gray-500 mt-1 leading-snug">{detailParts(job).join(' · ')}</p>
+                )}
 
                 {job.chips.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1.5">

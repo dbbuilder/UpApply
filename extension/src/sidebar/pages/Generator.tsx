@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../store';
 import { apiClient, ScreeningAnswerSearchResult, AttachmentData, MilestoneSuggestion, RefineMessage } from '../../lib/api-client';
+import { currentAnswer, otherAnswers, type AnswerTweak } from '../../lib/screening-context';
+import { jobIdFromUrl } from '../../content/job-cards';
+import { loadInclusions, saveInclusions } from '../../lib/job-inclusions';
 import JobHeader from '../components/generator/JobHeader';
 import AnalysisPanel from '../components/generator/AnalysisPanel';
 import CoverLetterPanel from '../components/generator/CoverLetterPanel';
@@ -12,6 +15,7 @@ import LegacyRevise from '../components/generator/LegacyRevise';
 export default function GeneratorPage() {
   const {
     currentJob,
+    profile,
     jobAnalysis,
     analysisLoading,
     analysisError,
@@ -23,6 +27,7 @@ export default function GeneratorPage() {
     savedJobId,
     applicationId,
     analyzeCurrentJob,
+    cancelAnalysis,
     generateCoverLetter,
     fillCoverLetter,
     fillScreeningQuestion,
@@ -33,6 +38,38 @@ export default function GeneratorPage() {
 
   // Screening question state
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
+  const [answerPrompts, setAnswerPrompts] = useState<Record<string, string>>({});
+  // Which sidebar answers the user typed or edited (AI-written ones are context, never evidence)
+  const [userEdited, setUserEdited] = useState<Record<string, boolean>>({});
+  const setAiAnswers = (updates: Record<string, string>) => {
+    setQuestionAnswers(prev => ({ ...prev, ...updates }));
+    setUserEdited(prev => {
+      const next = { ...prev };
+      Object.keys(updates).forEach(k => { delete next[k]; });
+      return next;
+    });
+  };
+
+  // Answers and prompts belong to one job: a different job starts clean (they are keyed by position)
+  useEffect(() => {
+    setQuestionAnswers({});
+    setAnswerPrompts({});
+    setUserEdited({});
+    setUnverifiedAnswers({});
+    setSuggestedAnswers({});
+    setLoadingSuggestions({});
+    setGeneratingAnswers({});
+  }, [currentJob?.url]);
+
+  // Screening questions live only on the apply page: ask the active tab when this job has none yet
+  // (covers a sidebar opened after the apply page loaded; the page also reports them itself)
+  useEffect(() => {
+    if (!currentJob?.url || currentJob.screeningQuestions?.length) return;
+    chrome.runtime.sendMessage({ type: 'REQUEST_SCREENING_QUESTIONS' }, (resp) => {
+      if (chrome.runtime.lastError || !resp?.url) return;
+      useAppStore.getState().mergeScreeningQuestions(resp.url, resp.questions ?? []);
+    });
+  }, [currentJob?.url, currentJob?.screeningQuestions?.length]);
   // Keys of AI answers whose claim check was skipped (claims_verified === false).
   const [unverifiedAnswers, setUnverifiedAnswers] = useState<Record<string, boolean>>({});
   const [suggestedAnswers, setSuggestedAnswers] = useState<Record<string, ScreeningAnswerSearchResult[]>>({});
@@ -71,6 +108,23 @@ export default function GeneratorPage() {
 
   // Cover letter options state
   const [inclusions, setInclusions] = useState('');
+  // "Include in cover letter" belongs to the job: load it when the job changes, save as it is typed
+  const inclusionsJobUrl = useRef<string | null>(null);
+  useEffect(() => {
+    const url = currentJob?.url ?? null;
+    inclusionsJobUrl.current = null;  // no saves until this job's text has loaded
+    let cancelled = false;
+    loadInclusions(url).then((text) => {
+      if (cancelled) return;
+      setInclusions(text);
+      inclusionsJobUrl.current = url;
+    });
+    return () => { cancelled = true; };
+  }, [currentJob?.url]);
+  const updateInclusions = useCallback((text: string) => {
+    setInclusions(text);
+    if (inclusionsJobUrl.current) void saveInclusions(inclusionsJobUrl.current, text);
+  }, []);
   const [prototypeUrl, setPrototypeUrl] = useState('');
   const [includeCallOffer, setIncludeCallOffer] = useState(true);
   const [clientReview, setClientReview] = useState(false);
@@ -226,7 +280,7 @@ export default function GeneratorPage() {
           revisedUnverified[`q${i}`] = !claimsVerified;
         }
       });
-      setQuestionAnswers(prev => ({ ...prev, ...revised }));
+      setAiAnswers(revised);
       setUnverifiedAnswers(prev => ({ ...prev, ...revisedUnverified }));
       setRefineMessages(result.refine_messages);
       setRefineWarnings(result.warnings);
@@ -361,22 +415,41 @@ export default function GeneratorPage() {
   };
 
   const handleUseSuggestedAnswer = (index: number, answer: string) => {
-    setQuestionAnswers(prev => ({ ...prev, [`q${index}`]: answer }));
+    setAiAnswers({ [`q${index}`]: answer });
     setUnverifiedAnswers(prev => ({ ...prev, [`q${index}`]: false }));
   };
 
-  const handleGenerateAnswer = async (question: string, index: number) => {
+  // What is typed in Upwork's own question boxes (answers written there count as context)
+  const readPageAnswers = (selectors: string[]) => new Promise<string[]>((resolve) => {
+    chrome.runtime.sendMessage({ type: 'READ_SCREENING_ANSWERS', selectors }, (resp) => {
+      // Only this job's apply page counts: another job's boxes in the active tab are not context
+      const sameJob = !!resp?.url && !!currentJob?.url && jobIdFromUrl(resp.url) === jobIdFromUrl(currentJob.url);
+      resolve(chrome.runtime.lastError || !sameJob ? [] : (resp?.values ?? []));
+    });
+  });
+
+  const handleGenerateAnswer = async (question: string, index: number, tweak?: AnswerTweak) => {
     const key = `q${index}`;
     setGeneratingAnswers(prev => ({ ...prev, [key]: true }));
     try {
+      const questions = currentJob?.screeningQuestions ?? [];
+      const pageValues = await readPageAnswers(questions.map(q => q.inputSelector));
+      const existing = currentAnswer(index, questionAnswers, pageValues);
       const result = await apiClient.generateScreeningAnswer(
         question,
         currentJob?.title ?? undefined,
         currentJob?.description ?? undefined,
         currentJob?.skills ?? undefined,
         useAppStore.getState().coverLetterId ?? undefined,
+        {
+          instruction: answerPrompts[key]?.trim() || undefined,
+          tweak,
+          current_answer: existing || undefined,  // there is an answer: revise it rather than start over
+          other_answers: otherAnswers(questions, index, questionAnswers, pageValues, userEdited),
+          cover_letter_text: useAppStore.getState().coverLetter ?? undefined,
+        },
       );
-      setQuestionAnswers(prev => ({ ...prev, [key]: result.answer }));
+      setAiAnswers({ [key]: result.answer });
       setUnverifiedAnswers(prev => ({ ...prev, [key]: result.claims_verified === false }));
     } catch {
       // silent
@@ -414,7 +487,7 @@ export default function GeneratorPage() {
           unverified[`q${i}`] = meta?.claimsVerified === false;
         }
       });
-      setQuestionAnswers(prev => ({ ...prev, ...fromDraft }));
+      setAiAnswers(fromDraft);
       setUnverifiedAnswers(prev => ({ ...prev, ...unverified }));
       return;
     }
@@ -437,7 +510,7 @@ export default function GeneratorPage() {
           unverified[`q${r.value.index}`] = r.value.unverified;
         }
       });
-      setQuestionAnswers(prev => ({ ...prev, ...newAnswers }));
+      setAiAnswers(newAnswers);
       setUnverifiedAnswers(prev => ({ ...prev, ...unverified }));
     }
   };
@@ -479,6 +552,7 @@ export default function GeneratorPage() {
 
   const handleAnswerChange = (index: number, value: string) => {
     setQuestionAnswers(prev => ({ ...prev, [`q${index}`]: value }));
+    setUserEdited(prev => ({ ...prev, [`q${index}`]: true }));
   };
 
   const handleFetchFullJob = async () => {
@@ -589,6 +663,7 @@ export default function GeneratorPage() {
               analysisLoading={analysisLoading}
               analysisError={analysisError}
               onAnalyze={() => analyzeCurrentJob()}
+              onCancelAnalysis={cancelAnalysis}
               addedSkills={addedSkills}
               addingSkill={addingSkill}
               onAddMissingSkill={handleAddMissingSkill}
@@ -598,7 +673,7 @@ export default function GeneratorPage() {
               coverLetter={coverLetter || ''}
               jobAnalysis={jobAnalysis}
               inclusions={inclusions}
-              setInclusions={setInclusions}
+              setInclusions={updateInclusions}
               prototypeUrl={prototypeUrl}
               setPrototypeUrl={setPrototypeUrl}
               includeCallOffer={includeCallOffer}
@@ -656,6 +731,9 @@ export default function GeneratorPage() {
                 suggestedAnswers={suggestedAnswers}
                 loadingSuggestions={loadingSuggestions}
                 generatingAnswers={generatingAnswers}
+                answerPrompts={answerPrompts}
+                promptsEnabled={profile?.generation_v2 === true}
+                onPromptChange={(index, value) => setAnswerPrompts(prev => ({ ...prev, [`q${index}`]: value }))}
                 onAnswerChange={handleAnswerChange}
                 onQuestionFocus={handleQuestionFocus}
                 onUseSuggestedAnswer={handleUseSuggestedAnswer}
