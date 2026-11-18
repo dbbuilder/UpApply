@@ -15,7 +15,7 @@ Contract for unattended work in this repo. Read by advance-all, the autopilot St
 
 ## Goal
 
-v2 is live for Chris and he is applying with it: since 2026-11-11 production logged 6 cover-letter generations, 3 recorded applications and 20 job analyses (Render request logs, 2026-11-16). Shipped 2026-11-09 to 11-16 (extension 1.0.37, API b6ffe2c, migrations 029-031): the job-fit rubric in shadow (#64), saved Upwork jobs as a scoring signal and a working saved-jobs import (#65, #67, #68), unmet client must-haves capping the score (#69), per-job "Include in cover letter" and Cancel analysis (#70, #71), per-question screening-answer prompts read from the apply page (#72), the client total-spent fix (#73), voice kit v0.5.2 with "Regards,\nChris" (#74) and Find-tab details and filters (#75). The scan has not run since 2026-11-02 (no `job-queue/ingest` requests in the logs since 2026-11-11), so the rubric's shadow week has collected nothing and its eval cannot start.
+v2 is live for Chris and he is applying with it: since 2026-11-11 production logged 6 cover-letter generations, 3 recorded applications and 20 job analyses (Render request logs, 2026-11-16). Shipped 2026-11-09 to 11-16 (extension 1.0.37, API b6ffe2c, migrations 029-031): the job-fit rubric in shadow (#64), saved Upwork jobs as a scoring signal and a working saved-jobs import (#65, #67, #68), unmet client must-haves capping the score (#69), per-job "Include in cover letter" and Cancel analysis (#70, #71), per-question screening-answer prompts read from the apply page (#72), the client total-spent fix (#73), voice kit v0.5.2 with "Regards,\nChris" (#74) and Find-tab details and filters (#75). The scan did not run from 2026-11-02 to 2026-11-18 (no `job-queue/ingest` requests in the logs from 2026-11-11 to 11-16); Chris turned on scheduled scans (every 3 h) on 2026-11-18, which starts the rubric's shadow week.
 
 ## Guardrails
 
@@ -30,12 +30,10 @@ v2 is live for Chris and he is applying with it: since 2026-11-11 production log
 
 - [x] 1. Runbook: "Reviewer, trust card, rules and filters" section — done in #52
 - [x] 2. Plan: `docs/superpowers/plans/2026-11-04-job-fit-rubric.md` — done in #63 (approved 2026-11-05; updated 2026-11-16 to the weights and decisions as built)
-- [ ] 3. Job-fit eval (plan phase 1): `scripts/eval_job_fit.py`, read-only against production in an attended session, over the scanned jobs that carry a `job_queue.score_breakdown`; Chris labels 40 jobs apply / maybe / skip — Done when: the script runs and its report shows the current score and the rubric side by side for the labelled jobs. Blocked until scheduled scans have run for about a week
+- [ ] 3. Job-fit eval (plan phase 1): `scripts/eval_job_fit.py`, read-only against production in an attended session, over the scanned jobs that carry a `job_queue.score_breakdown`; Chris labels 40 jobs apply / maybe / skip — Done when: the script runs and its report shows the current score and the rubric side by side for the labelled jobs. Scheduled scans on since 2026-11-18: ready to start about 2026-11-25
 
 ## Decisions pending
 
-- [2026-11-04] Turn on scheduled scans (Agent tab or ☰ → Settings; every 3 h). Nothing reaches the queue or the rubric's shadow week until they run (Chris) — the cheapest unblock of the most work
-- [2026-11-16] Merge #66 (Search Lab counts saved jobs, proposes searches for uncovered ones, whole-word matching): CI green, waiting on Chris
 - [2026-11-16] Check the Screening Questions card on a live apply page with questions (shipped in 1.0.37, not yet seen live) (Chris)
 - [2026-11-11] Remove the legacy cover-letter pipeline: the runbook's two weeks on v2 passed 2026-11-11, but Gus would start on the flag-off path; decide the order (Chris)
 - [2026-11-11] Saved-jobs import read about 200 of about 2,960 saves (paging gives up after 3 s in a throttled background tab); widen it only if older saves are wanted as signal (Chris)
@@ -73,4 +71,4 @@ v2 is live for Chris and he is applying with it: since 2026-11-11 production log
 - [2026-11-13] Chris's preferred_closing set to 'Regards,\nChris' in production; voice kit v0.5.2 (sv-writing-style#6)
 - [2026-11-15] #70-#75 merged and deployed (live b6ffe2c, migration 031 ran 00:37 UTC, extension 1.0.37). #72 completed: screening questions were never read because the extension only extracted on /jobs/ URLs and they exist only on the apply page; an independent review found 3 defects (AI answers counted as the user's words, answers carried across jobs, prompts shown to flag-off users), all fixed before merge. #73: client spend read only from About the client
 - [2026-11-16] Render logs since 2026-11-11: 6 cover letters, 3 applications, 20 analyses, no scan ingests
-
+- [2026-11-18] Scheduled scans turned on (every 3 h); #66 Search Lab merged (5a745b3)
