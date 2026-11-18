@@ -527,9 +527,10 @@ async def evaluate_search_lab(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Evaluate how well current search queries cover the user's winning jobs.
+    """Evaluate how well current search queries cover the user's winning and saved jobs.
 
-    Winning jobs = contract imports (strongest signal) + jobs from responded proposals.
+    Targets = contract imports (strongest signal) + jobs from responded proposals + jobs the user
+    saved on Upwork (jobs.is_saved: work they want, Chris 2026-11-09).
     Returns per-query coverage scores, uncovered gap jobs, and GPT-generated
     replacement/supplement queries with proper Upwork URL params.
     """
@@ -572,6 +573,18 @@ async def evaluate_search_lab(
             seen_titles.add(t)
             target_jobs.append(TargetJob(t, p.cover_letter_text or ""))
 
+    saved_result = await db.execute(
+        select(Job)
+        .where(Job.user_id == current_user.id, Job.is_saved.is_(True))
+        .order_by(Job.created_at.desc())
+        .limit(200)
+    )
+    for j in saved_result.scalars().all():
+        t = (j.title or "").strip()
+        if t and t not in seen_titles:
+            seen_titles.add(t)
+            target_jobs.append(TargetJob(t, j.description or "", saved=True))
+
     if not target_jobs:
         return SearchLabResult(
             total_target_jobs=0,
@@ -601,9 +614,11 @@ async def evaluate_search_lab(
         if not tokens:
             continue
         matches: list[str] = []
+        saved_hits = 0
         for tj in target_jobs:
             if _job_matches_query(tj.title, tj.description, tokens):
                 matches.append(tj.title)
+                saved_hits += tj.saved
                 job_covered_by[tj.title].add(sq.id)
 
         pct = round(len(matches) / len(target_jobs) * 100, 1)
@@ -614,6 +629,7 @@ async def evaluate_search_lab(
             coverage_count=len(matches),
             coverage_pct=pct,
             sample_matches=matches[:3],
+            saved_count=saved_hits,
         ))
 
     # Sort by coverage descending
@@ -640,6 +656,7 @@ async def evaluate_search_lab(
 
     return SearchLabResult(
         total_target_jobs=len(target_jobs),
+        saved_target_jobs=sum(tj.saved for tj in target_jobs),
         covered_count=covered_count,
         coverage_pct=coverage_pct,
         query_coverage=coverage_items,
