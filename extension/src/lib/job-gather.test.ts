@@ -5,6 +5,8 @@ import {
   SETTLE_EMPTY_MS, SETTLE_MAX_MS, blockMessage, describeEmptyPage, settleStep,
   defaultLookbackDays, effectiveLookbackDays, pageDecision, parsePostedAt, parseTileText, withinLookback,
   detectBlockedPage, emptyTotals, isLockFree, normalizeGatherSettings, parseRating, pickQueries,
+  isNoReceiverError,
+  sendWhenReady,
 } from './job-gather';
 import { THROTTLE_PAGE_TEXT } from './proposal-scrape';
 
@@ -349,5 +351,39 @@ describe('parseTileText', () => {
   it('knows the type when no amount is shown', () => {
     expect(parseTileText('Posted 1 hour ago Hourly Expert Est. Time: Less than 1 week')).toMatchObject({ budgetType: 'hourly', budgetAmount: null });
     expect(parseTileText('nothing here')).toEqual({ budgetType: null, budgetAmount: null, postedText: null, proposalsText: null });
+  });
+});
+
+describe('sendWhenReady (scan tab page script not listening yet)', () => {
+  const noReceiver = { error: 'Could not establish connection. Receiving end does not exist.' };
+  const noSleep = async () => {};
+
+  it('retries while nothing listens, then returns the answer', async () => {
+    const replies = [noReceiver, noReceiver, { value: { success: true, data: [1] } }];
+    let calls = 0;
+    const out = await sendWhenReady(async () => replies[calls++], 5, 1000, noSleep);
+    expect(out).toEqual({ value: { success: true, data: [1] } });
+    expect(calls).toBe(3);
+  });
+
+  it('returns any other error at once', async () => {
+    let calls = 0;
+    const out = await sendWhenReady(async () => { calls++; return { error: 'The tab was closed.' }; }, 5, 1000, noSleep);
+    expect(out).toEqual({ error: 'The tab was closed.' });
+    expect(calls).toBe(1);
+  });
+
+  it('gives up after the set number of attempts', async () => {
+    let calls = 0;
+    const out = await sendWhenReady(async () => { calls++; return noReceiver; }, 3, 1000, noSleep);
+    expect(out).toEqual(noReceiver);
+    expect(calls).toBe(3);
+  });
+
+  it('recognizes Chrome\'s no-receiver errors only', () => {
+    expect(isNoReceiverError(noReceiver.error)).toBe(true);
+    expect(isNoReceiverError('Receiving end does not exist.')).toBe(true);
+    expect(isNoReceiverError('No response')).toBe(false);
+    expect(isNoReceiverError(undefined)).toBe(false);
   });
 });

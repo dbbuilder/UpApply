@@ -9,7 +9,7 @@ import { apiClient } from '../lib/api-client';
 import {
   MAX_CONSECUTIVE_THROTTLED, SAVE_BATCH_SIZE, THROTTLE_PAGE_TEXT,
   completeProposalIds, isThrottledRead, randomDetailDelayMs, takeBatch, throttleBackoffMs, RUN_BUDGET_MS, LIST_CACHE_TTL_MS, pickProposalStatus, proposalFromNuxtData } from '../lib/proposal-scrape';
-import { SETTLE_POLL_MS, blockMessage, buildSearchUrl, describeEmptyPage, detectBlockedPage, pageDecision, parsePostedAt, settleStep, type EmptyPageFacts, type PageSnapshot } from '../lib/job-gather';
+import { SETTLE_POLL_MS, blockMessage, buildSearchUrl, describeEmptyPage, detectBlockedPage, pageDecision, parsePostedAt, sendWhenReady, settleStep, type EmptyPageFacts, type PageSnapshot } from '../lib/job-gather';
 import { initGatherer, type SearchScrapeOptions, type SearchScrapeResult } from './gatherer';
 
 // A generated draft stays linked to its job's apply page for a day (Submit-click capture).
@@ -1508,12 +1508,15 @@ async function _scrapeUpworkSearchNow(query: string, urlParams: string | null | 
         catch (e) { /* already loaded */ }
       }
       await new Promise(resolve => setTimeout(resolve, 500));
-      return new Promise<SearchScrapeResult>((resolve) => {
+      // The page script may not be listening yet ("Receiving end does not exist"): retry a few
+      // times a second apart instead of losing the whole search for this run.
+      const sent = await sendWhenReady<SearchScrapeResult>(() => new Promise((resolve) => {
         chrome.tabs.sendMessage(tabId, { type: 'SCRAPE_JOB_CARDS', maxPages }, (resp) => {
-          if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
-          else resolve(resp || { success: false, error: 'No response' });
+          if (chrome.runtime.lastError) resolve({ error: chrome.runtime.lastError.message });
+          else resolve({ value: resp || { success: false, error: 'No response' } });
         });
-      });
+      }));
+      return sent.value ?? { success: false, error: sent.error || 'No response' };
     };
     const describeEmpty = async (): Promise<string | undefined> => {
       try {

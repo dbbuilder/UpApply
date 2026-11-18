@@ -458,3 +458,27 @@ export function withinLookback<T extends { postedDateRaw?: string | null }>(card
     return !posted || posted.getTime() >= cutoff;
   });
 }
+
+/** Chrome's "nothing is listening in that tab" errors: the page script is not loaded (yet). */
+export function isNoReceiverError(message: string | null | undefined): boolean {
+  return /Receiving end does not exist|Could not establish connection/i.test(message || '');
+}
+
+/** Send a message the tab's page script answers, retrying while the script is not ready yet
+ *  (a search tab can finish loading before the script listens). Any other result is returned at
+ *  once; after `attempts` "no receiver" errors the last one is returned. */
+export async function sendWhenReady<T>(
+  send: () => Promise<{ value?: T; error?: string }>,
+  attempts = 5,
+  delayMs = 1000,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<{ value?: T; error?: string }> {
+  let last: { value?: T; error?: string } = {};
+  for (let i = 0; i < attempts; i++) {
+    last = await send();
+    if (!isNoReceiverError(last.error)) return last;
+    if (i < attempts - 1) await sleep(delayMs);
+  }
+  return last;
+}
+
