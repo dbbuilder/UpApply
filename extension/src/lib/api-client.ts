@@ -1331,6 +1331,7 @@ export interface QueryCoverage {
   coverage_count: number;
   coverage_pct: number;
   sample_matches: string[];
+  saved_count?: number;  // of coverage_count, jobs saved on Upwork
 }
 
 export interface SuggestedQuery {
@@ -1342,6 +1343,7 @@ export interface SuggestedQuery {
 
 export interface SearchLabResult {
   total_target_jobs: number;
+  saved_target_jobs?: number;  // of total_target_jobs, jobs saved on Upwork
   covered_count: number;
   coverage_pct: number;
   query_coverage: QueryCoverage[];
