@@ -110,9 +110,8 @@ async def analyze_job(
         user_id=current_user.id,
         profile=profile,
         job_title=request.title,
-        job_description=(f"{request.description}\n\n{request.location_restriction.strip()}"
-                         if request.location_restriction and request.location_restriction.strip()
-                         else request.description),
+        job_description=request.description,
+        location_restriction=(request.location_restriction or "").strip() or None,
         job_skills=job_skills,
         budget_amount=request.budget_amount,
         client_info=client_info,

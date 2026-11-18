@@ -15,4 +15,10 @@ describe("Upwork's location rule on a job page", () => {
     document.body.innerHTML = '<span>Posted 1 hour ago</span><span>Worldwide</span>';
     expect(locationRestriction()).toBeNull();
   });
+
+  it("a rule quoted in the description never beats the header's own line", () => {
+    document.body.innerHTML = `<header><span>Only freelancers located in the United Kingdom may apply.</span></header>
+      <section data-test="Description"><p>Note: Only freelancers located in the U.S. may apply.</p></section>`;
+    expect(locationRestriction()).toBe('Only freelancers located in the United Kingdom may apply.');
+  });
 });

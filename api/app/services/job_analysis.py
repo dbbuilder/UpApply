@@ -655,6 +655,7 @@ async def run_full_analysis(
     budget_min: Optional[float] = None,
     client_info: Optional[Dict] = None,
     precomputed_embedding: Optional[List[float]] = None,
+    location_restriction: Optional[str] = None,  # Upwork's job-page rule line, for the must-have check
 ) -> AnalysisResult:
     """Run complete job analysis pipeline and return consolidated result.
 
@@ -776,6 +777,7 @@ async def run_full_analysis(
         ),
         job_requirements.check_requirements(
             title=job_title or "", description=job_description, profile=profile, facts=fact_statements,
+            location_restriction=location_restriction,
         ),
     )
 

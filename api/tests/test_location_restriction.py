@@ -20,7 +20,8 @@ async def test_the_restriction_line_reaches_the_analysis(client, auth_headers_wi
     with patch("app.api.v1.jobs.run_full_analysis", run):
         resp = await client.post("/api/v1/jobs/analyze", json=body, headers=auth_headers_with_profile)
     assert resp.status_code == 200
-    assert run.await_args.kwargs["job_description"] == "Finish our CRM.\n\nOnly freelancers located in the U.S. may apply."
+    assert run.await_args.kwargs["job_description"] == "Finish our CRM."
+    assert run.await_args.kwargs["location_restriction"] == "Only freelancers located in the U.S. may apply."
 
 
 @pytest.mark.asyncio
@@ -30,6 +31,7 @@ async def test_no_restriction_leaves_the_description_alone(client, auth_headers_
         await client.post("/api/v1/jobs/analyze", json={"title": "t", "description": "d", "location_restriction": "  "},
                           headers=auth_headers_with_profile)
     assert run.await_args.kwargs["job_description"] == "d"
+    assert run.await_args.kwargs["location_restriction"] is None
 
 
 @pytest.mark.asyncio
@@ -37,3 +39,22 @@ async def test_an_oversized_restriction_is_rejected(client, auth_headers_with_pr
     resp = await client.post("/api/v1/jobs/analyze", headers=auth_headers_with_profile,
                              json={"title": "t", "description": "d", "location_restriction": "x" * 201})
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_the_rule_reaches_the_check_even_past_the_description_cut():
+    from types import SimpleNamespace
+    from app.services import job_requirements as jr
+
+    rule = "Only freelancers located in the U.S. may apply."
+    long_post = "We need a CRM finished. " * 400  # far past MAX_DESCRIPTION_CHARS
+    reply = {"must_haves": [{"requirement": "Located in the U.S.", "quote": rule, "kind": "location",
+                             "status": "unmet", "why": "Profile location is Canada"}]}
+    call = AsyncMock(return_value=reply)
+    profile = SimpleNamespace(freelancer_location="Canada", timezone=None, certifications=[], skills=[],
+                              preferred_project_types=[], career_goals=None)
+    with patch.object(jr, "structured_call", call), patch.object(jr.settings, "anthropic_api_key", "sk-test"):
+        check = await jr.check_requirements(title="CRM", description=long_post, profile=profile, facts=[],
+                                            location_restriction=rule)
+    assert "Upwork rule for this job: Only freelancers located in the U.S. may apply." in call.await_args.kwargs["user"]
+    assert [m.quote for m in check.unmet] == [rule]  # a quote from the rule line passes the verbatim check
