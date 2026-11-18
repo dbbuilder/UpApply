@@ -2,9 +2,9 @@
 
 autopilot: off
 autopilot-max: 10
-built: 2026-11-04T05:50
+built: 2026-11-16T22:30
 branch: main
-head: a0d6508
+head: b6ffe2c
 status: active
 
 <!--
@@ -15,7 +15,7 @@ Contract for unattended work in this repo. Read by advance-all, the autopilot St
 
 ## Goal
 
-v2 is live for Chris with job-queue drafts, canonical outcome stages, a results report, a new-user setup check, and the career-ops ideas 1-8 (graded requirements, client's-eye reviewer, client trust card, learned rules, skip reasons and filter audit). Automatic job gathering works against live Upwork (#49–#62, 2026-11-02): 10 keyword searches, paging back to a lookback window, budgets read from the tiles, server pre-filter and scoring; 325 scanned jobs in the queue (93 suggested, 232 filtered). Nothing has gone past Pending yet (0 reviewed, 0 v2 letters). The open problem is the match score: scanned jobs carry no skills list, so the 30% rule score sits at 85–94 and every scanned job gets about +27 (0.7 × LLM grade + 27). Step 2 writes the plan for a per-dimension rubric; building it waits on Chris.
+v2 is live for Chris and he is applying with it: since 2026-11-11 production logged 6 cover-letter generations, 3 recorded applications and 20 job analyses (Render request logs, 2026-11-16). Shipped 2026-11-09 to 11-16 (extension 1.0.37, API b6ffe2c, migrations 029-031): the job-fit rubric in shadow (#64), saved Upwork jobs as a scoring signal and a working saved-jobs import (#65, #67, #68), unmet client must-haves capping the score (#69), per-job "Include in cover letter" and Cancel analysis (#70, #71), per-question screening-answer prompts read from the apply page (#72), the client total-spent fix (#73), voice kit v0.5.2 with "Regards,\nChris" (#74) and Find-tab details and filters (#75). The scan did not run from 2026-11-02 to 2026-11-18 (no `job-queue/ingest` requests in the logs from 2026-11-11 to 11-16); Chris turned on scheduled scans (every 3 h) on 2026-11-18, which starts the rubric's shadow week.
 
 ## Guardrails
 
@@ -24,26 +24,23 @@ v2 is live for Chris with job-queue drafts, canonical outcome stages, a results 
 - Never run a working-tree-wide discard (`git checkout -- .`, `git restore .`, `git reset --hard`, `git clean`, bare `git stash`); `git add` explicit paths only; never commit `working/` or `docs/evals/`
 - Never flip `generation_v2` for anyone, never open `docs/evals/*/key.json`
 - Voice rules live in the kit repo (`~/dev2/sv/writing-style`); change them only from Chris's dated feedback
-- Tests: `docker start upapply-test-pg` (the container stops on its own; wait for `docker exec upapply-test-pg pg_isready -U upapply` before running), then `(cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q)` (996 passing at a0d6508). The test DB is shared with other sessions: on mass errors or deadlocks, create a private database in the same container (`CREATE DATABASE upapply_test_<name>` + `CREATE EXTENSION vector`), point TEST_DATABASE_URL at it, and drop it afterwards. A large skipped count means the DB was down. Extension: `cd extension && npx vitest run && npm run type-check` (150 passing at a0d6508)
+- Tests: `docker start upapply-test-pg` (the container stops on its own; wait for `docker exec upapply-test-pg pg_isready -U upapply` before running), then `(cd api && TEST_DATABASE_URL=postgresql+asyncpg://upapply:upapply@localhost:55499/upapply_test ./venv/bin/pytest -q)` (1106 passing on the merged #72 branch, 2026-11-15; equal to main b6ffe2c apart from the version bump). The test DB is shared with other sessions: on mass errors or deadlocks, create a private database in the same container (`CREATE DATABASE upapply_test_<name>` + `CREATE EXTENSION vector`), point TEST_DATABASE_URL at it, and drop it afterwards. A large skipped count means the DB was down. Extension: `cd extension && npx vitest run && npm run type-check` (180 passing on the same run). The machine is shared: under load (load average 70+ seen 2026-11-16) the API suite can take over 10 minutes
 
 ## Steps
 
-- [x] 1. Runbook: add a "Reviewer, trust card, rules and filters" section to `docs/superpowers/runbook-memory-driven-generation.md` covering the opt-in client's-eye reviewer (`client_review` request flag / sidebar checkbox, what the verdicts do, cost and latency, never a second repair), the client trust card (tiers, which client fields the extension captures today, that it never changes the match score), learned rules (Me → Rules, propose/accept/reject, evidence = the user's own edits and refine requests, voice-kit users copy accepted rules to the kit's feedback log), and `scripts/filter_audit.py` (skip reasons, pre-filter rule names, the n<5 rule) — Done when: `grep -c 'client_review'`, `grep -c 'trust card'`, `grep -c 'learned-rules'` and `grep -c 'filter_audit'` on the runbook are each ≥ 1
-- [ ] 2. Plan: write `docs/superpowers/plans/2026-11-04-job-fit-rubric.md` for replacing the scan score with a per-dimension rubric (role level, stack/domain, evidence from approved facts, engagement, competition/timing, red-flag caps), how it is measured against the stored scanned jobs and the proposals with traction, and the rollout (shadow scores first; whether a migration is needed) — Done when: the file exists and `grep -c 'Done when\|## '` on it is ≥ 6; no code changes
+- [x] 1. Runbook: "Reviewer, trust card, rules and filters" section — done in #52
+- [x] 2. Plan: `docs/superpowers/plans/2026-11-04-job-fit-rubric.md` — done in #63 (approved 2026-11-05; updated 2026-11-16 to the weights and decisions as built)
+- [ ] 3. Job-fit eval (plan phase 1): `scripts/eval_job_fit.py`, read-only against production in an attended session, over the scanned jobs that carry a `job_queue.score_breakdown`; Chris labels 40 jobs apply / maybe / skip — Done when: the script runs and its report shows the current score and the rubric side by side for the labelled jobs. Scheduled scans on since 2026-11-18: ready to start about 2026-11-25
 
 ## Decisions pending
 
-- [2026-10-29] Gus Tello (gustello@gmail.com) has no UpApply account yet: he registers via the extension, then facts are loaded (his Upwork proposals or a ChatGPT export) and `GET /api/v1/profile/setup-status` shows ready before his flag goes on; voice kit optional (Chris / Gus)
-- [2026-10-29] Re-run the Proposals import in the extension so the 144 'unknown' proposal stages (numeric Upwork codes) resolve; only code '7' is confirmed (Chris)
-- [2026-10-29] Client feedback: 5 quotes from profile page 1 of 21 await approval in Me → Facts; paste the other pages (or expand the two shortened quotes) to import more (Chris)
-- [2026-10-29] No v2 letters have been generated in real use yet, so the results report has nothing to compare; it fills in as Chris applies with the engine (Chris)
-- [2026-11-04] Rubric: build the per-dimension job-fit score once the step-2 plan is approved (Chris)
-- [2026-11-04] Turn on scheduled scans (Agent tab or ☰ → Settings; every 3 h). No scan has run since 2026-11-02 23:00 UTC; suggestions expire 7 days after ingest (Chris)
-- [2026-11-04] First end-to-end use: approve one scanned job and generate its v2 draft; the approve → draft → send path has never run on a scanned job (Chris)
-- [2026-11-04] Weak searches: "product lead …" (2 of 17 suggested, avg 37.6, none 70+) and "technical due diligence …" (1 of 8, avg 39.5) — keep, reword or drop; sales/assistant noise is already caught by the minimums (1 of 29 reached Pending) (Chris)
-- [2026-11-04] Reload the extension to 1.0.31 (Pending lists every suggestion) (Chris)
-- [2026-10-30] Trust card coverage: proposals count, posted date and jobs posted are not extracted from Upwork job pages yet, and there is no client identifier for "applied to this client before"; needs one saved job page to confirm selectors (Chris to provide)
-- [2026-10-29] Q11 A: the writer's direct Anthropic route needs a real `sk-ant-` key in Doppler `prd` as `WRITER_ANTHROPIC_API_KEY`; optional now that the proxy allows 300s (Chris)
+- [2026-11-16] Check the Screening Questions card on a live apply page with questions (shipped in 1.0.37, not yet seen live) (Chris)
+- [2026-11-11] Remove the legacy cover-letter pipeline: the runbook's two weeks on v2 passed 2026-11-11, but Gus would start on the flag-off path; decide the order (Chris)
+- [2026-11-11] Saved-jobs import read about 200 of about 2,960 saves (paging gives up after 3 s in a throttled background tab); widen it only if older saves are wanted as signal (Chris)
+- [2026-10-29] Gus Tello (gustello@gmail.com) has no UpApply account yet: he registers via the extension, then facts are loaded and `GET /api/v1/profile/setup-status` shows ready before his flag goes on (Chris / Gus)
+- [2026-10-29] Client feedback: 5 quotes from profile page 1 of 21 await approval in Me → Facts; paste the other pages to import more (Chris)
+- [2026-11-04] Weak searches: "product lead …" and "technical due diligence …" — keep, reword or drop (Chris)
+- [2026-10-29] Q11 A: optional `WRITER_ANTHROPIC_API_KEY` (a real `sk-ant-` key) in Doppler `prd` (Chris)
 - [2026-10-29] Q13: wire the voice kit into the gtm-bible sales agent next, then marketing (attended session)
 - [2026-10-13] Q12: rotate the UpApply password (commit 3b7affc) and revoke the old Render key in git history (Chris)
 
@@ -68,3 +65,10 @@ v2 is live for Chris with job-queue drafts, canonical outcome stages, a results 
 - [2026-11-02] #60 over-long scraped text is clipped instead of 422-ing a batch; a rejected batch is skipped with its reason. Full 10-search run: 356 sent, 249 seen, 60 pre-filtered, 24 below threshold, 23 new; budgets on 176 of 241 new jobs
 - [2026-11-04] Checked in production: one 422 (before #60), 16 accepted ingests, no scan since 2026-11-02 23:00 UTC; search-query stats recorded for all 10 searches; 0 items reviewed, 0 v2 letters
 - [2026-11-05] Job-fit rubric shadow built (branch feat/job-fit-shadow): job_fit.py on claude-haiku-4-5, migration 029 score_breakdown, posted time stored in client_info; 1056 API tests pass; live Haiku smoke OK (CTO job 92.5, commission-only setter 21.2)
+- [2026-11-05] Rubric plan approved (weights, competition counts, Haiku, migration 029); #63 review comments fixed in a8f021c
+- [2026-11-11] #64 rubric in shadow (migration 029 ran 06:02 UTC) and #65 saved jobs in scoring merged and live; #67/#68 saved-jobs import (Upwork moved the page back to /nx/search/jobs/saved/; batches of 25): Chris's import stored 200 saves (158 recent in the Queue, 42 signal only)
+- [2026-11-11] #69 unmet client must-haves cap the live score at 45 (migration 030 freelancer_location ran 19:52 UTC); CodeRabbit fixes d5df32f
+- [2026-11-13] Chris's preferred_closing set to 'Regards,\nChris' in production; voice kit v0.5.2 (sv-writing-style#6)
+- [2026-11-15] #70-#75 merged and deployed (live b6ffe2c, migration 031 ran 00:37 UTC, extension 1.0.37). #72 completed: screening questions were never read because the extension only extracted on /jobs/ URLs and they exist only on the apply page; an independent review found 3 defects (AI answers counted as the user's words, answers carried across jobs, prompts shown to flag-off users), all fixed before merge. #73: client spend read only from About the client
+- [2026-11-16] Render logs since 2026-11-11: 6 cover letters, 3 applications, 20 analyses, no scan ingests
+- [2026-11-18] Scheduled scans turned on (every 3 h); #66 Search Lab merged (5a745b3)
