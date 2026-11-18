@@ -131,6 +131,9 @@ class JobAnalysisRequest(BaseModel):
     experience_level: Optional[str] = None
     client_info: Optional[ClientInfo] = None
     upwork_url: Optional[str] = None  # lets repost detection skip this job itself
+    # Upwork's own restriction line on the job page ("Only freelancers located in the U.S. may
+    # apply."), which is not part of the description; the must-have check reads it with the post
+    location_restriction: Optional[str] = Field(None, max_length=200)
 
 
 class JobAnalysisResponse(BaseModel):

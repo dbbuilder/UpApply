@@ -111,6 +111,7 @@ async def analyze_job(
         profile=profile,
         job_title=request.title,
         job_description=request.description,
+        location_restriction=(request.location_restriction or "").strip() or None,
         job_skills=job_skills,
         budget_amount=request.budget_amount,
         client_info=client_info,

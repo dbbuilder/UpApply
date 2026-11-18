@@ -935,6 +935,7 @@ export interface JobAnalysisRequest {
     total_spent?: string;
   };
   upwork_url?: string;
+  location_restriction?: string;  // Upwork's job-page rule, read by the must-have check
 }
 
 export interface JobAnalysisResponse {
